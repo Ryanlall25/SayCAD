@@ -1,0 +1,28 @@
+{
+  "name": "saycad",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Speak it, see it, print it — a conversational CAD that turns plain language into 3D prototypes. Training focus: dental.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@types/three": "^0.180.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.6",
+    "vitest": "^3.2.4"
+  }
+}
