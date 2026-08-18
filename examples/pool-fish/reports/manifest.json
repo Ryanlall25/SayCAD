@@ -1,0 +1,103 @@
+{
+  "gate": "G7",
+  "ok": true,
+  "generatedAt": "2026-08-18T18:33:23.166Z",
+  "rhoResinGCm3": 1.15,
+  "rows": [
+    {
+      "part": "p1-front-hull-pod",
+      "qty": 1,
+      "volCm3": 55.56,
+      "massEachG": 63.9,
+      "massTotalG": 63.9
+    },
+    {
+      "part": "p2-rear-hull-pod",
+      "qty": 1,
+      "volCm3": 69.98,
+      "massEachG": 80.5,
+      "massTotalG": 80.5
+    },
+    {
+      "part": "p3-tail-assembly",
+      "qty": 1,
+      "volCm3": 7.6,
+      "massEachG": 8.7,
+      "massTotalG": 8.7
+    },
+    {
+      "part": "p4-hinge-pin",
+      "qty": 1,
+      "volCm3": 1.53,
+      "massEachG": 1.8,
+      "massTotalG": 1.8
+    },
+    {
+      "part": "p4a-retainer-cap",
+      "qty": 1,
+      "volCm3": 0.26,
+      "massEachG": 0.3,
+      "massTotalG": 0.3
+    },
+    {
+      "part": "j1-seam-pin",
+      "qty": 3,
+      "volCm3": 0.06,
+      "massEachG": 0.1,
+      "massTotalG": 0.2
+    },
+    {
+      "part": "p5-ballast-plug",
+      "qty": 2,
+      "volCm3": 5.74,
+      "massEachG": 6.6,
+      "massTotalG": 13.2
+    },
+    {
+      "part": "p6-drain-plug",
+      "qty": 3,
+      "volCm3": 0.1,
+      "massEachG": 0.1,
+      "massTotalG": 0.3
+    },
+    {
+      "part": "p7-fin-dorsal",
+      "qty": 1,
+      "volCm3": 1.74,
+      "massEachG": 2,
+      "massTotalG": 2
+    },
+    {
+      "part": "p7-fin-pectoral",
+      "qty": 2,
+      "volCm3": 0.99,
+      "massEachG": 1.1,
+      "massTotalG": 2.3
+    }
+  ],
+  "extras": [
+    {
+      "name": "EPDM 21×2 O-rings ×2",
+      "massG": 2.4
+    },
+    {
+      "name": "G/flex bead + fillets + RTV",
+      "massG": 6
+    }
+  ],
+  "ballastG": 111.4,
+  "coatBudgetG": 30,
+  "totals": {
+    "printedG": 173.2,
+    "extrasG": 8.4,
+    "allUpG": 323
+  },
+  "band": {
+    "minG": 198.1,
+    "maxG": 364.7,
+    "targetG": 323,
+    "deltaToTargetG": 0
+  },
+  "ownerCheck": "weigh every part on a 0.1 g scale at assembly step 5 against massEachG — catches trapped uncured resin (§6-G7)",
+  "note": "assembly quantities; ballast derived = 323 − struct − coat, tabs solved to match (in-pool trim is final); spares + P8 coupons excluded"
+}

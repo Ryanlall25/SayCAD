@@ -1,0 +1,18 @@
+{
+  "name": "saycad-pool-fish",
+  "version": "1.0.0",
+  "description": "Parametric 3D-printable pool fish — generated, validated and rendered entirely in code",
+  "type": "module",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "manifold-3d": "^3.5.1",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  },
+  "scripts": {
+    "gates": "node src/integrate.mjs",
+    "assembled": "node src/export-assembled.mjs"
+  }
+}

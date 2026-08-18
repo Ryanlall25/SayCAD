@@ -1,0 +1,1649 @@
+{
+  "verdict": "GREEN",
+  "secs": 39.2,
+  "mateProbes": {
+    "j1": [
+      {
+        "interMm3": 0,
+        "measuredPerSideMm": 0.149,
+        "expectPerSideMm": 0.15,
+        "ok": true
+      },
+      {
+        "interMm3": 0,
+        "measuredPerSideMm": 0.148,
+        "expectPerSideMm": 0.15,
+        "ok": true
+      },
+      {
+        "interMm3": 0,
+        "measuredPerSideMm": 0.149,
+        "expectPerSideMm": 0.15,
+        "ok": true
+      }
+    ],
+    "j4": {
+      "interMm3": 0,
+      "measuredPerSideMm": 0.15,
+      "expectPerSideMm": 0.15,
+      "ok": true
+    },
+    "j3": {
+      "interMm3": 0,
+      "ok": true,
+      "note": "clearance band proven by threads.selfMateCheck (identical cutter cut this port)"
+    },
+    "ok": true
+  },
+  "massLedgerG": {
+    "struct": 181.6,
+    "coat": 30,
+    "ballastDerived": 111.4,
+    "tabImplied": 120.1,
+    "allUp": 323,
+    "target": 323,
+    "ballastOk": true
+  },
+  "buoyancyLedger": {
+    "sealedVoidCm3": 410.9,
+    "ballastBedCm3": 61.9,
+    "postBallastAirCm3": 349,
+    "specSealedAirLetterCm3": 382,
+    "airNote": "the sealed VOID (419→411 after diaphragm) satisfies the §3 letter; post-ballast AIR is ~344 — the letter's purposes (flood ledger per chamber, submerged reserve) are gated explicitly here",
+    "realBodyCm3": 537.6,
+    "reserveG": 213,
+    "reserveOk": true
+  },
+  "chambersCm3": {
+    "F1": 48.8,
+    "F2": 104.5,
+    "M1joint": 151.6,
+    "M2": 106
+  },
+  "trayFill": {
+    "fillZ": -11.4,
+    "tabImpliedG": 120.1,
+    "targetG": 120,
+    "bedCentroidZ": -21.4,
+    "bulkGCm3": 1.8
+  },
+  "trim": {
+    "lcgMm": -7.61,
+    "lcbMm": -5.15,
+    "gmLMm": 142.7,
+    "pitchDegEst": -0.99,
+    "note": "heave-only solve: small pitch expected from the LCG/LCB offset — bias the pebble pour fore/aft at in-pool trim (the diaphragm separates the trays, so the split is controllable)"
+  },
+  "stopCheck": {
+    "ok": true,
+    "sweep": [
+      {
+        "deg": 0,
+        "interMm3": 0
+      },
+      {
+        "deg": 10,
+        "interMm3": 0
+      },
+      {
+        "deg": 20,
+        "interMm3": 0
+      },
+      {
+        "deg": 29,
+        "interMm3": 0
+      },
+      {
+        "deg": -10,
+        "interMm3": 0
+      },
+      {
+        "deg": -20,
+        "interMm3": 0
+      },
+      {
+        "deg": -29,
+        "interMm3": 0
+      }
+    ],
+    "clearOk": true,
+    "stopsEngage": {
+      "at31degMm3": 6.6,
+      "atMinus31Mm3": 6.6,
+      "ok": true
+    },
+    "contactDeg": 30.02,
+    "pinInterMm3": 0
+  },
+  "G6real": {
+    "ok": true,
+    "draftFrac": 0.5657,
+    "gmTMm": 5.142,
+    "minGZMm": 1.353
+  },
+  "fish": {
+    "ok": true,
+    "perPart": [
+      {
+        "name": "p1-front-hull-pod",
+        "ok": true,
+        "G1": {
+          "gate": "G1",
+          "name": "p1-front-hull-pod",
+          "ok": true,
+          "status": "NoError",
+          "volumeCm3": 55.56,
+          "stlPath": "fish-lab/parts/p1-front-hull-pod.stl",
+          "triangles": 92878,
+          "bytes": 4643984,
+          "roundTrip": {
+            "merged": true,
+            "status": "NoError",
+            "volCm3": 55.56,
+            "volMatchPct": 0
+          }
+        },
+        "G2": {
+          "gate": "G2",
+          "name": "p1-front-hull-pod",
+          "ok": true,
+          "samples": 6000,
+          "wallSamples": 4608,
+          "grazing": 49,
+          "thickBeyondProbe": 77,
+          "excluded": 1266,
+          "minWallSampledMm": 2,
+          "p01Mm": 2,
+          "requiredMm": {
+            "hull": 2,
+            "boss": 3,
+            "tolMm": 0.05
+          },
+          "violations": 0,
+          "worst": []
+        },
+        "G3": {
+          "gate": "G3",
+          "name": "p1-front-hull-pod",
+          "ok": true,
+          "genus": {
+            "value": 4,
+            "expected": 4,
+            "ok": true,
+            "rule": "-genus()===0 for printed parts; vented parts declare expectedGenus in meta"
+          },
+          "drain": {
+            "ok": true,
+            "trappedMm3": 23.7,
+            "sealedAirMm3": 0,
+            "pooledMm3": 23.7,
+            "maxTrappedMm3": 50,
+            "poolTolMm": 1,
+            "colPitchMm": 0.8,
+            "columns": 6808,
+            "badColumns": 0,
+            "worst": [
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -2.5,
+                  -31.5
+                ],
+                "floorZ": 40.2,
+                "poolDepthMm": 1
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -1.7,
+                  -31.5
+                ],
+                "floorZ": 40,
+                "poolDepthMm": 1.2
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -1.7,
+                  -29.9
+                ],
+                "floorZ": 25.4,
+                "poolDepthMm": 1.4
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -1.7,
+                  -29.1
+                ],
+                "floorZ": 25.4,
+                "poolDepthMm": 1.4
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -1.7,
+                  -29.1
+                ],
+                "floorZ": 40,
+                "poolDepthMm": 1
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -0.9,
+                  -31.5
+                ],
+                "floorZ": 39.9,
+                "poolDepthMm": 1.3
+              }
+            ]
+          }
+        },
+        "G4": {
+          "gate": "G4",
+          "name": "p1-front-hull-pod",
+          "ok": true,
+          "footprintMm": [
+            55.4,
+            70.3
+          ],
+          "heightMm": 120.6,
+          "standoffMm": 6,
+          "heightWithStandoffMm": 126.6,
+          "plateUsable": [
+            120,
+            72,
+            145
+          ],
+          "up": [
+            -1,
+            0,
+            0
+          ],
+          "hardGate": "Confirm Mono-class machine (130×80×165). Original Photon (115×65) FAILS the pods."
+        }
+      },
+      {
+        "name": "p2-rear-hull-pod",
+        "ok": true,
+        "G1": {
+          "gate": "G1",
+          "name": "p2-rear-hull-pod",
+          "ok": true,
+          "status": "NoError",
+          "volumeCm3": 69.98,
+          "stlPath": "fish-lab/parts/p2-rear-hull-pod.stl",
+          "triangles": 91300,
+          "bytes": 4565084,
+          "roundTrip": {
+            "merged": true,
+            "status": "NoError",
+            "volCm3": 69.98,
+            "volMatchPct": 0
+          }
+        },
+        "G2": {
+          "gate": "G2",
+          "name": "p2-rear-hull-pod",
+          "ok": true,
+          "samples": 6000,
+          "wallSamples": 4984,
+          "grazing": 84,
+          "thickBeyondProbe": 168,
+          "excluded": 764,
+          "minWallSampledMm": 2,
+          "p01Mm": 2,
+          "requiredMm": {
+            "hull": 2,
+            "boss": 3,
+            "tolMm": 0.05
+          },
+          "violations": 0,
+          "worst": []
+        },
+        "G3": {
+          "gate": "G3",
+          "name": "p2-rear-hull-pod",
+          "ok": true,
+          "genus": {
+            "value": 8,
+            "expected": 8,
+            "ok": true,
+            "rule": "-genus()===0 for printed parts; vented parts declare expectedGenus in meta"
+          },
+          "drain": {
+            "ok": true,
+            "trappedMm3": 4.5,
+            "sealedAirMm3": 0,
+            "pooledMm3": 4.5,
+            "maxTrappedMm3": 50,
+            "poolTolMm": 1,
+            "colPitchMm": 0.8,
+            "columns": 6808,
+            "badColumns": 0,
+            "worst": [
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -1.7,
+                  -31.6
+                ],
+                "floorZ": 0.1,
+                "poolDepthMm": 1.1
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -0.9,
+                  -31.6
+                ],
+                "floorZ": 0,
+                "poolDepthMm": 1.2
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -0.1,
+                  -31.6
+                ],
+                "floorZ": -0.1,
+                "poolDepthMm": 1.3
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  0.7,
+                  -31.6
+                ],
+                "floorZ": -0.1,
+                "poolDepthMm": 1.3
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  1.5,
+                  -31.6
+                ],
+                "floorZ": 0,
+                "poolDepthMm": 1.2
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  2.3,
+                  -31.6
+                ],
+                "floorZ": 0.1,
+                "poolDepthMm": 1.1
+              }
+            ]
+          }
+        },
+        "G4": {
+          "gate": "G4",
+          "name": "p2-rear-hull-pod",
+          "ok": true,
+          "footprintMm": [
+            55.4,
+            70.3
+          ],
+          "heightMm": 137.3,
+          "standoffMm": 6,
+          "heightWithStandoffMm": 143.3,
+          "plateUsable": [
+            120,
+            72,
+            145
+          ],
+          "up": [
+            1,
+            0,
+            0
+          ],
+          "hardGate": "Confirm Mono-class machine (130×80×165). Original Photon (115×65) FAILS the pods."
+        }
+      },
+      {
+        "name": "p3-tail-assembly",
+        "ok": true,
+        "G1": {
+          "gate": "G1",
+          "name": "p3-tail-assembly",
+          "ok": true,
+          "status": "NoError",
+          "volumeCm3": 7.6,
+          "stlPath": "fish-lab/parts/p3-tail-assembly.stl",
+          "triangles": 3952,
+          "bytes": 197684,
+          "roundTrip": {
+            "merged": true,
+            "status": "NoError",
+            "volCm3": 7.6,
+            "volMatchPct": 0
+          }
+        },
+        "G2": {
+          "gate": "G2",
+          "name": "p3-tail-assembly",
+          "ok": true,
+          "samples": 6000,
+          "wallSamples": 1786,
+          "grazing": 104,
+          "thickBeyondProbe": 151,
+          "excluded": 3959,
+          "minWallSampledMm": 1.598,
+          "p01Mm": 1.768,
+          "requiredMm": {
+            "hull": 1.1,
+            "boss": 3,
+            "tolMm": 0.05
+          },
+          "violations": 0,
+          "worst": []
+        },
+        "G3": {
+          "gate": "G3",
+          "name": "p3-tail-assembly",
+          "ok": true,
+          "genus": {
+            "value": 3,
+            "expected": 3,
+            "ok": true,
+            "rule": "-genus()===0 for printed parts; vented parts declare expectedGenus in meta"
+          },
+          "drain": {
+            "ok": true,
+            "trappedMm3": 0,
+            "sealedAirMm3": 0,
+            "pooledMm3": 0,
+            "maxTrappedMm3": 50,
+            "poolTolMm": 1,
+            "colPitchMm": 0.8,
+            "columns": 1840,
+            "badColumns": 0,
+            "worst": []
+          }
+        },
+        "G4": {
+          "gate": "G4",
+          "name": "p3-tail-assembly",
+          "ok": true,
+          "footprintMm": [
+            12.5,
+            69.7
+          ],
+          "heightMm": 73.1,
+          "standoffMm": 6,
+          "heightWithStandoffMm": 79.1,
+          "plateUsable": [
+            120,
+            72,
+            145
+          ],
+          "up": [
+            0.25881904510252074,
+            0,
+            0.9659258262890683
+          ],
+          "hardGate": "Confirm Mono-class machine (130×80×165). Original Photon (115×65) FAILS the pods."
+        }
+      },
+      {
+        "name": "p4-hinge-pin",
+        "ok": true,
+        "G1": {
+          "gate": "G1",
+          "name": "p4-hinge-pin",
+          "ok": true,
+          "status": "NoError",
+          "volumeCm3": 1.53,
+          "stlPath": "fish-lab/parts/p4-hinge-pin.stl",
+          "triangles": 1008,
+          "bytes": 50484,
+          "roundTrip": {
+            "merged": true,
+            "status": "NoError",
+            "volCm3": 1.53,
+            "volMatchPct": 0
+          }
+        },
+        "G2": {
+          "gate": "G2",
+          "name": "p4-hinge-pin",
+          "ok": true,
+          "samples": 2000,
+          "wallSamples": 1713,
+          "grazing": 1,
+          "thickBeyondProbe": 85,
+          "excluded": 201,
+          "minWallSampledMm": 2,
+          "p01Mm": 2,
+          "requiredMm": {
+            "hull": 2,
+            "boss": 3,
+            "tolMm": 0.05
+          },
+          "violations": 0,
+          "worst": []
+        },
+        "G3": {
+          "gate": "G3",
+          "name": "p4-hinge-pin",
+          "ok": true,
+          "genus": {
+            "value": 1,
+            "expected": 1,
+            "ok": true,
+            "rule": "-genus()===0 for printed parts; vented parts declare expectedGenus in meta"
+          },
+          "drain": {
+            "ok": true,
+            "trappedMm3": 0,
+            "sealedAirMm3": 0,
+            "pooledMm3": 0,
+            "maxTrappedMm3": 50,
+            "poolTolMm": 1,
+            "colPitchMm": 0.8,
+            "columns": 256,
+            "badColumns": 0,
+            "worst": []
+          }
+        },
+        "G4": {
+          "gate": "G4",
+          "name": "p4-hinge-pin",
+          "ok": true,
+          "footprintMm": [
+            9,
+            9
+          ],
+          "heightMm": 52,
+          "standoffMm": 6,
+          "heightWithStandoffMm": 58,
+          "plateUsable": [
+            120,
+            72,
+            145
+          ],
+          "up": [
+            0,
+            0,
+            1
+          ],
+          "hardGate": "Confirm Mono-class machine (130×80×165). Original Photon (115×65) FAILS the pods."
+        }
+      },
+      {
+        "name": "p4a-retainer-cap",
+        "ok": true,
+        "G1": {
+          "gate": "G1",
+          "name": "p4a-retainer-cap",
+          "ok": true,
+          "status": "NoError",
+          "volumeCm3": 0.26,
+          "stlPath": "fish-lab/parts/p4a-retainer-cap.stl",
+          "triangles": 764,
+          "bytes": 38284,
+          "roundTrip": {
+            "merged": true,
+            "status": "NoError",
+            "volCm3": 0.26,
+            "volMatchPct": 0
+          }
+        },
+        "G2": {
+          "gate": "G2",
+          "name": "p4a-retainer-cap",
+          "ok": true,
+          "samples": 2000,
+          "wallSamples": 2000,
+          "grazing": 0,
+          "thickBeyondProbe": 0,
+          "excluded": 0,
+          "minWallSampledMm": 1.449,
+          "p01Mm": 1.449,
+          "requiredMm": {
+            "hull": 1.3,
+            "boss": 3,
+            "tolMm": 0.05
+          },
+          "violations": 0,
+          "worst": []
+        },
+        "G3": {
+          "gate": "G3",
+          "name": "p4a-retainer-cap",
+          "ok": true,
+          "genus": {
+            "value": 0,
+            "expected": 0,
+            "ok": true,
+            "rule": "-genus()===0 for printed parts; vented parts declare expectedGenus in meta"
+          },
+          "drain": {
+            "ok": true,
+            "trappedMm3": 0,
+            "sealedAirMm3": 0,
+            "pooledMm3": 0,
+            "maxTrappedMm3": 50,
+            "poolTolMm": 1,
+            "colPitchMm": 0.8,
+            "columns": 256,
+            "badColumns": 0,
+            "worst": []
+          }
+        },
+        "G4": {
+          "gate": "G4",
+          "name": "p4a-retainer-cap",
+          "ok": true,
+          "footprintMm": [
+            9,
+            9
+          ],
+          "heightMm": 6,
+          "standoffMm": 6,
+          "heightWithStandoffMm": 12,
+          "plateUsable": [
+            120,
+            72,
+            145
+          ],
+          "up": [
+            0,
+            0,
+            1
+          ],
+          "hardGate": "Confirm Mono-class machine (130×80×165). Original Photon (115×65) FAILS the pods."
+        }
+      },
+      {
+        "name": "j1-seam-pin",
+        "ok": true,
+        "G1": {
+          "gate": "G1",
+          "name": "j1-seam-pin",
+          "ok": true,
+          "status": "NoError",
+          "volumeCm3": 0.06,
+          "stlPath": "fish-lab/parts/j1-seam-pin.stl",
+          "triangles": 252,
+          "bytes": 12684,
+          "roundTrip": {
+            "merged": true,
+            "status": "NoError",
+            "volCm3": 0.06,
+            "volMatchPct": 0
+          }
+        },
+        "G2": {
+          "gate": "G2",
+          "name": "j1-seam-pin",
+          "ok": true,
+          "samples": 2000,
+          "wallSamples": 2000,
+          "grazing": 0,
+          "thickBeyondProbe": 0,
+          "excluded": 0,
+          "minWallSampledMm": 2.996,
+          "p01Mm": 2.996,
+          "requiredMm": {
+            "hull": 2,
+            "boss": 3,
+            "tolMm": 0.05
+          },
+          "violations": 0,
+          "worst": []
+        },
+        "G3": {
+          "gate": "G3",
+          "name": "j1-seam-pin",
+          "ok": true,
+          "genus": {
+            "value": 0,
+            "expected": 0,
+            "ok": true,
+            "rule": "-genus()===0 for printed parts; vented parts declare expectedGenus in meta"
+          },
+          "drain": {
+            "ok": true,
+            "trappedMm3": 0,
+            "sealedAirMm3": 0,
+            "pooledMm3": 0,
+            "maxTrappedMm3": 50,
+            "poolTolMm": 1,
+            "colPitchMm": 0.8,
+            "columns": 64,
+            "badColumns": 0,
+            "worst": []
+          }
+        },
+        "G4": {
+          "gate": "G4",
+          "name": "j1-seam-pin",
+          "ok": true,
+          "footprintMm": [
+            3,
+            3
+          ],
+          "heightMm": 8.5,
+          "standoffMm": 6,
+          "heightWithStandoffMm": 14.5,
+          "plateUsable": [
+            120,
+            72,
+            145
+          ],
+          "up": [
+            0,
+            0,
+            1
+          ],
+          "hardGate": "Confirm Mono-class machine (130×80×165). Original Photon (115×65) FAILS the pods."
+        }
+      },
+      {
+        "name": "p5-ballast-plug",
+        "ok": true,
+        "G1": {
+          "gate": "G1",
+          "name": "p5-ballast-plug",
+          "ok": true,
+          "status": "NoError",
+          "volumeCm3": 5.74,
+          "stlPath": "fish-lab/parts/p5-ballast-plug.stl",
+          "triangles": 85276,
+          "bytes": 4263884,
+          "roundTrip": {
+            "merged": true,
+            "status": "NoError",
+            "volCm3": 5.74,
+            "volMatchPct": 0
+          }
+        },
+        "G2": {
+          "gate": "G2",
+          "name": "p5-ballast-plug",
+          "ok": true,
+          "samples": 2000,
+          "wallSamples": 1060,
+          "grazing": 81,
+          "thickBeyondProbe": 616,
+          "excluded": 243,
+          "minWallSampledMm": 0.963,
+          "p01Mm": 1.11,
+          "requiredMm": {
+            "hull": 0.8,
+            "boss": 3,
+            "tolMm": 0.05
+          },
+          "violations": 0,
+          "worst": []
+        },
+        "G3": {
+          "gate": "G3",
+          "name": "p5-ballast-plug",
+          "ok": true,
+          "genus": {
+            "value": 0,
+            "expected": 0,
+            "ok": true,
+            "rule": "-genus()===0 for printed parts; vented parts declare expectedGenus in meta"
+          },
+          "drain": {
+            "ok": true,
+            "trappedMm3": 319.7,
+            "sealedAirMm3": 0,
+            "pooledMm3": 319.7,
+            "maxTrappedMm3": 350,
+            "poolTolMm": 1,
+            "colPitchMm": 0.8,
+            "columns": 1764,
+            "badColumns": 0,
+            "worst": [
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -13,
+                  -4.2
+                ],
+                "floorZ": 4.5,
+                "poolDepthMm": 1.5
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -13,
+                  -3.4
+                ],
+                "floorZ": 4.5,
+                "poolDepthMm": 1.5
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -13,
+                  -2.6
+                ],
+                "floorZ": 4.5,
+                "poolDepthMm": 1.5
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -13,
+                  -1.8
+                ],
+                "floorZ": 4.5,
+                "poolDepthMm": 1.5
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -13,
+                  -1
+                ],
+                "floorZ": 4.5,
+                "poolDepthMm": 1.5
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -13,
+                  -0.2
+                ],
+                "floorZ": 4.5,
+                "poolDepthMm": 1.5
+              }
+            ]
+          }
+        },
+        "G4": {
+          "gate": "G4",
+          "name": "p5-ballast-plug",
+          "ok": true,
+          "footprintMm": [
+            30,
+            30
+          ],
+          "heightMm": 13.5,
+          "standoffMm": 6,
+          "heightWithStandoffMm": 19.5,
+          "plateUsable": [
+            120,
+            72,
+            145
+          ],
+          "up": [
+            0,
+            0,
+            1
+          ],
+          "hardGate": "Confirm Mono-class machine (130×80×165). Original Photon (115×65) FAILS the pods."
+        }
+      },
+      {
+        "name": "p6-drain-plug",
+        "ok": true,
+        "G1": {
+          "gate": "G1",
+          "name": "p6-drain-plug",
+          "ok": true,
+          "status": "NoError",
+          "volumeCm3": 0.1,
+          "stlPath": "fish-lab/parts/p6-drain-plug.stl",
+          "triangles": 764,
+          "bytes": 38284,
+          "roundTrip": {
+            "merged": true,
+            "status": "NoError",
+            "volCm3": 0.1,
+            "volMatchPct": 0
+          }
+        },
+        "G2": {
+          "gate": "G2",
+          "name": "p6-drain-plug",
+          "ok": true,
+          "samples": 2000,
+          "wallSamples": 1989,
+          "grazing": 11,
+          "thickBeyondProbe": 0,
+          "excluded": 0,
+          "minWallSampledMm": 1.6,
+          "p01Mm": 1.6,
+          "requiredMm": {
+            "hull": 1.3,
+            "boss": 3,
+            "tolMm": 0.05
+          },
+          "violations": 0,
+          "worst": []
+        },
+        "G3": {
+          "gate": "G3",
+          "name": "p6-drain-plug",
+          "ok": true,
+          "genus": {
+            "value": 0,
+            "expected": 0,
+            "ok": true,
+            "rule": "-genus()===0 for printed parts; vented parts declare expectedGenus in meta"
+          },
+          "drain": {
+            "ok": true,
+            "trappedMm3": 0,
+            "sealedAirMm3": 0,
+            "pooledMm3": 0,
+            "maxTrappedMm3": 50,
+            "poolTolMm": 1,
+            "colPitchMm": 0.8,
+            "columns": 144,
+            "badColumns": 0,
+            "worst": []
+          }
+        },
+        "G4": {
+          "gate": "G4",
+          "name": "p6-drain-plug",
+          "ok": true,
+          "footprintMm": [
+            6,
+            6
+          ],
+          "heightMm": 6,
+          "standoffMm": 6,
+          "heightWithStandoffMm": 12,
+          "plateUsable": [
+            120,
+            72,
+            145
+          ],
+          "up": [
+            0,
+            0,
+            1
+          ],
+          "hardGate": "Confirm Mono-class machine (130×80×165). Original Photon (115×65) FAILS the pods."
+        }
+      },
+      {
+        "name": "p7-fin-dorsal",
+        "ok": true,
+        "G1": {
+          "gate": "G1",
+          "name": "p7-fin-dorsal",
+          "ok": true,
+          "status": "NoError",
+          "volumeCm3": 1.74,
+          "stlPath": "fish-lab/parts/p7-fin-dorsal.stl",
+          "triangles": 888,
+          "bytes": 44484,
+          "roundTrip": {
+            "merged": true,
+            "status": "NoError",
+            "volCm3": 1.74,
+            "volMatchPct": 0
+          }
+        },
+        "G2": {
+          "gate": "G2",
+          "name": "p7-fin-dorsal",
+          "ok": true,
+          "samples": 2000,
+          "wallSamples": 1829,
+          "grazing": 17,
+          "thickBeyondProbe": 154,
+          "excluded": 0,
+          "minWallSampledMm": 1.5,
+          "p01Mm": 1.5,
+          "requiredMm": {
+            "hull": 1.3,
+            "boss": 3,
+            "tolMm": 0.05
+          },
+          "violations": 0,
+          "worst": []
+        },
+        "G3": {
+          "gate": "G3",
+          "name": "p7-fin-dorsal",
+          "ok": true,
+          "genus": {
+            "value": 0,
+            "expected": 0,
+            "ok": true,
+            "rule": "-genus()===0 for printed parts; vented parts declare expectedGenus in meta"
+          },
+          "drain": {
+            "ok": true,
+            "trappedMm3": 0,
+            "sealedAirMm3": 0,
+            "pooledMm3": 0,
+            "maxTrappedMm3": 50,
+            "poolTolMm": 1,
+            "colPitchMm": 0.8,
+            "columns": 780,
+            "badColumns": 0,
+            "worst": []
+          }
+        },
+        "G4": {
+          "gate": "G4",
+          "name": "p7-fin-dorsal",
+          "ok": true,
+          "footprintMm": [
+            6,
+            48.6
+          ],
+          "heightMm": 42,
+          "standoffMm": 6,
+          "heightWithStandoffMm": 48,
+          "plateUsable": [
+            120,
+            72,
+            145
+          ],
+          "up": [
+            0,
+            0,
+            1
+          ],
+          "hardGate": "Confirm Mono-class machine (130×80×165). Original Photon (115×65) FAILS the pods."
+        }
+      },
+      {
+        "name": "p7-fin-pectoral",
+        "ok": true,
+        "G1": {
+          "gate": "G1",
+          "name": "p7-fin-pectoral",
+          "ok": true,
+          "status": "NoError",
+          "volumeCm3": 0.99,
+          "stlPath": "fish-lab/parts/p7-fin-pectoral.stl",
+          "triangles": 840,
+          "bytes": 42084,
+          "roundTrip": {
+            "merged": true,
+            "status": "NoError",
+            "volCm3": 0.99,
+            "volMatchPct": 0
+          }
+        },
+        "G2": {
+          "gate": "G2",
+          "name": "p7-fin-pectoral",
+          "ok": true,
+          "samples": 2000,
+          "wallSamples": 1784,
+          "grazing": 27,
+          "thickBeyondProbe": 175,
+          "excluded": 14,
+          "minWallSampledMm": 1.5,
+          "p01Mm": 1.5,
+          "requiredMm": {
+            "hull": 1.3,
+            "boss": 3,
+            "tolMm": 0.05
+          },
+          "violations": 0,
+          "worst": []
+        },
+        "G3": {
+          "gate": "G3",
+          "name": "p7-fin-pectoral",
+          "ok": true,
+          "genus": {
+            "value": 0,
+            "expected": 0,
+            "ok": true,
+            "rule": "-genus()===0 for printed parts; vented parts declare expectedGenus in meta"
+          },
+          "drain": {
+            "ok": true,
+            "trappedMm3": 0,
+            "sealedAirMm3": 0,
+            "pooledMm3": 0,
+            "maxTrappedMm3": 50,
+            "poolTolMm": 1,
+            "colPitchMm": 0.8,
+            "columns": 576,
+            "badColumns": 0,
+            "worst": []
+          }
+        },
+        "G4": {
+          "gate": "G4",
+          "name": "p7-fin-pectoral",
+          "ok": true,
+          "footprintMm": [
+            6,
+            35
+          ],
+          "heightMm": 30,
+          "standoffMm": 6,
+          "heightWithStandoffMm": 36,
+          "plateUsable": [
+            120,
+            72,
+            145
+          ],
+          "up": [
+            0,
+            0,
+            1
+          ],
+          "hardGate": "Confirm Mono-class machine (130×80×165). Original Photon (115×65) FAILS the pods."
+        }
+      }
+    ],
+    "G5": {
+      "gate": "G5",
+      "ok": true,
+      "minTestableRadial": 0.05,
+      "rows": [
+        {
+          "source": "machine-profile",
+          "joint": "J1",
+          "name": "hull-seam registration pins Ø3.0→Ø3.3",
+          "perSideMm": [
+            0.15
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "machine-profile",
+          "joint": "J1",
+          "name": "bondline standoff nubs (glue gap)",
+          "perSideMm": [
+            0.2
+          ],
+          "kind": "axial",
+          "note": "bond thickness control, not a running fit",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "machine-profile",
+          "joint": "J2",
+          "name": "tail hinge Ø6.0 pin → Ø6.5 bores",
+          "perSideMm": [
+            0.25
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "machine-profile",
+          "joint": "J3",
+          "name": "M20×2.5 ballast port, female offset",
+          "perSideMm": [
+            0.15
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "machine-profile",
+          "joint": "J4",
+          "name": "fin tang Ø6.0 → Ø6.3 socket",
+          "perSideMm": [
+            0.15
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "machine-profile",
+          "joint": "J5",
+          "name": "drain plug Ø3.9 (2° taper) in Ø4.0",
+          "perSideMm": [
+            0.05
+          ],
+          "kind": "radial",
+          "note": "at the testable floor by design — tapered + UV-resin bedded, not a running fit (spec §4 J5)",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "machine-profile",
+          "joint": "J6",
+          "name": "retainer cap Ø6.1 blind bore on Ø6.0 pin",
+          "perSideMm": [
+            0.05
+          ],
+          "kind": "radial",
+          "note": "snug by design; silicone-dabbed, serviceable (spec §4 J6)",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p1-front-hull-pod",
+          "joint": "J1",
+          "name": "pin sockets Ø3.3×4.5 (×3, asymmetric)",
+          "perSideMm": [
+            0.15
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p1-front-hull-pod",
+          "joint": "J1",
+          "name": "standoff nubs 0.2 (×3)",
+          "perSideMm": [
+            0.2
+          ],
+          "kind": "axial",
+          "note": "bondline control",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p1-front-hull-pod",
+          "joint": "J3",
+          "name": "M20×2.5 belly port (female)",
+          "perSideMm": [
+            0.15
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p1-front-hull-pod",
+          "joint": "J4",
+          "name": "dorsal fin socket Ø6.3×12",
+          "perSideMm": [
+            0.15
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p1-front-hull-pod",
+          "joint": "J5",
+          "name": "bulkhead drain Ø4.0",
+          "perSideMm": [
+            0.05
+          ],
+          "kind": "radial",
+          "note": "tapered P6 plug, UV-resin bedded (spec §4 J5)",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p2-rear-hull-pod",
+          "joint": "J1",
+          "name": "pin sockets Ø3.3×4.5 (×3, asymmetric)",
+          "perSideMm": [
+            0.15
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p2-rear-hull-pod",
+          "joint": "J2",
+          "name": "clevis bores Ø6.5 (×2)",
+          "perSideMm": [
+            0.25
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p2-rear-hull-pod",
+          "joint": "J3",
+          "name": "M20×2.5 belly port (female)",
+          "perSideMm": [
+            0.15
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p2-rear-hull-pod",
+          "joint": "J4",
+          "name": "pectoral fin sockets Ø6.3×10 (×2)",
+          "perSideMm": [
+            0.15
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p2-rear-hull-pod",
+          "joint": "J5",
+          "name": "bulkhead drain Ø4.0",
+          "perSideMm": [
+            0.05
+          ],
+          "kind": "radial",
+          "note": "tapered P6 plug, UV-resin bedded (spec §4 J5)",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p3-tail-assembly",
+          "joint": "J2",
+          "name": "tail knuckle bore Ø6.5 on Ø6.0 pin",
+          "perSideMm": [
+            0.25
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p3-tail-assembly",
+          "joint": "J2",
+          "name": "knuckle axial float (per side)",
+          "perSideMm": [
+            1.75
+          ],
+          "kind": "axial",
+          "note": "spec band 1.5–2.0; domed thrust face approximated by 1.5×45° under-chamfer",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p4-hinge-pin",
+          "joint": "J2",
+          "name": "Ø6.0 pin in Ø6.5 bores",
+          "perSideMm": [
+            0.25
+          ],
+          "kind": "radial",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "p4a-retainer-cap",
+          "joint": "J6",
+          "name": "Ø6.1 blind bore on Ø6.0 pin",
+          "perSideMm": [
+            0.05
+          ],
+          "kind": "radial",
+          "note": "snug by design — neutral-cure silicone dab, serviceable (spec §4 J6)",
+          "ok": true,
+          "errors": []
+        },
+        {
+          "source": "j1-seam-pin",
+          "joint": "J1",
+          "name": "Ø3.0 pin in Ø3.3 sockets",
+          "perSideMm": [
+            0.15
+          ],
+          "kind": "radial",
+          "note": "8.5 long: 4.25 per side + 0.2 nub gap",
+          "ok": true,
+          "errors": []
+        }
+      ]
+    },
+    "G6": {
+      "gate": "G6",
+      "ok": true,
+      "draft": {
+        "frac": 0.5504,
+        "band": [
+          0.4,
+          0.6
+        ],
+        "ok": true
+      },
+      "hydro": {
+        "floats": true,
+        "massG": 323,
+        "keelZ": -35,
+        "waterZ": 3.528,
+        "draftFrac": 0.5504,
+        "dispVolMm3": 323971.9,
+        "dispMassG": 323,
+        "submergedFraction": 0.5754,
+        "AwpMm2": 11950.1,
+        "IxxMm4": 2232234,
+        "KB": 23.836,
+        "BM_T": 6.89,
+        "BM_L": 178.58,
+        "KM_T": 30.726,
+        "KG": 25.745,
+        "GM_T": 4.981,
+        "dTdmMmPerG": 0.0839,
+        "cob": [
+          0,
+          0,
+          -11.16
+        ],
+        "com": [
+          -7.61,
+          0,
+          -9.26
+        ]
+      },
+      "gz": {
+        "ok": true,
+        "gmT": 4.981,
+        "minGZMm": 1.314,
+        "steps": [
+          {
+            "phiDeg": 0,
+            "waterZ": 3.53,
+            "gzMm": 0
+          },
+          {
+            "phiDeg": 15,
+            "waterZ": 3.48,
+            "gzMm": 1.314
+          },
+          {
+            "phiDeg": 30,
+            "waterZ": 3.36,
+            "gzMm": 2.683
+          },
+          {
+            "phiDeg": 45,
+            "waterZ": 3.17,
+            "gzMm": 4.169
+          },
+          {
+            "phiDeg": 60,
+            "waterZ": 2.98,
+            "gzMm": 5.824
+          },
+          {
+            "phiDeg": 75,
+            "waterZ": 2.83,
+            "gzMm": 7.607
+          },
+          {
+            "phiDeg": 90,
+            "waterZ": 2.77,
+            "gzMm": 9.255
+          }
+        ]
+      },
+      "chambers": {
+        "declared": true,
+        "chambersCm3": [
+          48.8,
+          104.5,
+          151.6,
+          106
+        ],
+        "sumCm3": 410.9,
+        "requiredCm3": 382,
+        "maxSingleCm3": 151.6,
+        "maxAllowedCm3": 181,
+        "ok": true
+      }
+    },
+    "G7": {
+      "gate": "G7",
+      "ok": true,
+      "generatedAt": "2026-08-18T18:33:23.166Z",
+      "rhoResinGCm3": 1.15,
+      "rows": [
+        {
+          "part": "p1-front-hull-pod",
+          "qty": 1,
+          "volCm3": 55.56,
+          "massEachG": 63.9,
+          "massTotalG": 63.9
+        },
+        {
+          "part": "p2-rear-hull-pod",
+          "qty": 1,
+          "volCm3": 69.98,
+          "massEachG": 80.5,
+          "massTotalG": 80.5
+        },
+        {
+          "part": "p3-tail-assembly",
+          "qty": 1,
+          "volCm3": 7.6,
+          "massEachG": 8.7,
+          "massTotalG": 8.7
+        },
+        {
+          "part": "p4-hinge-pin",
+          "qty": 1,
+          "volCm3": 1.53,
+          "massEachG": 1.8,
+          "massTotalG": 1.8
+        },
+        {
+          "part": "p4a-retainer-cap",
+          "qty": 1,
+          "volCm3": 0.26,
+          "massEachG": 0.3,
+          "massTotalG": 0.3
+        },
+        {
+          "part": "j1-seam-pin",
+          "qty": 3,
+          "volCm3": 0.06,
+          "massEachG": 0.1,
+          "massTotalG": 0.2
+        },
+        {
+          "part": "p5-ballast-plug",
+          "qty": 2,
+          "volCm3": 5.74,
+          "massEachG": 6.6,
+          "massTotalG": 13.2
+        },
+        {
+          "part": "p6-drain-plug",
+          "qty": 3,
+          "volCm3": 0.1,
+          "massEachG": 0.1,
+          "massTotalG": 0.3
+        },
+        {
+          "part": "p7-fin-dorsal",
+          "qty": 1,
+          "volCm3": 1.74,
+          "massEachG": 2,
+          "massTotalG": 2
+        },
+        {
+          "part": "p7-fin-pectoral",
+          "qty": 2,
+          "volCm3": 0.99,
+          "massEachG": 1.1,
+          "massTotalG": 2.3
+        }
+      ],
+      "extras": [
+        {
+          "name": "EPDM 21×2 O-rings ×2",
+          "massG": 2.4
+        },
+        {
+          "name": "G/flex bead + fillets + RTV",
+          "massG": 6
+        }
+      ],
+      "ballastG": 111.4,
+      "coatBudgetG": 30,
+      "totals": {
+        "printedG": 173.2,
+        "extrasG": 8.4,
+        "allUpG": 323
+      },
+      "band": {
+        "minG": 198.1,
+        "maxG": 364.7,
+        "targetG": 323,
+        "deltaToTargetG": 0
+      },
+      "ownerCheck": "weigh every part on a 0.1 g scale at assembly step 5 against massEachG — catches trapped uncured resin (§6-G7)",
+      "note": "assembly quantities; ballast derived = 323 − struct − coat, tabs solved to match (in-pool trim is final); spares + P8 coupons excluded",
+      "manifestPath": "fish-lab/parts/manifest.json"
+    }
+  },
+  "coupons": [
+    {
+      "name": "p8-coupon-plate",
+      "ok": true,
+      "G1": true,
+      "G2": {
+        "ok": true,
+        "minMm": 0.891
+      },
+      "G3": true,
+      "G4": true
+    },
+    {
+      "name": "p8-coupon-ring",
+      "ok": true,
+      "G1": true,
+      "G2": {
+        "ok": true,
+        "minMm": 1.083
+      },
+      "G3": true,
+      "G4": true
+    },
+    {
+      "name": "p8-coupon-cube",
+      "ok": true,
+      "G1": true,
+      "G2": {
+        "ok": true,
+        "minMm": 21.5
+      },
+      "G3": true,
+      "G4": true
+    },
+    {
+      "name": "p8-coupon-pins",
+      "ok": true,
+      "G1": true,
+      "G2": {
+        "ok": true,
+        "minMm": 2.998
+      },
+      "G3": true,
+      "G4": true
+    }
+  ]
+}
