@@ -154,7 +154,7 @@ function seamDiaphragm() {
     ryAt(DIAPHRAGM.x) - i + 0.75, rzAt(DIAPHRAGM.x) - i + 0.75)
 }
 function diaphragmDrain() {
-  const zLow = -(rzAt(DIAPHRAGM.x) - insetAt(DIAPHRAGM.x)) + 2.5
+  const zLow = -(rzAt(DIAPHRAGM.x) - insetAt(DIAPHRAGM.x)) + 3.6 // flange seat clearance — see bulkheadDrain
   return M().cylinder(DIAPHRAGM.thk + 3, BULKHEADS.drainR, BULKHEADS.drainR, 48)
     .rotate([0, 90, 0]).translate([DIAPHRAGM.x - DIAPHRAGM.thk / 2 - 1.5, 0, zLow])
 }
@@ -200,7 +200,12 @@ function bulkhead(x) {
   return ellipCyl(x - BULKHEADS.thk / 2, BULKHEADS.thk, ryAt(x) - i + 0.75, rzAt(x) - i + 0.75)
 }
 function bulkheadDrain(x) {
-  const zLow = -(rzAt(x) - insetAt(x)) + 2.5
+  // hole center 3.6 above the local floor: the P6 plug's Ø6 flange (r 3.0)
+  // needs 0.6 of clearance to the curved hull floor to seat flush (audit —
+  // at +2.5 the flange fouled the shell 0.5 before seating). Print-frame
+  // drainability is unaffected: the hole is a vertical tunnel through a
+  // horizontal wall in print orientation.
+  const zLow = -(rzAt(x) - insetAt(x)) + 3.6
   return M().cylinder(BULKHEADS.thk + 3, BULKHEADS.drainR, BULKHEADS.drainR, 48)
     .rotate([0, 90, 0]).translate([x - BULKHEADS.thk / 2 - 1.5, 0, zLow])
 }
@@ -381,9 +386,10 @@ export function buildPods({ skirts = true, ballastTargetG = 120 } = {}) {
 }
 
 /** shared G2 region math: the seam feature belt is excluded from the 2.0 floor
- *  — its lands are deterministic by construction (socket outer land 1.65,
- *  P1 socket↔groove land 0.65, socket floors 2.25) and the whole belt is a
- *  glue-flooded, flange-backed (≥6.5) J1 zone; skirt + web are sacrificial. */
+ *  — its lands are deterministic by construction (socket outer land 1.40 to
+ *  the wetted surface, groove bridged at socket angles, socket floors 2.25)
+ *  and the whole belt is a glue-flooded, flange-backed (≥6.75) J1 zone;
+ *  skirt + web are sacrificial. */
 const G2_BELT_P1 = { min: [-27.0, -40, -40], max: [-18.4, 40, 40] }
 const G2_BELT_P2 = { min: [-21.5, -40, -40], max: [-13.0, 40, 40] }
 

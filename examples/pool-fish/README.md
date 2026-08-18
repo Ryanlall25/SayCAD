@@ -64,8 +64,10 @@ uncured resin trapped inside (re-flush it).
    that's intentional), tail on its pin, plugs with O-rings.
 3. Plug the three Ø4 drain holes (P6 plugs, from inside the open pods):
    one in each bulkhead plus one in the seam wall just behind the front
-   pod's flange. Wet with resin, 60–90 s UV flash in 2–3 passes. Seal the
-   two Ø3 shell vents (nose belly + near the tail) the same way.
+   pod's flange. The nose-side bulkhead sits ~60 mm in — use tweezers and
+   shine the UV torch through the opening. Wet each plug with resin,
+   60–90 s UV flash in 2–3 passes. Seal the two Ø3 shell vents (nose belly
+   + near the tail) the same way.
 4. **Glue the one seam:** sand both rim faces flat on 220-grit over glass,
    scuff, IPA wipe. G/flex bead in the groove, mate on the 3 pins until the
    little nubs touch, tape-clamp **24 h**.

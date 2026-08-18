@@ -47,13 +47,14 @@ plugA.manifold.delete()
 const dorsal = finDorsal()
 put(dorsal.manifold.translate([-60 - 0.42 * P7.dorsal.L, 0, 31.6]), 'p7-dorsal')
 dorsal.manifold.delete()
-// pectorals: rotate ±65° about X so the tang (−z) points inward-up along the
-// socket axis; seat the tang tip near the bore end, blade sweeping out-down
+// pectorals: rotate −115°·sy about X — the tang (local −z) maps to the
+// socket's inward-up axis (0, −0.906·sy, +0.423) and the blade sweeps
+// out-down (audit: +65° mounted them inside-out, tang aiming into the water)
 for (const sy of [1, -1]) {
   const fin = finPectoral()
   const xT = 0.42 * P7.pectoral.L
-  const placed = fin.manifold.translate([-xT, 0, 0]).rotate([sy * 65, 0, 0])
-    .translate([5, sy * 25.5, -16.6])
+  const placed = fin.manifold.translate([-xT, 0, 0]).rotate([-115 * sy, 0, 0])
+    .translate([5, sy * 24.4, -16])
   put(placed, sy > 0 ? 'p7-pect-L' : 'p7-pect-R')
   fin.manifold.delete()
 }
