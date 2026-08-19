@@ -1,6 +1,6 @@
 {
   "verdict": "GREEN",
-  "secs": 38.3,
+  "secs": 53.1,
   "mateProbes": {
     "j1": [
       {
@@ -36,27 +36,27 @@
     "ok": true
   },
   "massLedgerG": {
-    "struct": 181.6,
+    "struct": 183.1,
     "coat": 30,
-    "ballastDerived": 111.4,
+    "ballastDerived": 109.9,
     "tabImplied": 120.1,
     "allUp": 323,
     "target": 323,
     "ballastOk": true
   },
   "buoyancyLedger": {
-    "sealedVoidCm3": 410.8,
-    "ballastBedCm3": 61.9,
-    "postBallastAirCm3": 348.9,
+    "sealedVoidCm3": 410.7,
+    "ballastBedCm3": 61.1,
+    "postBallastAirCm3": 349.6,
     "specSealedAirLetterCm3": 382,
     "airNote": "the sealed VOID (419→411 after diaphragm) satisfies the §3 letter; post-ballast AIR is ~344 — the letter's purposes (flood ledger per chamber, submerged reserve) are gated explicitly here",
-    "realBodyCm3": 537.6,
-    "reserveG": 213,
+    "realBodyCm3": 538.7,
+    "reserveG": 214.1,
     "reserveOk": true
   },
   "chambersCm3": {
     "F1": 48.8,
-    "F2": 104.5,
+    "F2": 104.4,
     "M1joint": 151.5,
     "M2": 106
   },
@@ -68,10 +68,10 @@
     "bulkGCm3": 1.8
   },
   "trim": {
-    "lcgMm": -7.61,
-    "lcbMm": -5.15,
-    "gmLMm": 142.7,
-    "pitchDegEst": -0.99,
+    "lcgMm": -6.98,
+    "lcbMm": -4.86,
+    "gmLMm": 143.2,
+    "pitchDegEst": -0.85,
     "note": "heave-only solve: small pitch expected from the LCG/LCB offset — bias the pebble pour fore/aft at in-pool trim (the diaphragm separates the trays, so the split is controllable)"
   },
   "stopCheck": {
@@ -108,8 +108,8 @@
     ],
     "clearOk": true,
     "stopsEngage": {
-      "at31degMm3": 6.6,
-      "atMinus31Mm3": 6.6,
+      "at31degMm3": 6.8,
+      "atMinus31Mm3": 6.8,
       "ok": true
     },
     "contactDeg": 30.02,
@@ -117,9 +117,9 @@
   },
   "G6real": {
     "ok": true,
-    "draftFrac": 0.5657,
-    "gmTMm": 5.143,
-    "minGZMm": 1.354
+    "draftFrac": 0.565,
+    "gmTMm": 4.997,
+    "minGZMm": 1.316
   },
   "fish": {
     "ok": true,
@@ -132,14 +132,14 @@
           "name": "p1-front-hull-pod",
           "ok": true,
           "status": "NoError",
-          "volumeCm3": 55.56,
-          "stlPath": "fish-lab/parts/p1-front-hull-pod.stl",
+          "volumeCm3": 55.64,
+          "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p1-front-hull-pod.stl",
           "triangles": 92842,
           "bytes": 4642184,
           "roundTrip": {
             "merged": true,
             "status": "NoError",
-            "volCm3": 55.56,
+            "volCm3": 55.64,
             "volMatchPct": 0
           }
         },
@@ -147,11 +147,11 @@
           "gate": "G2",
           "name": "p1-front-hull-pod",
           "ok": true,
-          "samples": 6000,
-          "wallSamples": 4611,
-          "grazing": 48,
-          "thickBeyondProbe": 72,
-          "excluded": 1269,
+          "samples": 30000,
+          "wallSamples": 22851,
+          "grazing": 330,
+          "thickBeyondProbe": 424,
+          "excluded": 6395,
           "minWallSampledMm": 2,
           "p01Mm": 2,
           "requiredMm": {
@@ -272,14 +272,14 @@
           "name": "p2-rear-hull-pod",
           "ok": true,
           "status": "NoError",
-          "volumeCm3": 69.98,
-          "stlPath": "fish-lab/parts/p2-rear-hull-pod.stl",
+          "volumeCm3": 70.05,
+          "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p2-rear-hull-pod.stl",
           "triangles": 91300,
           "bytes": 4565084,
           "roundTrip": {
             "merged": true,
             "status": "NoError",
-            "volCm3": 69.98,
+            "volCm3": 70.05,
             "volMatchPct": 0
           }
         },
@@ -287,11 +287,11 @@
           "gate": "G2",
           "name": "p2-rear-hull-pod",
           "ok": true,
-          "samples": 6000,
-          "wallSamples": 4984,
-          "grazing": 84,
-          "thickBeyondProbe": 168,
-          "excluded": 764,
+          "samples": 30000,
+          "wallSamples": 25016,
+          "grazing": 463,
+          "thickBeyondProbe": 818,
+          "excluded": 3703,
           "minWallSampledMm": 2,
           "p01Mm": 2,
           "requiredMm": {
@@ -412,14 +412,14 @@
           "name": "p3-tail-assembly",
           "ok": true,
           "status": "NoError",
-          "volumeCm3": 7.6,
-          "stlPath": "fish-lab/parts/p3-tail-assembly.stl",
-          "triangles": 3952,
-          "bytes": 197684,
+          "volumeCm3": 8.73,
+          "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p3-tail-assembly.stl",
+          "triangles": 7560,
+          "bytes": 378084,
           "roundTrip": {
             "merged": true,
             "status": "NoError",
-            "volCm3": 7.6,
+            "volCm3": 8.73,
             "volMatchPct": 0
           }
         },
@@ -427,15 +427,15 @@
           "gate": "G2",
           "name": "p3-tail-assembly",
           "ok": true,
-          "samples": 6000,
-          "wallSamples": 1786,
-          "grazing": 104,
-          "thickBeyondProbe": 151,
-          "excluded": 3959,
-          "minWallSampledMm": 1.598,
-          "p01Mm": 1.768,
+          "samples": 30000,
+          "wallSamples": 26780,
+          "grazing": 1069,
+          "thickBeyondProbe": 1544,
+          "excluded": 607,
+          "minWallSampledMm": 1.436,
+          "p01Mm": 1.642,
           "requiredMm": {
-            "hull": 1.1,
+            "hull": 1.25,
             "boss": 3,
             "tolMm": 0.05
           },
@@ -498,7 +498,7 @@
           "ok": true,
           "status": "NoError",
           "volumeCm3": 1.53,
-          "stlPath": "fish-lab/parts/p4-hinge-pin.stl",
+          "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p4-hinge-pin.stl",
           "triangles": 1008,
           "bytes": 50484,
           "roundTrip": {
@@ -512,11 +512,11 @@
           "gate": "G2",
           "name": "p4-hinge-pin",
           "ok": true,
-          "samples": 2000,
-          "wallSamples": 1713,
-          "grazing": 1,
-          "thickBeyondProbe": 85,
-          "excluded": 201,
+          "samples": 30000,
+          "wallSamples": 25871,
+          "grazing": 26,
+          "thickBeyondProbe": 1234,
+          "excluded": 2869,
           "minWallSampledMm": 2,
           "p01Mm": 2,
           "requiredMm": {
@@ -583,7 +583,7 @@
           "ok": true,
           "status": "NoError",
           "volumeCm3": 0.26,
-          "stlPath": "fish-lab/parts/p4a-retainer-cap.stl",
+          "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p4a-retainer-cap.stl",
           "triangles": 764,
           "bytes": 38284,
           "roundTrip": {
@@ -597,8 +597,8 @@
           "gate": "G2",
           "name": "p4a-retainer-cap",
           "ok": true,
-          "samples": 2000,
-          "wallSamples": 2000,
+          "samples": 30000,
+          "wallSamples": 30000,
           "grazing": 0,
           "thickBeyondProbe": 0,
           "excluded": 0,
@@ -668,7 +668,7 @@
           "ok": true,
           "status": "NoError",
           "volumeCm3": 0.06,
-          "stlPath": "fish-lab/parts/j1-seam-pin.stl",
+          "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/j1-seam-pin.stl",
           "triangles": 252,
           "bytes": 12684,
           "roundTrip": {
@@ -682,8 +682,8 @@
           "gate": "G2",
           "name": "j1-seam-pin",
           "ok": true,
-          "samples": 2000,
-          "wallSamples": 2000,
+          "samples": 30000,
+          "wallSamples": 30000,
           "grazing": 0,
           "thickBeyondProbe": 0,
           "excluded": 0,
@@ -753,7 +753,7 @@
           "ok": true,
           "status": "NoError",
           "volumeCm3": 5.74,
-          "stlPath": "fish-lab/parts/p5-ballast-plug.stl",
+          "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p5-ballast-plug.stl",
           "triangles": 85276,
           "bytes": 4263884,
           "roundTrip": {
@@ -767,13 +767,13 @@
           "gate": "G2",
           "name": "p5-ballast-plug",
           "ok": true,
-          "samples": 2000,
-          "wallSamples": 1060,
-          "grazing": 81,
-          "thickBeyondProbe": 616,
-          "excluded": 243,
-          "minWallSampledMm": 0.963,
-          "p01Mm": 1.11,
+          "samples": 30000,
+          "wallSamples": 15943,
+          "grazing": 1169,
+          "thickBeyondProbe": 9200,
+          "excluded": 3688,
+          "minWallSampledMm": 0.944,
+          "p01Mm": 1.106,
           "requiredMm": {
             "hull": 0.8,
             "boss": 3,
@@ -893,7 +893,7 @@
           "ok": true,
           "status": "NoError",
           "volumeCm3": 0.1,
-          "stlPath": "fish-lab/parts/p6-drain-plug.stl",
+          "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p6-drain-plug.stl",
           "triangles": 764,
           "bytes": 38284,
           "roundTrip": {
@@ -907,9 +907,9 @@
           "gate": "G2",
           "name": "p6-drain-plug",
           "ok": true,
-          "samples": 2000,
-          "wallSamples": 1989,
-          "grazing": 11,
+          "samples": 30000,
+          "wallSamples": 29807,
+          "grazing": 193,
           "thickBeyondProbe": 0,
           "excluded": 0,
           "minWallSampledMm": 1.6,
@@ -978,7 +978,7 @@
           "ok": true,
           "status": "NoError",
           "volumeCm3": 1.74,
-          "stlPath": "fish-lab/parts/p7-fin-dorsal.stl",
+          "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p7-fin-dorsal.stl",
           "triangles": 888,
           "bytes": 44484,
           "roundTrip": {
@@ -992,10 +992,10 @@
           "gate": "G2",
           "name": "p7-fin-dorsal",
           "ok": true,
-          "samples": 2000,
-          "wallSamples": 1829,
-          "grazing": 17,
-          "thickBeyondProbe": 154,
+          "samples": 30000,
+          "wallSamples": 27312,
+          "grazing": 261,
+          "thickBeyondProbe": 2427,
           "excluded": 0,
           "minWallSampledMm": 1.5,
           "p01Mm": 1.5,
@@ -1063,7 +1063,7 @@
           "ok": true,
           "status": "NoError",
           "volumeCm3": 0.99,
-          "stlPath": "fish-lab/parts/p7-fin-pectoral.stl",
+          "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p7-fin-pectoral.stl",
           "triangles": 840,
           "bytes": 42084,
           "roundTrip": {
@@ -1077,11 +1077,11 @@
           "gate": "G2",
           "name": "p7-fin-pectoral",
           "ok": true,
-          "samples": 2000,
-          "wallSamples": 1784,
-          "grazing": 27,
-          "thickBeyondProbe": 175,
-          "excluded": 14,
+          "samples": 30000,
+          "wallSamples": 26832,
+          "grazing": 327,
+          "thickBeyondProbe": 2626,
+          "excluded": 215,
           "minWallSampledMm": 1.5,
           "p01Mm": 1.5,
           "requiredMm": {
@@ -1424,8 +1424,8 @@
         "BM_T": 6.89,
         "BM_L": 178.58,
         "KM_T": 30.726,
-        "KG": 25.744,
-        "GM_T": 4.982,
+        "KG": 25.847,
+        "GM_T": 4.88,
         "dTdmMmPerG": 0.0839,
         "cob": [
           0,
@@ -1433,15 +1433,15 @@
           -11.16
         ],
         "com": [
-          -7.61,
+          -6.98,
           0,
-          -9.26
+          -9.15
         ]
       },
       "gz": {
         "ok": true,
-        "gmT": 4.982,
-        "minGZMm": 1.314,
+        "gmT": 4.88,
+        "minGZMm": 1.288,
         "steps": [
           {
             "phiDeg": 0,
@@ -1451,32 +1451,32 @@
           {
             "phiDeg": 15,
             "waterZ": 3.48,
-            "gzMm": 1.314
+            "gzMm": 1.288
           },
           {
             "phiDeg": 30,
             "waterZ": 3.36,
-            "gzMm": 2.683
+            "gzMm": 2.632
           },
           {
             "phiDeg": 45,
             "waterZ": 3.17,
-            "gzMm": 4.17
+            "gzMm": 4.097
           },
           {
             "phiDeg": 60,
             "waterZ": 2.98,
-            "gzMm": 5.824
+            "gzMm": 5.736
           },
           {
             "phiDeg": 75,
             "waterZ": 2.83,
-            "gzMm": 7.607
+            "gzMm": 7.508
           },
           {
             "phiDeg": 90,
             "waterZ": 2.77,
-            "gzMm": 9.256
+            "gzMm": 9.153
           }
         ]
       },
@@ -1484,11 +1484,11 @@
         "declared": true,
         "chambersCm3": [
           48.8,
-          104.5,
+          104.4,
           151.5,
           106
         ],
-        "sumCm3": 410.8,
+        "sumCm3": 410.7,
         "requiredCm3": 382,
         "maxSingleCm3": 151.5,
         "maxAllowedCm3": 181,
@@ -1498,29 +1498,29 @@
     "G7": {
       "gate": "G7",
       "ok": true,
-      "generatedAt": "2026-08-18T18:50:51.017Z",
+      "generatedAt": "2026-08-19T11:09:02.193Z",
       "rhoResinGCm3": 1.15,
       "rows": [
         {
           "part": "p1-front-hull-pod",
           "qty": 1,
-          "volCm3": 55.56,
-          "massEachG": 63.9,
-          "massTotalG": 63.9
+          "volCm3": 55.64,
+          "massEachG": 64,
+          "massTotalG": 64
         },
         {
           "part": "p2-rear-hull-pod",
           "qty": 1,
-          "volCm3": 69.98,
-          "massEachG": 80.5,
-          "massTotalG": 80.5
+          "volCm3": 70.05,
+          "massEachG": 80.6,
+          "massTotalG": 80.6
         },
         {
           "part": "p3-tail-assembly",
           "qty": 1,
-          "volCm3": 7.6,
-          "massEachG": 8.7,
-          "massTotalG": 8.7
+          "volCm3": 8.73,
+          "massEachG": 10,
+          "massTotalG": 10
         },
         {
           "part": "p4-hinge-pin",
@@ -1582,10 +1582,10 @@
           "massG": 6
         }
       ],
-      "ballastG": 111.4,
+      "ballastG": 109.9,
       "coatBudgetG": 30,
       "totals": {
-        "printedG": 173.2,
+        "printedG": 174.7,
         "extrasG": 8.4,
         "allUpG": 323
       },
@@ -1597,7 +1597,7 @@
       },
       "ownerCheck": "weigh every part on a 0.1 g scale at assembly step 5 against massEachG — catches trapped uncured resin (§6-G7)",
       "note": "assembly quantities; ballast derived = 323 − struct − coat, tabs solved to match (in-pool trim is final); spares + P8 coupons excluded",
-      "manifestPath": "fish-lab/parts/manifest.json"
+      "manifestPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/manifest.json"
     }
   },
   "coupons": [
@@ -1607,7 +1607,7 @@
       "G1": true,
       "G2": {
         "ok": true,
-        "minMm": 0.891
+        "minMm": 0.944
       },
       "G3": true,
       "G4": true

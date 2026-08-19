@@ -84,9 +84,9 @@ const report = runAll(fishParts, {
     note: 'assembly quantities; ballast derived = 323 − struct − coat, tabs solved to match (in-pool trim is final); spares + P8 coupons excluded'
   },
   g2: {
-    'p1-front-hull-pod': { samples: 6000 }, // audit: 2000 samples is a weak statistical claim on the biggest parts
-    'p2-rear-hull-pod': { samples: 6000 },
-    'p3-tail-assembly': { samples: 6000 },
+    'p1-front-hull-pod': { samples: 30000 }, // audit G: 6000 still missed the 1.89 nose wall — resolve it
+    'p2-rear-hull-pod': { samples: 30000 },
+    'p3-tail-assembly': { samples: 30000 },
     'p4-hinge-pin': { excludeRegions: [{ min: [-3.2, -3.2, 45], max: [3.2, 3.2, 49.5] }] }, // Ø1.5 cross-drill rim chords (spec'd feature)
     'p4a-retainer-cap': { minWallMm: 1.3 }, // Ø9 wall over Ø6.1 bore = 1.45 by design (J6)
     'p5-ballast-plug': {
@@ -168,7 +168,12 @@ const trim = {
 
 const couponReport = couponParts.map((part) => {
   const overrides = {
-    'p8-coupon-plate': { minWallMm: 0.8 }, // M20 stub thread ridges + 2.25 wall panel
+    // M20 stub thread ridges + 2.25 wall panel. The exclusion box is the male
+    // thread's 45° lead-in crest fade at the stub top (LAYOUT8.stub [102,15],
+    // top z 13.38, fade depth 1.63) — a spec'd knife-edge crest taper, the
+    // SAME feature already excluded on P5. Without it the plate reads 0.218 mm
+    // at 100k samples; with it, 0.944 mm at every sample count (audit G).
+    'p8-coupon-plate': { minWallMm: 0.8, excludeRegions: [{ min: [91, 4, 11.65], max: [113, 26, 13.5] }] },
     'p8-coupon-ring': {
       minWallMm: 0.8, // through-threaded ring: mid-band ridge chords ~1.2
       excludeRegions: [ // 45° crest-fade tips at both ends + mouth transition (ring sits at LAYOUT8.ring = [17, 50])

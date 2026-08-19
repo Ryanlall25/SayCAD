@@ -26,7 +26,7 @@ export const GATE = {
   designBandFrac: [0.40, 0.60], // §3: acceptable draft-fraction band
   maxChamberCm3: 115, // §6-G6: max single sealed chamber (worst flood still floats)
   volTolFrac: 0.001, // G1: round-trip volume ±0.1 %
-  minWallSamples: 2000, // G2 sample budget
+  minWallSamples: 30000, // G2 sample budget — 2000 demonstrably missed a real 1.88 mm nose wall and a 0.22 mm crest chord (audit G: both surfaced only at 30k+)
   minExitDot: 0.5, // G2: exit face within 60° of the ray = a wall pair (else grazing an edge/aperture — reported, not thickness)
   wallTolMm: 0.05, // G2 sampling tolerance under the class floor
   maxProbeMm: 12, // G2: rays longer than this are "thick enough"

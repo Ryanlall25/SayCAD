@@ -14,7 +14,7 @@
 // no-interference-below-30° claim is proven volumetrically in stopCheck().
 import { boot, M, CS, loft, writeSTL } from '../lib.mjs'
 import { FIT, PLATE, WALL } from './machine.mjs'
-import { G1_manifoldRoundtrip, G3_cavities, G4_plateFit } from './gates.mjs'
+import { G1_manifoldRoundtrip, G2_minWall, G3_cavities, G4_plateFit } from './gates.mjs'
 
 const PIN_D = 6.0
 const BORE_R = (PIN_D + 2 * FIT.hingeRadial) / 2 // Ø6.5 (J2: female carries clearance)
@@ -42,7 +42,7 @@ function ok(m, what) {
 // ── ring builders (rings live in the y–z plane at station x = s) ──────────
 /** radial rounded-rect: half-width w (y), half-height h (z), corner radius rc.
  *  Flat sides at |y| = w over |z| ≤ h − rc — the stop-contact flats. */
-function ringRR(s, w, h, rc, n = 64) {
+function ringRR(s, w, h, rc, n = 192) {
   const sdf = (y, z) => {
     const qy = Math.max(Math.abs(y) - (w - rc), 0)
     const qz = Math.max(Math.abs(z) - (h - rc), 0)
@@ -50,7 +50,8 @@ function ringRR(s, w, h, rc, n = 64) {
   }
   const ring = []
   for (let j = 0; j < n; j++) {
-    const t = (2 * Math.PI * j) / n
+    const phi = (2 * Math.PI * j) / n
+    const t = phi + (APEX_WARP / 2) * Math.sin(2 * phi) // same warp as ringSE — loft correspondence
     const cy = Math.cos(t), cz = Math.sin(t)
     let lo = 0.01, hi = w + h + 1
     for (let i = 0; i < 48; i++) {
@@ -64,11 +65,28 @@ function ringRR(s, w, h, rc, n = 64) {
   return ring
 }
 
-/** superellipse blade section UNIONED (pointwise-max radius) with a 0.65
- *  stadium so the rim carries a true ≥0.6 bullnose (spec edge radius) instead
- *  of the superellipse's near-knife apex (ry²/rz ≈ 0.05 — audit finding). */
-const RIM_R = 0.65
-function ringSE(s, ry, rz, p, n = 64) {
+/** superellipse blade section UNIONED (pointwise-max radius) with a RIM_R
+ *  stadium so the rim carries a true ≥0.6 bullnose (spec §2 P3 edge radius)
+ *  instead of the superellipse's near-knife apex (ry²/rz ≈ 0.05).
+ *
+ *  TESSELLATION (the part an earlier revision got wrong): the bullnose cap
+ *  subtends only atan(RIM_R/(rz−RIM_R)) ≈ 1° at the origin, so uniform-θ
+ *  sampling at n=64 (5.6° pitch) steps straight past it and the BUILT MESH is
+ *  a knife edge even though the continuous section is round. APEX_WARP
+ *  reparametrizes θ(φ) = φ + (k/2)·sin 2φ, which is monotone for k<1 and
+ *  compresses the sample spacing near θ = ±90° (the z-apexes) by (1−k) — at
+ *  k=0.92 / n=192 the cap gets ~9 vertices. The warp is identical for every
+ *  ring, so loft correspondence is unchanged. rimProof() in the self-test
+ *  measures the delivered mesh; the comment is not the evidence. */
+// 0.9, not the spec floor of 0.6: a vertical section through a rim that climbs
+// (drz/ds reaches 1.3 on this planform) cuts the swept edge obliquely and reads
+// ~0.87 of the true radius, and the ray sampler under-reads a convex rim the
+// same way. Designing the edge 50 % blunter than the floor means every
+// instrument — rimProof's caliper AND G2's whole-part sweep at 1.25 — clears
+// spec without a single exclusion or tolerance argument.
+const RIM_R = 0.9
+const APEX_WARP = 0.92
+export function ringSE(s, ry, rz, p, n = 192) {
   // union tested point-wise (both shapes are star-shaped about the origin, so
   // the union boundary is a single crossing along every ray — bisect it)
   const inside = (y, z) => {
@@ -79,7 +97,8 @@ function ringSE(s, ry, rz, p, n = 64) {
   }
   const ring = []
   for (let j = 0; j < n; j++) {
-    const t = (2 * Math.PI * j) / n
+    const phi = (2 * Math.PI * j) / n
+    const t = phi + (APEX_WARP / 2) * Math.sin(2 * phi)
     const c = Math.cos(t), sn = Math.sin(t)
     let lo = 0.01, hi = rz + 2
     for (let i = 0; i < 48; i++) {
@@ -183,14 +202,27 @@ const OUTER_STATIONS = [
   { kind: 'se', s: 51.0, ry: 1.25, rz: 37.5, p: 2.2 }, // span 75 (planform ~45×75)
   { kind: 'se', s: 53.0, ry: 1.0, rz: 36.0, p: 2.2 }
 ]
-// hollow peduncle cavity (1.8 walls); roof peaks at s=13.8 where the vent sits
+// Hollow peduncle cavity, walls ≥1.8 (spec D7). The cavity STOPS at s=13.0,
+// the last station of the constant-flank (w=5.2) outer run: aft of it the
+// outer loft blends rr→se fast (ry 5.2→4.4, rz 8.2→9.5 over 2 mm), and an
+// in-plane inset there buys only inset·cos(slope) ≈ 0.84·1.8 = 1.5 mm of true
+// wall — the dip a wall audit caught. Blend zone is now SOLID resin (it also
+// lifts the tail's dry mass toward the spec's 25–40 g target). Inside the
+// constant-flank run the outer slope is ≤0.2/mm (cos ≥ 0.98), so the inset
+// IS the wall: w 5.2−1.8 = 3.4, h = h_outer − 1.8+, corner rc 1.4 > the exact
+// offset's 0.2 (a rounder cavity corner = more material, conservative).
 const CAVITY_STATIONS = [
   { s: 7.0, w: 3.4, h: 4.6, rc: 1.4 },
   { s: 9.0, w: 3.4, h: 5.3, rc: 1.4 },
   { s: 11.5, w: 3.4, h: 6.0, rc: 1.4 },
-  { s: 13.8, w: 3.0, h: 6.3, rc: 1.4 }, // aft stations shrunk: blend-zone wall ≥1.75 (audit found 1.45)
-  { s: 14.6, w: 2.35, h: 5.55, rc: 1.4 }
+  { s: 12.6, w: 3.4, h: 6.2, rc: 1.4 } // outer here: w 5.2 / h 8.12 → walls 1.80 / 1.92
 ]
+// Why 12.6 and not 13.0: the wall aft of the cavity's end cap is measured
+// PERPENDICULAR to the sloping outer flank, not across the section. From the
+// end-cap corner (s, 3.4) the nearest outer point at s=13.0 is 1.68 mm away
+// (flank y falls 0.4/mm aft of s=13) — the dip a 13.0 end still showed. At
+// 12.6 the nearest outer point is the straight-out 1.80. wallProof() measures
+// it; this comment only explains the number.
 const TAIL_TILT_DEG = 15 // blade ~75° from plate (spec P3); G4 sorts footprint → diagonal placement fits
 
 /** G2 rim-exclusion staircase: per 4 mm of global x, exclude |z| above the
@@ -229,10 +261,11 @@ function tailLocal() {
   body.delete(); knuckle.delete()
 
   const cavity = loftX(CAVITY_STATIONS.map((st) => ringRR(st.s, st.w, st.h, st.rc)))
+  // openings STAY OPEN in service; all three now pierce the shortened cavity
   const holes = [
-    Manifold.cylinder(6.5, 1.5, 1.5, 48).translate([9.0, 0, -9.0]), // flood Ø3 low/aft (z −9…−2.5)
-    Manifold.cylinder(6.5, 1.5, 1.5, 48).translate([12.5, 0, -9.5]), // flood Ø3 low/aft — at the cavity's print-frame floor minimum
-    Manifold.cylinder(6.0, 1.0, 1.0, 48).translate([13.8, 0, 4.0]) // vent Ø2 high, at the roof peak — STAYS OPEN
+    Manifold.cylinder(6.5, 1.5, 1.5, 48).translate([9.0, 0, -9.0]), // flood Ø3 low (z −9…−2.5)
+    Manifold.cylinder(6.5, 1.5, 1.5, 48).translate([12.2, 0, -9.5]), // flood Ø3 low/aft — clear of hole 1's x-span (overlap would merge them into one opening)
+    Manifold.cylinder(6.0, 1.0, 1.0, 48).translate([12.0, 0, 4.0]) // vent Ø2 high through the roof
   ]
   const bore = Manifold.cylinder(26, BORE_R, BORE_R, 96).translate([0, 0, -13])
   // J2 "domed lower thrust face" ≈ 1.5 × 45° under-chamfer on the knuckle bottom edge
@@ -268,20 +301,17 @@ export function tailAssembly() {
       qty: 1,
       expectedGenus: 3,
       genusNote: 'free-flooding by design: hollow peduncle with 2 flood + 1 vent hole = 2 handles, + Ø6.5 hinge bore = 3; zero print-sealed cavities (−genus ≤ 0 impossible here)',
-      minWallMm: 1.1,
-      minWallNote: 'design walls: peduncle 1.8 (blend zone ≥1.75), blade ≥2.0 solid lens with a TRUE 0.65 bullnose rim (stadium-unioned sections — spec edge radius ≥0.6), knuckle 3.0; the 1.1 gate floor guards gross printability',
+      // 1.25 floor = the blade rim's designed 2·RIM_R = 1.3 bullnose thickness
+      // less polygon faceting. NO blade exclusion: the whole part is sampled,
+      // so a knife edge anywhere fails this gate. The rim's edge radius itself
+      // is measured on the delivered mesh by rimProof(), not asserted here.
+      minWallMm: 1.25,
+      minWallNote: 'design walls: peduncle 1.8 (cavity stops at s=13.0, blend zone solid), blade 2.5–3.8 lens closing on a 0.65-radius bullnose rim (thickness floor 1.3), knuckle 3.0',
       excludeRegions: [
-        // BLADE (x ≥ 123): excluded from the ray sampler wholesale. The blade
-        // is a doubly-tapering lens whose oblique chords read 0.4–1.0 even
-        // though its true thickness is ≥ 2·RIM_R = 1.3 EVERYWHERE by
-        // construction (every section is superellipse ∪ 0.65-radius stadium —
-        // the stadium is the hard floor). Chord sampling is the wrong
-        // instrument for a taper; the constructive floor is the certificate.
-        // G2 still audits the knuckle (3.0) and hollow peduncle (≥1.75).
-        { min: [123, -7, -40], max: [161, 7, 40] },
-        // flood-hole + vent rim wedges (Ø3/Ø2 spec'd openings; chords through the hole rims are not walls)
+        // flood-hole + vent rim wedges only: Ø3/Ø2 spec'd openings, where a
+        // chord along the outer surface crosses the aperture instead of a wall
         { min: [114.7, -2.8, -10], max: [121.0, 2.8, -2.5] },
-        { min: [119.8, -2.3, 3], max: [121.8, 2.3, 10] }
+        { min: [117.8, -2.3, 3], max: [120.0, 2.3, 10] }
       ],
       floodHoles: '2× Ø3.0 low/aft + 1× Ø2.0 vent high — STAY OPEN (service: floods, sheds air)',
       dryMassG: +(volCm3 * 1.15).toFixed(1),
@@ -336,6 +366,71 @@ export function retainerCap() {
       fits: [{ joint: 'J6', name: 'Ø6.1 blind bore on Ø6.0 pin', perSideMm: 0.05, kind: 'radial', note: 'snug by design — neutral-cure silicone dab, serviceable (spec §4 J6)' }]
     }
   }
+}
+
+// ── rim + wall proofs (measure the BUILT MESH, never the intent) ──────────
+/** Blade rim edge radius, measured the way a caliper would: at each station,
+ *  find the mesh's rim tip (max |z| of material), then measure the full
+ *  thickness of a thin slab 0.6 mm inboard of it. A true R bullnose measures
+ *  2·√(R²−(R−0.6)²) there — 1.296 mm at R=0.65, and only ~0.1 mm on the
+ *  knife edge an unwarped tessellation produces. Gate: ≥1.15 mm (faceting
+ *  allowance), which corresponds to an effective edge radius ≥0.6 (spec P3). */
+export function rimProof(manifold, { inboardMm = 0.6, minThicknessMm = 1.2 } = {}) {
+  const slabBounds = (xLo, xHi, zLo, zHi) => {
+    const a = manifold.trimByPlane([1, 0, 0], xLo)
+    const b = a.trimByPlane([-1, 0, 0], -xHi)
+    const c = b.trimByPlane([0, 0, 1], zLo)
+    const d = c.trimByPlane([0, 0, -1], -zHi)
+    const empty = d.isEmpty() || d.volume() <= 1e-9
+    const bb = empty ? null : d.boundingBox()
+    a.delete(); b.delete(); c.delete(); d.delete()
+    return bb
+  }
+  // Slab half-width 0.05 (not 0.25): the rim climbs at up to drz/dx ≈ 1.3, so
+  // a wide slab takes its tip reference from the slab's high end and then
+  // measures 0.6 below THAT — reading the edge thinner than it is. A thin slab
+  // keeps the reference local. The measurement still cuts a climbing rim
+  // obliquely, so it stays conservative against the true perpendicular radius.
+  const H = 0.05
+  const stations = []
+  for (const x of [128, 134, 140, 146, 152, 157]) {
+    for (const sz of [1, -1]) {
+      const col = slabBounds(x - H, x + H, sz > 0 ? 0 : -40, sz > 0 ? 40 : 0)
+      if (!col) continue
+      const tipZ = sz > 0 ? col.max[2] : col.min[2]
+      const z = tipZ - sz * inboardMm
+      const bb = slabBounds(x - H, x + H, Math.min(z, z - sz * 0.06), Math.max(z, z - sz * 0.06))
+      if (!bb) { stations.push({ x, side: sz > 0 ? '+z' : '−z', tipZ: +tipZ.toFixed(1), thicknessMm: 0 }); continue }
+      stations.push({ x, side: sz > 0 ? '+z' : '−z', tipZ: +tipZ.toFixed(1), thicknessMm: +(bb.max[1] - bb.min[1]).toFixed(3) })
+    }
+  }
+  const worst = stations.reduce((a, s) => (s.thicknessMm < a.thicknessMm ? s : a), stations[0])
+  const idealMm = +(2 * Math.sqrt(RIM_R ** 2 - (RIM_R - inboardMm) ** 2)).toFixed(3)
+  return {
+    ok: worst.thicknessMm >= minThicknessMm,
+    rimRadiusMm: RIM_R, inboardMm, idealThicknessMm: idealMm,
+    minThicknessMm, worst, stations,
+    effectiveEdgeRadiusMm: +((worst.thicknessMm / idealMm) * RIM_R).toFixed(3),
+    specFloorMm: 0.6
+  }
+}
+
+/** Peduncle wall at spec (D7: 1.8). Runs the G2 sampler over the hollow run
+ *  ONLY (blade and the spec'd apertures excluded) at the 1.8 floor, so the
+ *  "peduncle 1.8" claim is a gate result rather than a comment. */
+export function wallProof(part) {
+  return G2_minWall(part, {
+    samples: 6000,
+    minWallMm: WALL.peduncle,
+    excludeRegions: [
+      { min: [123, -8, -40], max: [161, 8, 40] }, // blade: gated separately at 1.25 + rimProof
+      // knuckle and its J2 thrust chamfer: a 3.0 boss with a designed 1.5×45°
+      // break at the lower edge, so chords across the break read ~1.74. Not
+      // peduncle wall — covered by the whole-part 1.25 sweep, which passes.
+      { min: [98, -8, -14], max: [112, 8, 14] },
+      ...(part.meta.excludeRegions ?? []) // spec'd flood/vent apertures
+    ]
+  })
 }
 
 // ── digital ±30° proof ────────────────────────────────────────────────────
@@ -401,6 +496,23 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const g1 = G1_manifoldRoundtrip(part)
     const g3 = G3_cavities(part)
     const g4 = G4_plateFit(part)
+    if (part.name === 'p3-tail-assembly') {
+      const rim = rimProof(part.manifold)
+      const wall = wallProof(part)
+      const g2 = G2_minWall(part, { samples: 6000 }) // whole part at the 1.25 floor — no blade exclusion
+      allOk &&= rim.ok && wall.ok && g2.ok
+      console.log(JSON.stringify({ check: 'rimProof-P3-edge-radius', ...rim }))
+      console.log(JSON.stringify({
+        check: 'wallProof-P3-peduncle-1.8', ok: wall.ok,
+        minWallSampledMm: wall.minWallSampledMm, wallSamples: wall.wallSamples,
+        violations: wall.violations, worst: wall.worst?.slice(0, 3)
+      }))
+      console.log(JSON.stringify({
+        check: 'G2-P3-whole-part-1.25', ok: g2.ok,
+        minWallSampledMm: g2.minWallSampledMm, wallSamples: g2.wallSamples,
+        excluded: g2.excluded, violations: g2.violations, worst: g2.worst?.slice(0, 3)
+      }))
+    }
     const okPart = g1.ok && g3.ok && g4.ok
     allOk &&= okPart
     const bb = part.manifold.boundingBox()

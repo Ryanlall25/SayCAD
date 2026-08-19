@@ -62,12 +62,19 @@ uncured resin trapped inside (re-flush it).
 1. Hand-ream both Ø6.5 hinge bores and the tail bore with a Ø6.0 drill bit.
 2. **Dry-fit everything:** pods on their 3 pins (they only fit one way —
    that's intentional), tail on its pin, plugs with O-rings.
-3. Plug the three Ø4 drain holes (P6 plugs, from inside the open pods):
-   one in each bulkhead plus one in the seam wall just behind the front
-   pod's flange. The nose-side bulkhead sits ~60 mm in — use tweezers and
-   shine the UV torch through the opening. Wet each plug with resin,
-   60–90 s UV flash in 2–3 passes. Seal the two Ø3 shell vents (nose belly
-   + near the tail) the same way.
+3. Plug the three Ø4 drain holes (P6 plugs). Two go in **from inside the
+   open pods** through the rim — one in each bulkhead; the nose-side one
+   sits ~60 mm in, so use tweezers and shine the UV torch through the
+   opening. The third is in the **seam diaphragm**, the wall just behind the
+   front pod's flange: that one is *not* reachable from the rim (the flange
+   ring blocks it) — fit it **through the front belly port**, the Ø20
+   threaded hole at the nose end of the belly, before the ballast plug goes
+   in. Wet each plug with resin, 60–90 s UV flash in 2–3 passes. Seal the
+   two Ø3 shell vents (nose belly + near the tail) the same way.
+
+   *Why it matters:* that diaphragm is what keeps the front and middle
+   chambers separate. Leave its plug out and the two become one big
+   compartment — if it ever floods, the fish sits far lower than designed.
 4. **Glue the one seam:** sand both rim faces flat on 220-grit over glass,
    scuff, IPA wipe. G/flex bead in the groove, mate on the 3 pins until the
    little nubs touch, tape-clamp **24 h**.

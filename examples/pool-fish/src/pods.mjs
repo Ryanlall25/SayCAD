@@ -76,7 +76,7 @@ function ellipRing(x0, len, ryRef, rzRef, iOut, iIn, segs = 96) {
 const OUTER_X = [-139.3, -134, -126, -115, -100, -82, -62, -40, -20, 0, 20, 40, 60, 78, 90, 97, 100]
 // inner apex sits 4.1 mm behind the outer apex: the nose cone is so steep that
 // no radial inset holds 2.0 normal there — the tip prints as a solid nose cap
-const INNER_X = [-134.7, -130.8, -125, -114, -100, -82, -62, -40, -20, 0, 20, 40, 60, 78, 90, 95, 97.75]
+const INNER_X = [-134.0, -130.8, -125, -114, -100, -82, -62, -40, -20, 0, 20, 40, 60, 78, 90, 95, 97.75]
 
 function ringYZ(x, ry, rz, n = 96) {
   const ring = []
@@ -155,7 +155,7 @@ function seamDiaphragm() {
 }
 function diaphragmDrain() {
   const zLow = -(rzAt(DIAPHRAGM.x) - insetAt(DIAPHRAGM.x)) + 3.6 // flange seat clearance — see bulkheadDrain
-  return M().cylinder(DIAPHRAGM.thk + 3, BULKHEADS.drainR, BULKHEADS.drainR, 48)
+  return M().cylinder(DIAPHRAGM.thk + 5, BULKHEADS.drainR, BULKHEADS.drainR, 48)
     .rotate([0, 90, 0]).translate([DIAPHRAGM.x - DIAPHRAGM.thk / 2 - 1.5, 0, zLow])
 }
 function seamNubs() {
@@ -233,10 +233,10 @@ function trayTabs(xs, fillZ) {
 function dorsalFeatures() {
   const x = FINS.dorsalX
   const zTop = rzAt(x)
-  const boss = M().cylinder(12.6, FINS.bossR, FINS.bossR, 64).translate([x, 0, 17.0]) // floor 2.6 under the bore (G2)
+  const boss = M().cylinder(13.0, FINS.bossR, FINS.bossR, 64).translate([x, 0, 16.6]) // floor 3.02 under the bore (WALL.boss)
   const bore = M().cylinder(FINS.dorsalDepth + 0.4, FINS.boreR, FINS.boreR, 64).translate([x, 0, zTop - FINS.dorsalDepth])
   // drain offset +X (tangent to the bore's low side in P1's nose-up print frame) so nothing pools (G3)
-  const drain = M().cylinder(5.0, FINS.drainR, FINS.drainR, 48).translate([x + (FINS.boreR - FINS.drainR), 0, 16.5])
+  const drain = M().cylinder(5.5, FINS.drainR, FINS.drainR, 48).translate([x + (FINS.boreR - FINS.drainR), 0, 16.0])
   return { boss, cuts: [bore, drain] }
 }
 /** pectoral sockets (P2): Ø6.3×10 blind, axis 25° below horizontal, ×2 */
@@ -246,7 +246,7 @@ function pectoralFeatures() {
   for (const sy of [1, -1]) {
     const rot = [sy * tilt, 0, 0]
     const A = [x, sy * 27, -17.2]
-    const boss = M().cylinder(14.5, FINS.bossR, FINS.bossR, 64).rotate(rot) // floor 2.7 past the bore (G2)
+    const boss = M().cylinder(14.8, FINS.bossR, FINS.bossR, 64).rotate(rot) // floor 3.00 past the bore (WALL.boss)
       .translate([A[0], A[1] - sy * 0.9063 * 3.2, A[2] + 0.4226 * 3.2])
     const bore = M().cylinder(15, FINS.boreR, FINS.boreR, 64).rotate(rot).translate(A)
     const drain = M().cylinder(8, FINS.drainR, FINS.drainR, 48).rotate(rot)
@@ -404,7 +404,7 @@ function wrapP1(manifold, chambers, tabBoxes, trayFill) {
       excludeRegions: [G2_BELT_P1, ...tabBoxes,
         { min: [-60.5, -10.5, -34.4], max: [-39.5, 10.5, -26.4] }, // female port-thread ridges (r ≤10.5 inside the 13.15 neck; ridge chords 1.2–1.9 are the ISO profile, not walls — neck outer wall stays audited)
         { min: [-128, -3, -18], max: [-122, 3, -11] }], // Ø3 belly-vent rim wedge (hole-rim chords are the spec'd opening, not walls)
-      g2Note: 'seam feature belt + 1.5 mm tray witness tabs + port thread bore excluded from the 2.0 floor by design; boss WALLS are 3.0 by construction via WALL.boss (socket floors 2.6–2.7) — no bossRegions AABBs (they would false-flag the adjacent 2.25 shell)',
+      g2Note: 'seam feature belt + 1.5 mm tray witness tabs + port thread bore excluded from the 2.0 floor by design; boss WALLS are 3.0 by construction via WALL.boss (socket floors 3.0) — no bossRegions AABBs (they would false-flag the adjacent 2.25 shell)',
       genusNote: 'rim primary; +1 each: belly vent, M20 port, dorsal-socket drain, Ø4 bulkhead pass-through, Ø4 seam-diaphragm pass-through — zero print-sealed cavities (drain audit sealedAir = 0); ~4 mm³ pooled in the horizontal port-thread roots, syringe-flushed at step 4',
       minWallMm: WALL.hullFloor,
       chambersCm3: { F1: chambers.F1, F2: chambers.F2 },
@@ -416,7 +416,7 @@ function wrapP1(manifold, chambers, tabBoxes, trayFill) {
         { joint: 'J4', name: 'dorsal fin socket Ø6.3×12', perSideMm: FIT.finTangRadial, kind: 'radial' },
         { joint: 'J5', name: 'bulkhead drain Ø4.0', perSideMm: 0.05, kind: 'radial', note: 'tapered P6 plug, UV-resin bedded (spec §4 J5)' }
       ],
-      sealNote: 'Ø3.0 belly vent (x=−125) sealed at step 7 with UV-resin fill + epoxy skim (J5 method); Ø4 bulkhead drain AND Ø4 seam-diaphragm drain each take a P6 plug (3 used fish-wide)',
+      sealNote: 'Ø3.0 belly vent (x=−125) sealed at step 7 with UV-resin fill + epoxy skim (J5 method); Ø4 bulkhead drain takes a P6 plug from inside the rim; the Ø4 seam-diaphragm drain is UNREACHABLE from the rim (J1 flange ring blocks the approach) and is plugged through the x=−50 M20 belly port — bore runs to x=−23.4, 5.5 mm usable vs the 4.4 mm plug body (3 plugs used fish-wide)',
       trayNote: `fore pebble/epoxy tray −80…−29; fill to the witness tabs at z=${trayFill.fillZ} (both trays together ≈ ${trayFill.tabImpliedG} g at bed centroid z≈${trayFill.bedCentroidZ})`,
       deviationNote: 'seam diaphragm added at x=−27.9 (spec had none): without it F2+M1 form one ~264 cm³ compartment through the open flange hole and a single flood sinks the fish — the diaphragm restores the spec §3 four-chamber flood ledger; flange 5→7.6 wide (Ø3.3 sockets + groove + moat cannot coexist in 5)'
     }
@@ -433,7 +433,7 @@ function wrapP2(manifold, chambers, tabBoxes, trayFill) {
       excludeRegions: [G2_BELT_P2, ...tabBoxes,
         { min: [-0.5, -10.5, -35.4], max: [20.5, 10.5, -27.4] }, // female port-thread ridges (see P1 note)
         { min: [92, -3, -28], max: [98, 3, -19] }], // Ø3 shell-vent rim wedge
-      g2Note: 'seam feature belt + tray witness tabs + port thread bore excluded from the 2.0 floor by design; boss WALLS are 3.0 by construction via WALL.boss (socket floors 2.6–2.7); fork stop columns are 2.8 thick (≥2.0 floor applies)',
+      g2Note: 'seam feature belt + tray witness tabs + port thread bore excluded from the 2.0 floor by design; boss WALLS are 3.0 by construction via WALL.boss (socket floors 3.0); fork stop columns are 2.8 thick (≥2.0 floor applies)',
       genusNote: 'rim primary; +1 each: shell vent, M20 port, 2× pectoral drains, Ø4 bulkhead pass-through; +3 clevis fork (2 bored bands + column loop); +1 flange-ring annular weld; +1 skirt (solid torus) — zero print-sealed cavities; ~5 mm³ pooled in the horizontal port-thread roots is real and syringe-flushed at step 4',
       minWallMm: WALL.hullFloor,
       chambersCm3: { M1joint: chambers.M1joint, M2: chambers.M2 },
