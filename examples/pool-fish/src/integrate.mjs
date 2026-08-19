@@ -7,7 +7,7 @@
 import { boot, M } from '../lib.mjs'
 import { runAll, G1_manifoldRoundtrip, G2_minWall, G3_cavities, G4_plateFit, G6_stability } from './gates.mjs'
 import { ENVELOPE, FIT, MASS, RHO } from './machine.mjs'
-import { buildPods, seamPin, PROBES } from './pods.mjs'
+import { buildPods, seamPin, seamWallProof, drainPlugProof, PROBES } from './pods.mjs'
 import { tailAssembly, hingePin, retainerCap, stopCheck, HINGE } from './tailparts.mjs'
 import { buildAll } from './smallparts.mjs'
 import { threadMale } from './threads.mjs'
@@ -109,6 +109,14 @@ const report = runAll(fishParts, {
 // G6 on the real generated body (chambers gated once above)
 const g6real = G6_stability(realBody, massItems, { stepDeg: 15, gmMinMm: 3 })
 
+// J1 seam-wall proof: resin between each pin socket and the pool, measured
+// (audit L: the old belt exclusion hid 0.99 mm here)
+const seamWall = seamWallProof(bare)
+
+// Every Ø4 drain must actually accept its P6 plug (audit B: one of them could
+// not be reached from either end, which would have merged two chambers)
+const drainPlugs = drainPlugProof()
+
 // J2 swing proof (audit: was self-test-only — now part of the delivered record)
 const stops = stopCheck()
 
@@ -192,7 +200,7 @@ const couponReport = couponParts.map((part) => {
 })
 const couponOk = couponReport.every((r) => r.ok)
 
-const ok = report.ok && g6real.ok && stops.ok && couponOk && ballastOk && reserveOk && matesOk
+const ok = report.ok && g6real.ok && stops.ok && couponOk && ballastOk && reserveOk && matesOk && seamWall.ok && drainPlugs.ok
 const out = {
   verdict: ok ? 'GREEN' : 'RED',
   secs: +((Date.now() - t0) / 1000).toFixed(1),
@@ -205,6 +213,8 @@ const out = {
     realBodyCm3, reserveG, reserveOk
   },
   chambersCm3: chambers, trayFill, trim,
+  seamWallProof: seamWall,
+  drainPlugProof: drainPlugs,
   stopCheck: stops,
   G6real: { ok: g6real.ok, draftFrac: g6real.draft.frac, gmTMm: g6real.gz.gmT, minGZMm: g6real.gz.minGZMm },
   fish: report,
@@ -235,5 +245,7 @@ console.log(JSON.stringify({ stopCheck: { ok: stops.ok, contactDeg: stops.contac
 console.log(JSON.stringify({ mateProbes: out.mateProbes }))
 console.log(JSON.stringify({ ledgers: { mass: out.massLedgerG, buoyancy: out.buoyancyLedger, trim } }))
 console.log(JSON.stringify({ G7: { ok: report.G7.ok, totals: report.G7.totals, band: report.G7.band } }))
+console.log(JSON.stringify({ drainPlugProof: { ok: drainPlugs.ok, rows: drainPlugs.rows.map((r) => ({ drain: r.drain, access: r.access, marginMm: r.marginMm, seats: r.seats })) } }))
+console.log(JSON.stringify({ seamWallProof: { ok: seamWall.ok, minWallMm: seamWall.minWallMm, maxWallMm: seamWall.maxWallMm, floorMm: seamWall.floorMm } }))
 console.log(JSON.stringify({ verdict: out.verdict, secs: out.secs, wrote: 'parts/gates.integration.json + parts/manifest.json + STLs' }))
 process.exit(ok ? 0 : 1)

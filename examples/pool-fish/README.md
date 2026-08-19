@@ -62,27 +62,40 @@ uncured resin trapped inside (re-flush it).
 1. Hand-ream both Ø6.5 hinge bores and the tail bore with a Ø6.0 drill bit.
 2. **Dry-fit everything:** pods on their 3 pins (they only fit one way —
    that's intentional), tail on its pin, plugs with O-rings.
-3. Plug the three Ø4 drain holes (P6 plugs). Two go in **from inside the
-   open pods** through the rim — one in each bulkhead; the nose-side one
-   sits ~60 mm in, so use tweezers and shine the UV torch through the
-   opening. The third is in the **seam diaphragm**, the wall just behind the
-   front pod's flange: that one is *not* reachable from the rim (the flange
-   ring blocks it) — fit it **through the front belly port**, the Ø20
-   threaded hole at the nose end of the belly, before the ballast plug goes
-   in. Wet each plug with resin, 60–90 s UV flash in 2–3 passes. Seal the
-   two Ø3 shell vents (nose belly + near the tail) the same way.
+3. Plug the three Ø4 drain holes (P6 plugs). **Each pod uses a different
+   route — this matters, one of them is physically impossible the other
+   way:**
 
-   *Why it matters:* that diaphragm is what keeps the front and middle
-   chambers separate. Leave its plug out and the two become one big
-   compartment — if it ever floods, the fish sits far lower than designed.
+   - **Rear pod:** its bulkhead drain goes in **through the rim**, from
+     inside the open pod. It sits ~60 mm in — use tweezers and shine the UV
+     torch through the opening.
+   - **Front pod — BOTH its plugs go through the front belly port**, the Ø20
+     threaded hole at the nose end of the belly, before the ballast plug
+     goes in. One sits ~29 mm forward of the port (the nose bulkhead), the
+     other ~21 mm aft of it (the seam diaphragm, the wall just behind the
+     front pod's flange). Neither is reachable from the rim: the diaphragm
+     is a solid wall across the whole pod and the only gap in it is the Ø4
+     hole you are plugging.
+
+   Wet each plug with resin, 60–90 s UV flash in 2–3 passes. Seal the two Ø3
+   shell vents (nose belly + near the tail) the same way.
+
+   *Why it matters:* the diaphragm is what keeps the front and middle
+   chambers separate. Leave either front plug out and two chambers become
+   one — and the nose one sits *below* the pebble fill line, so ballast and
+   epoxy would run forward into the nose.
 4. **Glue the one seam:** sand both rim faces flat on 220-grit over glass,
    scuff, IPA wipe. G/flex bead in the groove, mate on the 3 pins until the
    little nubs touch, tape-clamp **24 h**.
-5. **Leak test:** submerge the glued hull 24 h at ~30 cm. PASS = it gains
-   less than 0.5 g. Do not continue until it passes.
-6. Epoxy the three fins into their sockets (tangs are Ø6.0 — dorsal on top of
+5. Epoxy the three fins into their sockets (tangs are Ø6.0 — dorsal on top of
    the front pod, two pectorals low on the rear pod sides). Epoxy fillet band
-   8–10 mm wide over the seam and all plugs.
+   8–10 mm wide over the seam and all plugs. **Do this before the leak test:**
+   the three fin sockets open straight into the sealed chambers, so a hull
+   with bare sockets is not sealed yet — it would "fail" a leak test that has
+   nothing wrong with it.
+6. **Leak test:** once the fin epoxy has cured, submerge the glued hull 24 h
+   at ~30 cm. PASS = it gains less than 0.5 g. Do not continue until it
+   passes.
 7. Mask the hinge bores, pin, port threads and the flat O-ring faces →
    2 coats exterior UV clearcoat. (Unpainted resin yellows in weeks and gets
    brittle in months of sun.)

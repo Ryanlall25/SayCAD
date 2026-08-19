@@ -12,6 +12,7 @@
 import { boot, M, loft, writeSTL } from '../lib.mjs'
 import { ENVELOPE, CUTS, FIT, PLATE, WALL } from './machine.mjs'
 import { threadFemaleCutter, THREAD } from './threads.mjs'
+import { drainPlug, P6 } from './smallparts.mjs'
 import { clevisFork, HINGE } from './tailparts.mjs'
 import { G1_manifoldRoundtrip, G3_cavities, G4_plateFit } from './gates.mjs'
 
@@ -32,12 +33,17 @@ const insetAt = (x) => WALL.hull + (Math.abs(x) > 95 ? 1.35 * ((Math.abs(x) - 95
 // groove + moat cannot coexist in the spec's 5 (documented deviation).
 const SEAM = {
   x: CUTS.p1p2, // −20
-  flangeW: 7.6, ringThk: 6.75, // ring depth 6.75 → 2.25 floor behind the 4.5 sockets (G2)
+  flangeW: 8.0, ringThk: 6.75, // ring depth 6.75 → 2.25 floor behind the 4.5 sockets (G2)
   witness: [0, 0.4], // outer-edge step (≈ the 0.4×45° witness chamfer)
   webLand: [0.6, 1.15], // face annulus the break-away skirt web grips
-  ringR: 3.05, // socket + nub circle inset
+  ringR: 4.05, // SOCKET circle inset. Measured, not chosen: a Ø3.3 socket
+  // reaches ringR±1.65, and the witness step takes another 0.4 off the wetted
+  // surface, so wall-to-water = ringR − 1.65 − 0.4. At the old 3.05 that was
+  // 1.00 mm (measured 0.99–1.44 across all six sockets) — half the 2.0 hull
+  // floor, on the seam, hidden by a G2 belt exclusion. 4.05 puts it at 2.00.
+  nubInset: 3.0, // nubs ride their own circle (span 2.0–4.0), clear of the groove
   groove: [5.0, 6.0], // 1.0 × 0.5 glue groove (P1 face only, bridged at socket angles)
-  moat: [6.45, 7.45], // 1.0 × 0.5 squeeze-out moat flush to the inner edge (P1 face only)
+  moat: [7.0, 8.0], // 1.0 × 0.5 squeeze-out moat flush to the inner edge (P1 face only)
   nubPhiDeg: [90, 210, 330], nubH: 0.2, nubR: 1.0,
   socketPhiDeg: [60, 165, 300], socketR: (3.0 + 2 * FIT.pinSocketRadial) / 2, socketDepth: 4.5,
   pinLen: 8.5 // production J1 pin: 4.25 per side + 0.2 nub gap ⇒ 8.7 max, cut to 8.5
@@ -46,10 +52,10 @@ const SEAM = {
 // this wall F2+M1 would be ONE ~264 cm³ compartment whose flood sinks the fish
 // (audit finding). A 2.0 wall just behind the P1 ring restores the four-
 // chamber flood ledger; its Ø4 drain takes a P6 plug at assembly step 3.
-const DIAPHRAGM = { x: -27.9, thk: 2.0 } // spans x −28.9…−26.9
+const DIAPHRAGM = { x: -27.9, thk: WALL.hull } // 2.25, the hull nominal: at exactly 2.0 it sat ON the G2 floor and sampling noise tripped it
 const PORTS = { p1x: -50, p2x: 10, faceR: 16.5, neckR: 13.15 } // M20 belly ports over the trays
 const TRAYS = { tabAtX: { p1: [-74, -70], p2: [30, 34] }, bulkGCm3: 1.8 } // witness-tab z is SOLVED from the ballast target (audit: a fixed z=−8 encoded ~170 g)
-const BULKHEADS = { p1x: -80, p2x: 40, thk: 2, drainR: 2.0 } // Ø4.0 drains (J5 plugs)
+const BULKHEADS = { p1x: -80, p2x: 40, thk: WALL.hull, drainR: 2.0 } // 2.25 internal walls; Ø4.0 drains (J5 plugs)
 const VENTS = { p1x: -125, p2x: 95, r: 1.5 } // Ø3.0 shell vents (UV-resin sealed at step 7)
 const FINS = { dorsalX: -60, boreR: (6.0 + 2 * FIT.finTangRadial) / 2, dorsalDepth: 12, pectoralDepth: 10, bossR: 6.15, drainR: 1.0 }
 
@@ -155,12 +161,24 @@ function seamDiaphragm() {
 }
 function diaphragmDrain() {
   const zLow = -(rzAt(DIAPHRAGM.x) - insetAt(DIAPHRAGM.x)) + 3.6 // flange seat clearance — see bulkheadDrain
-  return M().cylinder(DIAPHRAGM.thk + 5, BULKHEADS.drainR, BULKHEADS.drainR, 48)
+  // Ø4 bore: 2.0 through the diaphragm (the P6 taper seal) + run-out aft so the
+  // plug body has 5.5 mm of clear bore, reachable only from the belly port.
+  const bore = M().cylinder(DIAPHRAGM.thk + 5, BULKHEADS.drainR, BULKHEADS.drainR, 48)
     .rotate([0, 90, 0]).translate([DIAPHRAGM.x - DIAPHRAGM.thk / 2 - 1.5, 0, zLow])
+  // RELIEF: the bore runs just outboard of the J1 flange ring's inner opening,
+  // so without this it grazes that edge and leaves a feather (measured 0.07 mm
+  // — a knife-thin fin that would snap off inside a sealed chamber). A Ø6.4
+  // counterbore through the ring aft of the diaphragm removes the feather and
+  // clears the plug body; the 2.0 mm sealing bore in the diaphragm is untouched.
+  const relief = M().cylinder(3.95, 3.2, 3.2, 64)
+    .rotate([0, 90, 0]).translate([DIAPHRAGM.x + DIAPHRAGM.thk / 2 - 0.05, 0, zLow])
+  const both = ok(bore.add(relief), 'diaphragm drain + relief')
+  bore.delete(); relief.delete()
+  return both
 }
 function seamNubs() {
   return SEAM.nubPhiDeg.map((phi) => {
-    const [y, z] = seamPt(phi, SEAM.ringR)
+    const [y, z] = seamPt(phi, SEAM.nubInset)
     return M().cylinder(SEAM.nubH, SEAM.nubR, SEAM.nubR, 32).rotate([0, 90, 0]).translate([SEAM.x, y, z])
   })
 }
@@ -390,8 +408,21 @@ export function buildPods({ skirts = true, ballastTargetG = 120 } = {}) {
  *  the wetted surface, groove bridged at socket angles, socket floors 2.25)
  *  and the whole belt is a glue-flooded, flange-backed (≥6.75) J1 zone;
  *  skirt + web are sacrificial. */
-const G2_BELT_P1 = { min: [-27.0, -40, -40], max: [-18.4, 40, 40] }
-const G2_BELT_P2 = { min: [-21.5, -40, -40], max: [-13.0, 40, 40] }
+// SKIRT-ONLY exclusion (was a full 8.6 mm "seam feature belt"): the break-away
+// skirt is a sacrificial 0.4 mm web + 2×1 ring that snaps off before the fish
+// ever sees water, so its chords are not walls. Everything else in the seam —
+// pin sockets, glue groove, moat, witness step, flange body — is now GATED at
+// the 2.0 floor. That is what forced the socket circle out to ringR 4.05.
+const G2_SKIRT_P1 = { min: [-20.15, -40, -40], max: [-18.6, 40, 40] }
+const G2_SKIRT_P2 = { min: [-21.35, -40, -40], max: [-19.85, 40, 40] }
+// P1 seam FACE, 0.7 mm slab: holds the glue groove, the squeeze-out moat and
+// the witness step. Spec §4-J1 mandates a 1.0×0.5 groove AND a 1.0×0.5 moat on
+// one flange, so the land between them is ~1.0 mm wide by construction — a
+// 0.5 mm-tall bead on a 6.75 mm-thick flange, which a chord sampler reports as
+// a "1.0 mm wall". It is a face feature, not structure. The thing that WOULD
+// matter here — resin between a pin socket and the pool — is measured
+// deterministically by seamWallProof() and gated at 2.0, not excluded.
+const G2_FACE_P1 = { min: [-20.6, -40, -40], max: [-19.9, 40, 40] }
 
 function wrapP1(manifold, chambers, tabBoxes, trayFill) {
   return {
@@ -401,10 +432,10 @@ function wrapP1(manifold, chambers, tabBoxes, trayFill) {
     meta: {
       qty: 1,
       expectedGenus: 4, // measured & pinned — regression tripwire; the enforced safety invariant is genus ≥ 0 + drain sealedAir = 0
-      excludeRegions: [G2_BELT_P1, ...tabBoxes,
+      excludeRegions: [G2_SKIRT_P1, G2_FACE_P1, ...tabBoxes,
         { min: [-60.5, -10.5, -34.4], max: [-39.5, 10.5, -26.4] }, // female port-thread ridges (r ≤10.5 inside the 13.15 neck; ridge chords 1.2–1.9 are the ISO profile, not walls — neck outer wall stays audited)
         { min: [-128, -3, -18], max: [-122, 3, -11] }], // Ø3 belly-vent rim wedge (hole-rim chords are the spec'd opening, not walls)
-      g2Note: 'seam feature belt + 1.5 mm tray witness tabs + port thread bore excluded from the 2.0 floor by design; boss WALLS are 3.0 by construction via WALL.boss (socket floors 3.0) — no bossRegions AABBs (they would false-flag the adjacent 2.25 shell)',
+      g2Note: 'break-away skirt (sacrificial 0.4 web) + 1.5 mm tray witness tabs + port thread bore excluded from the 2.0 floor by design; the seam features themselves are gated; boss WALLS are 3.0 by construction via WALL.boss (socket floors 3.0) — no bossRegions AABBs (they would false-flag the adjacent 2.25 shell)',
       genusNote: 'rim primary; +1 each: belly vent, M20 port, dorsal-socket drain, Ø4 bulkhead pass-through, Ø4 seam-diaphragm pass-through — zero print-sealed cavities (drain audit sealedAir = 0); ~4 mm³ pooled in the horizontal port-thread roots, syringe-flushed at step 4',
       minWallMm: WALL.hullFloor,
       chambersCm3: { F1: chambers.F1, F2: chambers.F2 },
@@ -416,7 +447,7 @@ function wrapP1(manifold, chambers, tabBoxes, trayFill) {
         { joint: 'J4', name: 'dorsal fin socket Ø6.3×12', perSideMm: FIT.finTangRadial, kind: 'radial' },
         { joint: 'J5', name: 'bulkhead drain Ø4.0', perSideMm: 0.05, kind: 'radial', note: 'tapered P6 plug, UV-resin bedded (spec §4 J5)' }
       ],
-      sealNote: 'Ø3.0 belly vent (x=−125) sealed at step 7 with UV-resin fill + epoxy skim (J5 method); Ø4 bulkhead drain takes a P6 plug from inside the rim; the Ø4 seam-diaphragm drain is UNREACHABLE from the rim (J1 flange ring blocks the approach) and is plugged through the x=−50 M20 belly port — bore runs to x=−23.4, 5.5 mm usable vs the 4.4 mm plug body (3 plugs used fish-wide)',
+      sealNote: 'Ø3.0 belly vent (x=−125) sealed at step 7 with UV-resin fill + epoxy skim (J5 method); Ø4 bulkhead drain takes a P6 plug from the F2 side through the x=−50 M20 belly port (29 mm forward of the port axis) — the rim approach is walled off by the seam diaphragm; the Ø4 seam-diaphragm drain is UNREACHABLE from the rim (J1 flange ring blocks the approach) and is plugged through the x=−50 M20 belly port — bore runs to x=−23.4, 5.5 mm usable vs the 4.4 mm plug body (3 plugs used fish-wide)',
       trayNote: `fore pebble/epoxy tray −80…−29; fill to the witness tabs at z=${trayFill.fillZ} (both trays together ≈ ${trayFill.tabImpliedG} g at bed centroid z≈${trayFill.bedCentroidZ})`,
       deviationNote: 'seam diaphragm added at x=−27.9 (spec had none): without it F2+M1 form one ~264 cm³ compartment through the open flange hole and a single flood sinks the fish — the diaphragm restores the spec §3 four-chamber flood ledger; flange 5→7.6 wide (Ø3.3 sockets + groove + moat cannot coexist in 5)'
     }
@@ -430,10 +461,10 @@ function wrapP2(manifold, chambers, tabBoxes, trayFill) {
     meta: {
       qty: 1,
       expectedGenus: 8, // measured & pinned — regression tripwire; the enforced safety invariant is genus ≥ 0 + drain sealedAir = 0
-      excludeRegions: [G2_BELT_P2, ...tabBoxes,
+      excludeRegions: [G2_SKIRT_P2, ...tabBoxes,
         { min: [-0.5, -10.5, -35.4], max: [20.5, 10.5, -27.4] }, // female port-thread ridges (see P1 note)
         { min: [92, -3, -28], max: [98, 3, -19] }], // Ø3 shell-vent rim wedge
-      g2Note: 'seam feature belt + tray witness tabs + port thread bore excluded from the 2.0 floor by design; boss WALLS are 3.0 by construction via WALL.boss (socket floors 3.0); fork stop columns are 2.8 thick (≥2.0 floor applies)',
+      g2Note: 'break-away skirt (sacrificial 0.4 web) + tray witness tabs + port thread bore excluded from the 2.0 floor by design; the seam features themselves are gated; boss WALLS are 3.0 by construction via WALL.boss (socket floors 3.0); fork stop columns are 2.8 thick (≥2.0 floor applies)',
       genusNote: 'rim primary; +1 each: shell vent, M20 port, 2× pectoral drains, Ø4 bulkhead pass-through; +3 clevis fork (2 bored bands + column loop); +1 flange-ring annular weld; +1 skirt (solid torus) — zero print-sealed cavities; ~5 mm³ pooled in the horizontal port-thread roots is real and syringe-flushed at step 4',
       minWallMm: WALL.hullFloor,
       chambersCm3: { M1joint: chambers.M1joint, M2: chambers.M2 },
@@ -460,6 +491,99 @@ export const PROBES = {
   j1: SEAM.socketPhiDeg.map((phi) => { const [y, z] = seamPt(phi, SEAM.ringR); return { y: +y.toFixed(2), z: +z.toFixed(2) } }),
   dorsal: { x: FINS.dorsalX, boreR: FINS.boreR, boreTopZ: +rzAt(FINS.dorsalX).toFixed(2), depth: FINS.dorsalDepth },
   port1: { x: PORTS.p1x, faceZ: -34.2 }
+}
+
+/** DRAIN PLUG PROOF — can the owner actually fit a P6 plug in every Ø4 drain?
+ *  This gate exists because the answer was once NO: the seam-diaphragm drain
+ *  was reachable from neither end (rim blocked by the J1 flange ring, belly-port
+ *  side 0.9 mm too shallow), which would have left two chambers merged into one
+ *  256 cm³ compartment. Per drain it measures: usable bore depth on the plug's
+ *  path, seated interference, and the flange land it lands on. */
+export function drainPlugProof() {
+  const SHOULDER = P6.flangeH + 0.1
+  const exposedBody = P6.bodyLen + P6.flangeH + 0.1 - SHOULDER
+  const { bare } = buildPods({ skirts: false })
+  const plug = drainPlug().manifold
+  const zAt = (x) => -(rzAt(x) - insetAt(x)) + 3.6
+  const sites = [
+    { name: 'P1 bulkhead x=-80', part: bare.p1, faceX: BULKHEADS.p1x + BULKHEADS.thk / 2, dir: -1, z: zAt(BULKHEADS.p1x), access: 'front belly port' },
+    { name: 'seam diaphragm x=-27.9', part: bare.p1, faceX: DIAPHRAGM.x - DIAPHRAGM.thk / 2, dir: +1, z: zAt(DIAPHRAGM.x), access: 'front belly port' },
+    { name: 'P2 bulkhead x=+40', part: bare.p2, faceX: BULKHEADS.p2x - BULKHEADS.thk / 2, dir: +1, z: zAt(BULKHEADS.p2x), access: 'rear pod rim' }
+  ]
+  const rows = sites.map((st) => {
+    // usable bore: march the Ø3.9 body along its path from the seat face
+    let firstBlock = null
+    for (let k = 1; k < 160; k++) {
+      const x0 = st.faceX + st.dir * k * 0.05
+      const d = M().cylinder(0.05, P6.bodyD / 2, P6.bodyD / 2, 96).rotate([0, 90, 0]).translate([Math.min(x0, x0 + 0.05), 0, st.z])
+      const x = st.part.intersect(d)
+      const v = x.volume()
+      x.delete(); d.delete()
+      if (v > 1e-4) { firstBlock = k * 0.05; break }
+    }
+    const usable = firstBlock === null ? 8 : +firstBlock.toFixed(2)
+    const seated = st.dir > 0
+      ? plug.rotate([0, 90, 0]).translate([st.faceX - SHOULDER, 0, st.z])
+      : plug.rotate([0, -90, 0]).translate([st.faceX + SHOULDER, 0, st.z])
+    const inter = seated.intersect(st.part)
+    const interVol = inter.volume()
+    const ring = M().cylinder(0.2, P6.flangeD / 2, P6.flangeD / 2, 128).rotate([0, 90, 0])
+      .translate([st.dir > 0 ? st.faceX : st.faceX - 0.2, 0, st.z])
+    const land = ring.intersect(st.part)
+    const landArea = land.volume() / 0.2
+    inter.delete(); seated.delete(); ring.delete(); land.delete()
+    return {
+      drain: st.name, access: st.access,
+      usableBoreMm: usable, exposedPlugBodyMm: +exposedBody.toFixed(2),
+      marginMm: +(usable - exposedBody).toFixed(2),
+      seatedInterferenceMm3: +interVol.toFixed(4),
+      flangeLandMm2: +landArea.toFixed(2), idealLandMm2: +(Math.PI * ((P6.flangeD / 2) ** 2 - (P6.bodyD / 2) ** 2)).toFixed(2),
+      seats: interVol < 0.05 && usable >= exposedBody
+    }
+  })
+  plug.delete(); bare.p1.delete(); bare.p2.delete()
+  return { gate: 'drainPlugProof', ok: rows.every((r) => r.seats), rows }
+}
+
+/** SEAM WALL PROOF — the measurement behind the J1 socket placement.
+ *  Marches outward along the local ellipse normal from each pin socket's outer
+ *  edge to the wetted surface, at mid-socket depth and in the witness-step
+ *  band (where the step removes another 0.4 radially). Gate: ≥ WALL.hullFloor.
+ *  This is what makes the narrow G2_FACE_P1 exclusion honest — the wall that
+ *  matters is measured, not asserted. */
+export function seamWallProof(bare, { floorMm = WALL.hullFloor } = {}) {
+  const solidAt = (part, pt) => {
+    const probe = M().cube([0.02, 0.02, 0.02], true).translate(pt)
+    const x = part.intersect(probe)
+    const v = x.volume()
+    x.delete(); probe.delete()
+    return v > 1e-9
+  }
+  const rows = []
+  for (const [name, part, dir] of [['P1', bare.p1, -1], ['P2', bare.p2, +1]]) {
+    for (const { y: cy, z: cz } of PROBES.j1) {
+      const nrm = Math.hypot(cy / seamRy ** 2, cz / seamRz ** 2)
+      const ny = cy / seamRy ** 2 / nrm, nz = cz / seamRz ** 2 / nrm
+      for (const [at, xOff] of [['mid-socket', dir * 2.2], ['witness-band', dir * 0.2]]) {
+        const x = SEAM.x + xOff
+        let first = null, exit = null
+        for (let k = 0; k < 400; k++) {
+          const t = SEAM.socketR + k * 0.01
+          const solid = solidAt(part, [x, cy + ny * t, cz + nz * t])
+          if (solid && first === null) first = t
+          if (first !== null && !solid) { exit = t; break }
+        }
+        rows.push({ part: name, at, wallMm: exit === null ? null : +(exit - first).toFixed(3) })
+      }
+    }
+  }
+  const vals = rows.map((r) => r.wallMm).filter((v) => v !== null)
+  const min = Math.min(...vals)
+  return {
+    gate: 'seamWallProof', ok: vals.length === rows.length && min >= floorMm - 0.02,
+    minWallMm: +min.toFixed(3), maxWallMm: +Math.max(...vals).toFixed(3),
+    floorMm, sockets: PROBES.j1.length, rows
+  }
 }
 
 /** production J1 registration pin (coupon P8 pins are 12 long — test only) */

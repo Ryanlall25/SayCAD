@@ -1,6 +1,6 @@
 {
   "verdict": "GREEN",
-  "secs": 53.1,
+  "secs": 97.6,
   "mateProbes": {
     "j1": [
       {
@@ -11,7 +11,7 @@
       },
       {
         "interMm3": 0,
-        "measuredPerSideMm": 0.148,
+        "measuredPerSideMm": 0.15,
         "expectPerSideMm": 0.15,
         "ok": true
       },
@@ -36,18 +36,18 @@
     "ok": true
   },
   "massLedgerG": {
-    "struct": 183.1,
+    "struct": 185.8,
     "coat": 30,
-    "ballastDerived": 109.9,
+    "ballastDerived": 107.2,
     "tabImplied": 120.1,
     "allUp": 323,
     "target": 323,
     "ballastOk": true
   },
   "buoyancyLedger": {
-    "sealedVoidCm3": 410.7,
-    "ballastBedCm3": 61.1,
-    "postBallastAirCm3": 349.6,
+    "sealedVoidCm3": 408.4,
+    "ballastBedCm3": 59.6,
+    "postBallastAirCm3": 348.8,
     "specSealedAirLetterCm3": 382,
     "airNote": "the sealed VOID (419→411 after diaphragm) satisfies the §3 letter; post-ballast AIR is ~344 — the letter's purposes (flood ledger per chamber, submerged reserve) are gated explicitly here",
     "realBodyCm3": 538.7,
@@ -55,24 +55,133 @@
     "reserveOk": true
   },
   "chambersCm3": {
-    "F1": 48.8,
-    "F2": 104.4,
-    "M1joint": 151.5,
-    "M2": 106
+    "F1": 48.6,
+    "F2": 103.9,
+    "M1joint": 150.2,
+    "M2": 105.7
   },
   "trayFill": {
-    "fillZ": -11.4,
+    "fillZ": -11.3,
     "tabImpliedG": 120.1,
     "targetG": 120,
-    "bedCentroidZ": -21.4,
+    "bedCentroidZ": -21.3,
     "bulkGCm3": 1.8
   },
   "trim": {
-    "lcgMm": -6.98,
+    "lcgMm": -6.99,
     "lcbMm": -4.86,
-    "gmLMm": 143.2,
+    "gmLMm": 143,
     "pitchDegEst": -0.85,
     "note": "heave-only solve: small pitch expected from the LCG/LCB offset — bias the pebble pour fore/aft at in-pool trim (the diaphragm separates the trays, so the split is controllable)"
+  },
+  "seamWallProof": {
+    "gate": "seamWallProof",
+    "ok": true,
+    "minWallMm": 1.99,
+    "maxWallMm": 2.44,
+    "floorMm": 2,
+    "sockets": 3,
+    "rows": [
+      {
+        "part": "P1",
+        "at": "mid-socket",
+        "wallMm": 2.39
+      },
+      {
+        "part": "P1",
+        "at": "witness-band",
+        "wallMm": 1.99
+      },
+      {
+        "part": "P1",
+        "at": "mid-socket",
+        "wallMm": 2.4
+      },
+      {
+        "part": "P1",
+        "at": "witness-band",
+        "wallMm": 2
+      },
+      {
+        "part": "P1",
+        "at": "mid-socket",
+        "wallMm": 2.39
+      },
+      {
+        "part": "P1",
+        "at": "witness-band",
+        "wallMm": 1.99
+      },
+      {
+        "part": "P2",
+        "at": "mid-socket",
+        "wallMm": 2.42
+      },
+      {
+        "part": "P2",
+        "at": "witness-band",
+        "wallMm": 1.99
+      },
+      {
+        "part": "P2",
+        "at": "mid-socket",
+        "wallMm": 2.44
+      },
+      {
+        "part": "P2",
+        "at": "witness-band",
+        "wallMm": 2
+      },
+      {
+        "part": "P2",
+        "at": "mid-socket",
+        "wallMm": 2.42
+      },
+      {
+        "part": "P2",
+        "at": "witness-band",
+        "wallMm": 1.99
+      }
+    ]
+  },
+  "drainPlugProof": {
+    "gate": "drainPlugProof",
+    "ok": true,
+    "rows": [
+      {
+        "drain": "P1 bulkhead x=-80",
+        "access": "front belly port",
+        "usableBoreMm": 8,
+        "exposedPlugBodyMm": 4.5,
+        "marginMm": 3.5,
+        "seatedInterferenceMm3": 0,
+        "flangeLandMm2": 15.73,
+        "idealLandMm2": 16.33,
+        "seats": true
+      },
+      {
+        "drain": "seam diaphragm x=-27.9",
+        "access": "front belly port",
+        "usableBoreMm": 6.15,
+        "exposedPlugBodyMm": 4.5,
+        "marginMm": 1.65,
+        "seatedInterferenceMm3": 0,
+        "flangeLandMm2": 15.73,
+        "idealLandMm2": 16.33,
+        "seats": true
+      },
+      {
+        "drain": "P2 bulkhead x=+40",
+        "access": "rear pod rim",
+        "usableBoreMm": 8,
+        "exposedPlugBodyMm": 4.5,
+        "marginMm": 3.5,
+        "seatedInterferenceMm3": 0,
+        "flangeLandMm2": 15.73,
+        "idealLandMm2": 16.33,
+        "seats": true
+      }
+    ]
   },
   "stopCheck": {
     "ok": true,
@@ -118,8 +227,8 @@
   "G6real": {
     "ok": true,
     "draftFrac": 0.565,
-    "gmTMm": 4.997,
-    "minGZMm": 1.316
+    "gmTMm": 4.777,
+    "minGZMm": 1.259
   },
   "fish": {
     "ok": true,
@@ -132,15 +241,15 @@
           "name": "p1-front-hull-pod",
           "ok": true,
           "status": "NoError",
-          "volumeCm3": 55.64,
+          "volumeCm3": 57,
           "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p1-front-hull-pod.stl",
-          "triangles": 92842,
-          "bytes": 4642184,
+          "triangles": 92814,
+          "bytes": 4640784,
           "roundTrip": {
             "merged": true,
             "status": "NoError",
-            "volCm3": 55.64,
-            "volMatchPct": 0
+            "volCm3": 57,
+            "volMatchPct": 0.0001
           }
         },
         "G2": {
@@ -148,12 +257,12 @@
           "name": "p1-front-hull-pod",
           "ok": true,
           "samples": 30000,
-          "wallSamples": 22851,
-          "grazing": 330,
-          "thickBeyondProbe": 424,
-          "excluded": 6395,
-          "minWallSampledMm": 2,
-          "p01Mm": 2,
+          "wallSamples": 26337,
+          "grazing": 371,
+          "thickBeyondProbe": 528,
+          "excluded": 2764,
+          "minWallSampledMm": 2.116,
+          "p01Mm": 2.19,
           "requiredMm": {
             "hull": 2,
             "boss": 3,
@@ -272,14 +381,14 @@
           "name": "p2-rear-hull-pod",
           "ok": true,
           "status": "NoError",
-          "volumeCm3": 70.05,
+          "volumeCm3": 71.03,
           "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p2-rear-hull-pod.stl",
-          "triangles": 91300,
-          "bytes": 4565084,
+          "triangles": 91280,
+          "bytes": 4564084,
           "roundTrip": {
             "merged": true,
             "status": "NoError",
-            "volCm3": 70.05,
+            "volCm3": 71.03,
             "volMatchPct": 0
           }
         },
@@ -288,12 +397,12 @@
           "name": "p2-rear-hull-pod",
           "ok": true,
           "samples": 30000,
-          "wallSamples": 25016,
-          "grazing": 463,
-          "thickBeyondProbe": 818,
-          "excluded": 3703,
-          "minWallSampledMm": 2,
-          "p01Mm": 2,
+          "wallSamples": 26730,
+          "grazing": 445,
+          "thickBeyondProbe": 882,
+          "excluded": 1943,
+          "minWallSampledMm": 1.989,
+          "p01Mm": 2.179,
           "requiredMm": {
             "hull": 2,
             "boss": 3,
@@ -1424,8 +1533,8 @@
         "BM_T": 6.89,
         "BM_L": 178.58,
         "KM_T": 30.726,
-        "KG": 25.847,
-        "GM_T": 4.88,
+        "KG": 26.067,
+        "GM_T": 4.659,
         "dTdmMmPerG": 0.0839,
         "cob": [
           0,
@@ -1433,15 +1542,15 @@
           -11.16
         ],
         "com": [
-          -6.98,
+          -6.99,
           0,
-          -9.15
+          -8.93
         ]
       },
       "gz": {
         "ok": true,
-        "gmT": 4.88,
-        "minGZMm": 1.288,
+        "gmT": 4.659,
+        "minGZMm": 1.231,
         "steps": [
           {
             "phiDeg": 0,
@@ -1451,46 +1560,46 @@
           {
             "phiDeg": 15,
             "waterZ": 3.48,
-            "gzMm": 1.288
+            "gzMm": 1.231
           },
           {
             "phiDeg": 30,
             "waterZ": 3.36,
-            "gzMm": 2.632
+            "gzMm": 2.522
           },
           {
             "phiDeg": 45,
             "waterZ": 3.17,
-            "gzMm": 4.097
+            "gzMm": 3.942
           },
           {
             "phiDeg": 60,
             "waterZ": 2.98,
-            "gzMm": 5.736
+            "gzMm": 5.545
           },
           {
             "phiDeg": 75,
             "waterZ": 2.83,
-            "gzMm": 7.508
+            "gzMm": 7.296
           },
           {
             "phiDeg": 90,
             "waterZ": 2.77,
-            "gzMm": 9.153
+            "gzMm": 8.933
           }
         ]
       },
       "chambers": {
         "declared": true,
         "chambersCm3": [
-          48.8,
-          104.4,
-          151.5,
-          106
+          48.6,
+          103.9,
+          150.2,
+          105.7
         ],
-        "sumCm3": 410.7,
+        "sumCm3": 408.4,
         "requiredCm3": 382,
-        "maxSingleCm3": 151.5,
+        "maxSingleCm3": 150.2,
         "maxAllowedCm3": 181,
         "ok": true
       }
@@ -1498,22 +1607,22 @@
     "G7": {
       "gate": "G7",
       "ok": true,
-      "generatedAt": "2026-08-19T11:09:02.193Z",
+      "generatedAt": "2026-08-19T17:33:54.263Z",
       "rhoResinGCm3": 1.15,
       "rows": [
         {
           "part": "p1-front-hull-pod",
           "qty": 1,
-          "volCm3": 55.64,
-          "massEachG": 64,
-          "massTotalG": 64
+          "volCm3": 57,
+          "massEachG": 65.6,
+          "massTotalG": 65.6
         },
         {
           "part": "p2-rear-hull-pod",
           "qty": 1,
-          "volCm3": 70.05,
-          "massEachG": 80.6,
-          "massTotalG": 80.6
+          "volCm3": 71.03,
+          "massEachG": 81.7,
+          "massTotalG": 81.7
         },
         {
           "part": "p3-tail-assembly",
@@ -1582,10 +1691,10 @@
           "massG": 6
         }
       ],
-      "ballastG": 109.9,
+      "ballastG": 107.2,
       "coatBudgetG": 30,
       "totals": {
-        "printedG": 174.7,
+        "printedG": 177.4,
         "extrasG": 8.4,
         "allUpG": 323
       },
