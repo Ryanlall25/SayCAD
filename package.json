@@ -3,7 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Speak it, see it, print it — a conversational CAD that turns plain language into 3D prototypes. Training focus: dental.",
+  "description": "Speak it, see it, print it \u2014 a conversational CAD that turns plain language into 3D prototypes. Training focus: dental.",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
