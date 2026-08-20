@@ -1,22 +1,22 @@
 {
   "gate": "G7",
   "ok": true,
-  "generatedAt": "2026-08-19T17:33:54.263Z",
+  "generatedAt": "2026-08-20T00:33:14.824Z",
   "rhoResinGCm3": 1.15,
   "rows": [
     {
       "part": "p1-front-hull-pod",
       "qty": 1,
-      "volCm3": 57,
-      "massEachG": 65.6,
-      "massTotalG": 65.6
+      "volCm3": 57.61,
+      "massEachG": 66.3,
+      "massTotalG": 66.3
     },
     {
       "part": "p2-rear-hull-pod",
       "qty": 1,
-      "volCm3": 71.03,
-      "massEachG": 81.7,
-      "massTotalG": 81.7
+      "volCm3": 71.69,
+      "massEachG": 82.4,
+      "massTotalG": 82.4
     },
     {
       "part": "p3-tail-assembly",
@@ -49,9 +49,9 @@
     {
       "part": "p5-ballast-plug",
       "qty": 2,
-      "volCm3": 5.74,
-      "massEachG": 6.6,
-      "massTotalG": 13.2
+      "volCm3": 6.43,
+      "massEachG": 7.4,
+      "massTotalG": 14.8
     },
     {
       "part": "p6-drain-plug",
@@ -85,10 +85,10 @@
       "massG": 6
     }
   ],
-  "ballastG": 107.2,
+  "ballastG": 104.2,
   "coatBudgetG": 30,
   "totals": {
-    "printedG": 177.4,
+    "printedG": 180.4,
     "extrasG": 8.4,
     "allUpG": 323
   },

@@ -196,6 +196,13 @@ function skirtFor(side) {
   return skirt
 }
 
+/** G2 exclusion for a female port's thread ridges — DERIVED from the thread
+ *  length so it cannot go stale when THREAD.engagementMm changes (it just did:
+ *  7.5 → 10 left the old typed box 2.5 mm short and P1/P2 went red). */
+function portThreadBox(x, faceZ) {
+  return { min: [x - 10.5, -10.5, faceZ - 0.2], max: [x + 10.5, 10.5, faceZ + THREAD.engagementMm + 0.4] }
+}
+
 // ── belly port boss (two-tier pad + neck; thread cutter pierces the top) ──
 function portBoss(x, faceZ) {
   const disc = M().cylinder(2.7, PORTS.faceR, PORTS.faceR, 96).translate([x, 0, faceZ])
@@ -433,7 +440,7 @@ function wrapP1(manifold, chambers, tabBoxes, trayFill) {
       qty: 1,
       expectedGenus: 4, // measured & pinned — regression tripwire; the enforced safety invariant is genus ≥ 0 + drain sealedAir = 0
       excludeRegions: [G2_SKIRT_P1, G2_FACE_P1, ...tabBoxes,
-        { min: [-60.5, -10.5, -34.4], max: [-39.5, 10.5, -26.4] }, // female port-thread ridges (r ≤10.5 inside the 13.15 neck; ridge chords 1.2–1.9 are the ISO profile, not walls — neck outer wall stays audited)
+        portThreadBox(PORTS.p1x, -34.2), // female port-thread ridges (ISO profile inside the neck, not walls — neck outer wall stays audited)
         { min: [-128, -3, -18], max: [-122, 3, -11] }], // Ø3 belly-vent rim wedge (hole-rim chords are the spec'd opening, not walls)
       g2Note: 'break-away skirt (sacrificial 0.4 web) + 1.5 mm tray witness tabs + port thread bore excluded from the 2.0 floor by design; the seam features themselves are gated; boss WALLS are 3.0 by construction via WALL.boss (socket floors 3.0) — no bossRegions AABBs (they would false-flag the adjacent 2.25 shell)',
       genusNote: 'rim primary; +1 each: belly vent, M20 port, dorsal-socket drain, Ø4 bulkhead pass-through, Ø4 seam-diaphragm pass-through — zero print-sealed cavities (drain audit sealedAir = 0); ~4 mm³ pooled in the horizontal port-thread roots, syringe-flushed at step 4',
@@ -462,7 +469,7 @@ function wrapP2(manifold, chambers, tabBoxes, trayFill) {
       qty: 1,
       expectedGenus: 8, // measured & pinned — regression tripwire; the enforced safety invariant is genus ≥ 0 + drain sealedAir = 0
       excludeRegions: [G2_SKIRT_P2, ...tabBoxes,
-        { min: [-0.5, -10.5, -35.4], max: [20.5, 10.5, -27.4] }, // female port-thread ridges (see P1 note)
+        portThreadBox(PORTS.p2x, -35.2), // female port-thread ridges (see P1 note)
         { min: [92, -3, -28], max: [98, 3, -19] }], // Ø3 shell-vent rim wedge
       g2Note: 'break-away skirt (sacrificial 0.4 web) + tray witness tabs + port thread bore excluded from the 2.0 floor by design; the seam features themselves are gated; boss WALLS are 3.0 by construction via WALL.boss (socket floors 3.0); fork stop columns are 2.8 thick (≥2.0 floor applies)',
       genusNote: 'rim primary; +1 each: shell vent, M20 port, 2× pectoral drains, Ø4 bulkhead pass-through; +3 clevis fork (2 bored bands + column loop); +1 flange-ring annular weld; +1 skirt (solid torus) — zero print-sealed cavities; ~5 mm³ pooled in the horizontal port-thread roots is real and syringe-flushed at step 4',

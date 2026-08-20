@@ -13,12 +13,28 @@ import { readFileSync } from 'node:fs'
 export const THREAD = {
   majorD: 20, // M20
   pitch: 2.5, // ×2.5
-  engagementMm: 7.5, // 3 turns (spec P5/J3)
+  // 10.0, not the spec's 7.5. Spec J3 asks for 3 TURNS OF ENGAGEMENT; 7.5 mm
+  // of thread does not deliver that, because the male's 45° lead-in fades
+  // 1.63 mm at the tip and the female's mouth countersink removes another 1.0,
+  // leaving 1.75 turns of full-form crest actually in mesh (measured, not
+  // assumed — see engagementProof()). 10.0 mm delivers 2.95 turns. The thread
+  // grows UP into the hull, so the plug's grip knob and the belly line are
+  // unchanged.
+  engagementMm: 10.0,
   crestRoundMm: 0.3, // spec: crest/root radii ≥ 0.3
   segsPerTurn: 128, // polygon points per 360° (also z-divisions per turn)
   leadInDeg: 45, // end chamfer angle
   mouthChamferMm: 0.5, // female cutter 45° countersink at its z=0 mouth — capped at 0.5 so the mouth (Ø21.3) stays INSIDE the J3 face-O-ring seal band (gland ID 22): a 1.5 chamfer (Ø23.3) undercut the seat (audit finding)
   maxRadialClearanceMm: 0.3 // selfMateCheck upper gate (fit band ceiling)
+}
+
+/** Axial depth of the 45° tip lead-in — the band where the crest is faded and
+ *  a chord sampler legitimately reads under the wall floor. Exported so the
+ *  modules that PLACE a thread derive their own G2 exclusion from it instead of
+ *  hand-typed boxes that go stale the moment the thread length changes. */
+export function leadInFadeMm() {
+  const g = profileGeom()
+  return +(g.rMaj + 0.1 - g.rRoot).toFixed(2)
 }
 
 /** ISO 60° profile geometry with full-round crest/root (all mm, radii). */
@@ -81,14 +97,19 @@ function threadForm(lengthMm, radialOffset) {
 
 /** 45° double-cone crest envelope: fades crests to the root circle at both
  *  ends (lead-in chamfers). Intersect the raw form with this. */
-function crestChamferEnvelope(lengthMm, radialOffset) {
+function crestChamferEnvelope(lengthMm, radialOffset, ends = 'both') {
   const Manifold = M()
   const g = profileGeom()
   const rEnd = g.rRoot + radialOffset // radius at the end faces
   const rMid = g.rMaj + radialOffset + 0.1 // clears the (rounded, sub-major) crests
-  const coneBot = Manifold.cylinder(lengthMm, rEnd, rEnd + lengthMm, 96)
-  const coneTop = Manifold.cylinder(lengthMm, rEnd + lengthMm, rEnd, 96)
+  const coneTop = Manifold.cylinder(lengthMm, rEnd + lengthMm, rEnd, 96) // fades the TIP (entering end)
   const mid = Manifold.cylinder(lengthMm, rMid, rMid, 128)
+  if (ends === 'top') { // male: a bolt leads in at the tip, not at the shoulder
+    const env = coneTop.intersect(mid)
+    coneTop.delete(); mid.delete()
+    return env
+  }
+  const coneBot = Manifold.cylinder(lengthMm, rEnd, rEnd + lengthMm, 96)
   const both = coneBot.intersect(coneTop)
   const env = both.intersect(mid)
   coneBot.delete(); coneTop.delete(); mid.delete(); both.delete()
@@ -101,7 +122,7 @@ export function threadMale(lengthMm = THREAD.engagementMm) {
   mustBeBooted()
   const g = profileGeom()
   const form = threadForm(lengthMm, 0)
-  const env = crestChamferEnvelope(lengthMm, 0)
+  const env = crestChamferEnvelope(lengthMm, 0, 'top') // shoulder end stays full form — it is buried in the plug body
   const manifold = checkStatus(form.intersect(env), 'threadMale')
   form.delete(); env.delete()
   return {
@@ -111,7 +132,7 @@ export function threadMale(lengthMm = THREAD.engagementMm) {
     meta: {
       thread: 'M20x2.5', engagementMm: lengthMm, turns: lengthMm / g.P,
       majorR: g.rMaj, rootR: g.rRoot, crestRound: g.rhoCrest, rootRound: g.rhoRoot,
-      leadIn: `45° both ends, depth ${(g.rMaj + 0.1 - g.rRoot).toFixed(2)} mm`,
+      leadIn: `45° at the TIP only, depth ${(g.rMaj + 0.1 - g.rRoot).toFixed(2)} mm (a shoulder-end fade would cost full-form engagement for nothing)`,
       radialOffset: 0, expectedGenus: 0
     }
   }
@@ -128,10 +149,19 @@ export function threadFemaleCutter(lengthMm = THREAD.engagementMm) {
   const off = FIT.threadFemaleRadial
   if (off < FIT.minTestableRadial) throw new Error('female thread clearance below testable floor (G5)')
   const form = threadForm(lengthMm, off)
-  const env = crestChamferEnvelope(lengthMm, off)
+  // 'top' = fade only at the DEEP end, mirroring the male's tip fade. Fading the
+  // mouth end too would leave the female under-cut exactly where the male now
+  // carries full crest — selfMateCheck catches that as 5.8 mm³ of interference.
+  const env = crestChamferEnvelope(lengthMm, off, 'top')
   const faded = form.intersect(env)
   const ch = THREAD.mouthChamferMm
-  const mouth = Manifold.cylinder(ch, g.rMaj + off + ch, g.rMaj + off, 96)
+  // The countersink must CLEAR the crests, not shave them: ending it exactly at
+  // the major radius slices the first threads into slivers (measured 0.002 mm
+  // once the mouth-end fade was removed). +0.15 radial leaves a clean 0.15 step
+  // at the first full thread instead. Face Ø stays 21.6 < the Ø22 gland ID, so
+  // the J3 face-O-ring seat is still untouched.
+  const cskR = g.rMaj + off + 0.15
+  const mouth = Manifold.cylinder(ch, cskR + ch, cskR, 96)
   const manifold = checkStatus(faded.add(mouth), 'threadFemaleCutter')
   form.delete(); env.delete(); faded.delete(); mouth.delete()
   return {
@@ -261,6 +291,49 @@ export function selfMateCheck() {
   }
 }
 
+/** ENGAGEMENT PROOF — turns of FULL-FORM thread actually in mesh (spec J3
+ *  asks for 3). Thread LENGTH is not engagement: the male's 45° lead-in and the
+ *  female's mouth countersink each remove full-form crest 1:1. The male band is
+ *  MEASURED off the built solid; the female's contribution is its mouth
+ *  countersink, a plain 45° cone of known depth (THREAD.mouthChamferMm) whose
+ *  deep-end fade mirrors the male tip fade by construction.
+ *  Every intermediate is deleted — chained trimByPlane orphans WASM handles. */
+export function engagementProof({ minTurns = 2.8, samples = 160 } = {}) {
+  mustBeBooted()
+  const g = profileGeom()
+  const L = THREAD.engagementMm
+  const male = threadMale(L)
+  let lo = null, hi = null
+  for (let k = 0; k <= samples; k++) {
+    const z = (k / samples) * L
+    const a = male.manifold.trimByPlane([0, 0, 1], z - 0.02)
+    const slab = a.trimByPlane([0, 0, -1], -(z + 0.02))
+    a.delete()
+    let full = false
+    if (!slab.isEmpty()) {
+      const bb = slab.boundingBox()
+      full = Math.max(bb.max[0], bb.max[1]) >= g.rMaj - 0.35
+    }
+    slab.delete()
+    if (full) { if (lo === null) lo = z; hi = z }
+  }
+  male.manifold.delete()
+  const maleBand = lo === null ? [0, 0] : [lo, hi]
+  const engLo = Math.max(maleBand[0], THREAD.mouthChamferMm) // female countersink eats the mouth
+  const engHi = maleBand[1]
+  const bandMm = Math.max(0, engHi - engLo)
+  const turns = +(bandMm / THREAD.pitch).toFixed(2)
+  return {
+    gate: 'engagementProof', ok: turns >= minTurns,
+    threadLengthMm: L,
+    maleFullFormBandMm: maleBand.map((v) => +v.toFixed(2)),
+    mouthChamferMm: THREAD.mouthChamferMm,
+    engagedBandMm: +bandMm.toFixed(2), fullFormTurns: turns,
+    specTurns: 3, minTurns,
+    note: 'thread LENGTH is not engagement — lead-in fade and mouth countersink each cost full-form crest 1:1'
+  }
+}
+
 // ── self-test ─────────────────────────────────────────────────────────────
 if (import.meta.url === `file://${process.argv[1]}`) {
   await boot()
@@ -316,6 +389,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     }))
     part.manifold.delete()
   }
+
+  const eng = engagementProof()
+  allOk &&= eng.ok
+  console.log(JSON.stringify({ check: 'engagementProof-J3-turns', ...eng }))
 
   const sm = selfMateCheck()
   allOk &&= sm.ok

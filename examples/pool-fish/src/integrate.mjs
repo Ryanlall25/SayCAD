@@ -16,13 +16,31 @@ import { writeFileSync } from 'node:fs'
 await boot()
 const t0 = Date.now()
 
-const BALLAST_TARGET_G = 120
-const { p1, p2, bare, chambers, trayFill, sealedSolid } = buildPods({ ballastTargetG: BALLAST_TARGET_G })
+// The tray witness tabs encode a ballast mass, and the physics derives one
+// (323 − structure − coating). Those two must agree or the owner fills to a
+// line the design does not want. A hardcoded target drifts every time the
+// geometry changes — the last thread revision moved it 15 g and tripped the
+// gate — so SOLVE it: build once to learn the structure mass, then rebuild the
+// trays against the ballast that mass implies. Converges in one pass because
+// the tabs themselves weigh ~0.2 g.
 const tail = tailAssembly()
 const pin = hingePin()
 const cap = retainerCap()
 const jpin = seamPin()
 const [plug, drain, finD, finP, cPlate, cRing, cCube, cPins] = buildAll()
+
+const gOf = (m) => +((m.volume() / 1000) * RHO.resin).toFixed(1)
+const fixedStructG = gOf(tail.manifold) + gOf(pin.manifold) + gOf(cap.manifold) +
+  3 * gOf(jpin.manifold) + 2 * gOf(plug.manifold) + 0.3 +
+  gOf(finD.manifold) + 2 * gOf(finP.manifold) + 2.4 + 6
+const solveBallast = (podsG) => +(MASS.allUpG - (podsG + fixedStructG) - MASS.coatBudgetG).toFixed(1)
+
+let probe = buildPods({ ballastTargetG: 120 })
+const podsG = gOf(probe.p1.manifold) + gOf(probe.p2.manifold)
+const BALLAST_TARGET_G = solveBallast(podsG)
+for (const m of [probe.p1.manifold, probe.p2.manifold, probe.bare.p1, probe.bare.p2, probe.sealedSolid]) m.delete()
+probe = null
+const { p1, p2, bare, chambers, trayFill, sealedSolid } = buildPods({ ballastTargetG: BALLAST_TARGET_G })
 
 // G7 sees ASSEMBLY quantities (P4a: 1 fitted + 1 spare printed; P4 pin
 // fallback: 1 fitted; P6: 3 fitted of 8). Coupons validated separately.
@@ -89,10 +107,7 @@ const report = runAll(fishParts, {
     'p3-tail-assembly': { samples: 30000 },
     'p4-hinge-pin': { excludeRegions: [{ min: [-3.2, -3.2, 45], max: [3.2, 3.2, 49.5] }] }, // Ø1.5 cross-drill rim chords (spec'd feature)
     'p4a-retainer-cap': { minWallMm: 1.3 }, // Ø9 wall over Ø6.1 bore = 1.45 by design (J6)
-    'p5-ballast-plug': {
-      minWallMm: 0.8, // knurl teeth ~0.95 by design
-      excludeRegions: [{ min: [-11, -11, 12], max: [11, 11, 14] }] // male-thread 45° lead-in crest fade (tip chords → 0.3)
-    },
+    'p5-ballast-plug': { minWallMm: 0.8 }, // knurl teeth ~0.95 by design; the thread's tip-fade exclusion is DERIVED in smallparts meta
     'p6-drain-plug': { minWallMm: 1.3 }, // Ø6×1.5 flange annulus over the Ø3.9 body
     'p7-fin-dorsal': { minWallMm: 1.3, excludeRegions: [{ min: [48.4, -1, -0.6], max: [50.6, 1, 1.6] }] }, // sharp trailing-corner wedge
     'p7-fin-pectoral': { minWallMm: 1.3, excludeRegions: [{ min: [33.4, -1, -0.6], max: [35.6, 1, 1.6] }] }
@@ -176,19 +191,15 @@ const trim = {
 
 const couponReport = couponParts.map((part) => {
   const overrides = {
-    // M20 stub thread ridges + 2.25 wall panel. The exclusion box is the male
-    // thread's 45° lead-in crest fade at the stub top (LAYOUT8.stub [102,15],
-    // top z 13.38, fade depth 1.63) — a spec'd knife-edge crest taper, the
-    // SAME feature already excluded on P5. Without it the plate reads 0.218 mm
-    // at 100k samples; with it, 0.944 mm at every sample count (audit G).
-    'p8-coupon-plate': { minWallMm: 0.8, excludeRegions: [{ min: [91, 4, 11.65], max: [113, 26, 13.5] }] },
-    'p8-coupon-ring': {
-      minWallMm: 0.8, // through-threaded ring: mid-band ridge chords ~1.2
-      excludeRegions: [ // 45° crest-fade tips at both ends + mouth transition (ring sits at LAYOUT8.ring = [17, 50])
-        { min: [1, 34, -0.1], max: [33, 66, 2.35] },
-        { min: [1, 34, 5.6], max: [33, 66, 7.6] }
-      ]
-    },
+    // M20 stub thread ridges + 2.25 wall panel. The stub's 45° tip lead-in is a
+    // spec'd crest taper, excluded via a box DERIVED from the thread constants
+    // in smallparts meta — the old typed box went stale when the thread grew.
+    'p8-coupon-plate': { minWallMm: 0.8 },
+    // NOTE: no excludeRegions here on purpose. The ring declares its own,
+    // derived from the thread constants in smallparts meta. Typed boxes here
+    // were sized for the 7.5 mm thread and silently overrode the derived ones
+    // when it grew to 10 — the exact staleness this pass is removing.
+    'p8-coupon-ring': { minWallMm: 0.8 },
     'p8-coupon-pins': {},
     'p8-coupon-cube': { maxProbeMm: 25 } // 21.5 solid cube: rays must out-reach it or the sampler sees zero walls
   }[part.name] ?? {}

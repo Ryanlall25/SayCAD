@@ -1,6 +1,6 @@
 {
   "verdict": "GREEN",
-  "secs": 97.6,
+  "secs": 159.7,
   "mateProbes": {
     "j1": [
       {
@@ -36,18 +36,18 @@
     "ok": true
   },
   "massLedgerG": {
-    "struct": 185.8,
+    "struct": 188.8,
     "coat": 30,
-    "ballastDerived": 107.2,
-    "tabImplied": 120.1,
+    "ballastDerived": 104.2,
+    "tabImplied": 104.3,
     "allUp": 323,
     "target": 323,
     "ballastOk": true
   },
   "buoyancyLedger": {
-    "sealedVoidCm3": 408.4,
-    "ballastBedCm3": 59.6,
-    "postBallastAirCm3": 348.8,
+    "sealedVoidCm3": 407.2,
+    "ballastBedCm3": 57.9,
+    "postBallastAirCm3": 349.3,
     "specSealedAirLetterCm3": 382,
     "airNote": "the sealed VOID (419→411 after diaphragm) satisfies the §3 letter; post-ballast AIR is ~344 — the letter's purposes (flood ledger per chamber, submerged reserve) are gated explicitly here",
     "realBodyCm3": 538.7,
@@ -56,22 +56,22 @@
   },
   "chambersCm3": {
     "F1": 48.6,
-    "F2": 103.9,
-    "M1joint": 150.2,
+    "F2": 103.3,
+    "M1joint": 149.6,
     "M2": 105.7
   },
   "trayFill": {
-    "fillZ": -11.3,
-    "tabImpliedG": 120.1,
-    "targetG": 120,
-    "bedCentroidZ": -21.3,
+    "fillZ": -12.9,
+    "tabImpliedG": 104.3,
+    "targetG": 104.2,
+    "bedCentroidZ": -22.1,
     "bulkGCm3": 1.8
   },
   "trim": {
-    "lcgMm": -6.99,
+    "lcgMm": -7.01,
     "lcbMm": -4.86,
-    "gmLMm": 143,
-    "pitchDegEst": -0.85,
+    "gmLMm": 143.3,
+    "pitchDegEst": -0.86,
     "note": "heave-only solve: small pitch expected from the LCG/LCB offset — bias the pebble pour fore/aft at in-pool trim (the diaphragm separates the trays, so the split is controllable)"
   },
   "seamWallProof": {
@@ -227,8 +227,8 @@
   "G6real": {
     "ok": true,
     "draftFrac": 0.565,
-    "gmTMm": 4.777,
-    "minGZMm": 1.259
+    "gmTMm": 5.111,
+    "minGZMm": 1.345
   },
   "fish": {
     "ok": true,
@@ -241,14 +241,14 @@
           "name": "p1-front-hull-pod",
           "ok": true,
           "status": "NoError",
-          "volumeCm3": 57,
+          "volumeCm3": 57.61,
           "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p1-front-hull-pod.stl",
-          "triangles": 92814,
-          "bytes": 4640784,
+          "triangles": 130088,
+          "bytes": 6504484,
           "roundTrip": {
             "merged": true,
             "status": "NoError",
-            "volCm3": 57,
+            "volCm3": 57.61,
             "volMatchPct": 0.0001
           }
         },
@@ -257,12 +257,12 @@
           "name": "p1-front-hull-pod",
           "ok": true,
           "samples": 30000,
-          "wallSamples": 26337,
-          "grazing": 371,
-          "thickBeyondProbe": 528,
-          "excluded": 2764,
-          "minWallSampledMm": 2.116,
-          "p01Mm": 2.19,
+          "wallSamples": 26226,
+          "grazing": 354,
+          "thickBeyondProbe": 534,
+          "excluded": 2886,
+          "minWallSampledMm": 2.041,
+          "p01Mm": 2.191,
           "requiredMm": {
             "hull": 2,
             "boss": 3,
@@ -283,9 +283,9 @@
           },
           "drain": {
             "ok": true,
-            "trappedMm3": 8.1,
+            "trappedMm3": 13.8,
             "sealedAirMm3": 0,
-            "pooledMm3": 8.1,
+            "pooledMm3": 13.8,
             "maxTrappedMm3": 50,
             "poolTolMm": 1,
             "colPitchMm": 0.8,
@@ -317,7 +317,16 @@
                   -29.1
                 ],
                 "floorZ": 40,
-                "poolDepthMm": 1
+                "poolDepthMm": 1.2
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -1.7,
+                  -26.7
+                ],
+                "floorZ": 40,
+                "poolDepthMm": 1.1
               },
               {
                 "kind": "pooled",
@@ -333,15 +342,6 @@
                 "printXY": [
                   -0.9,
                   -29.1
-                ],
-                "floorZ": 39.9,
-                "poolDepthMm": 1.1
-              },
-              {
-                "kind": "pooled",
-                "printXY": [
-                  -0.1,
-                  -31.5
                 ],
                 "floorZ": 39.9,
                 "poolDepthMm": 1.3
@@ -381,14 +381,14 @@
           "name": "p2-rear-hull-pod",
           "ok": true,
           "status": "NoError",
-          "volumeCm3": 71.03,
+          "volumeCm3": 71.69,
           "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p2-rear-hull-pod.stl",
-          "triangles": 91280,
-          "bytes": 4564084,
+          "triangles": 128422,
+          "bytes": 6421184,
           "roundTrip": {
             "merged": true,
             "status": "NoError",
-            "volCm3": 71.03,
+            "volCm3": 71.69,
             "volMatchPct": 0
           }
         },
@@ -397,12 +397,12 @@
           "name": "p2-rear-hull-pod",
           "ok": true,
           "samples": 30000,
-          "wallSamples": 26730,
-          "grazing": 445,
-          "thickBeyondProbe": 882,
-          "excluded": 1943,
-          "minWallSampledMm": 1.989,
-          "p01Mm": 2.179,
+          "wallSamples": 26553,
+          "grazing": 461,
+          "thickBeyondProbe": 929,
+          "excluded": 2057,
+          "minWallSampledMm": 2.109,
+          "p01Mm": 2.18,
           "requiredMm": {
             "hull": 2,
             "boss": 3,
@@ -423,9 +423,9 @@
           },
           "drain": {
             "ok": true,
-            "trappedMm3": 4.5,
+            "trappedMm3": 9.2,
             "sealedAirMm3": 0,
-            "pooledMm3": 4.5,
+            "pooledMm3": 9.2,
             "maxTrappedMm3": 50,
             "poolTolMm": 1,
             "colPitchMm": 0.8,
@@ -444,10 +444,28 @@
               {
                 "kind": "pooled",
                 "printXY": [
+                  -1.7,
+                  -29.2
+                ],
+                "floorZ": 0.3,
+                "poolDepthMm": 1
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
                   -0.9,
                   -31.6
                 ],
                 "floorZ": 0,
+                "poolDepthMm": 1.2
+              },
+              {
+                "kind": "pooled",
+                "printXY": [
+                  -0.9,
+                  -29.2
+                ],
+                "floorZ": 0.1,
                 "poolDepthMm": 1.2
               },
               {
@@ -462,29 +480,11 @@
               {
                 "kind": "pooled",
                 "printXY": [
-                  0.7,
-                  -31.6
-                ],
-                "floorZ": -0.1,
-                "poolDepthMm": 1.3
-              },
-              {
-                "kind": "pooled",
-                "printXY": [
-                  1.5,
-                  -31.6
+                  -0.1,
+                  -29.2
                 ],
                 "floorZ": 0,
-                "poolDepthMm": 1.2
-              },
-              {
-                "kind": "pooled",
-                "printXY": [
-                  2.3,
-                  -31.6
-                ],
-                "floorZ": 0.1,
-                "poolDepthMm": 1.1
+                "poolDepthMm": 1.3
               }
             ]
           }
@@ -861,14 +861,14 @@
           "name": "p5-ballast-plug",
           "ok": true,
           "status": "NoError",
-          "volumeCm3": 5.74,
+          "volumeCm3": 6.43,
           "stlPath": "/tmp/claude-0/-home-user-smilehub-marketing-site/590c8a06-1fad-59b4-8544-f37cfc773bb3/scratchpad/fish-lab/parts/p5-ballast-plug.stl",
-          "triangles": 85276,
-          "bytes": 4263884,
+          "triangles": 125544,
+          "bytes": 6277284,
           "roundTrip": {
             "merged": true,
             "status": "NoError",
-            "volCm3": 5.74,
+            "volCm3": 6.43,
             "volMatchPct": 0
           }
         },
@@ -877,12 +877,12 @@
           "name": "p5-ballast-plug",
           "ok": true,
           "samples": 30000,
-          "wallSamples": 15943,
-          "grazing": 1169,
-          "thickBeyondProbe": 9200,
-          "excluded": 3688,
-          "minWallSampledMm": 0.944,
-          "p01Mm": 1.106,
+          "wallSamples": 15492,
+          "grazing": 1114,
+          "thickBeyondProbe": 9770,
+          "excluded": 3624,
+          "minWallSampledMm": 0.945,
+          "p01Mm": 1.03,
           "requiredMm": {
             "hull": 0.8,
             "boss": 3,
@@ -977,9 +977,9 @@
             30,
             30
           ],
-          "heightMm": 13.5,
+          "heightMm": 16,
           "standoffMm": 6,
-          "heightWithStandoffMm": 19.5,
+          "heightWithStandoffMm": 22,
           "plateUsable": [
             120,
             72,
@@ -1533,8 +1533,8 @@
         "BM_T": 6.89,
         "BM_L": 178.58,
         "KM_T": 30.726,
-        "KG": 26.067,
-        "GM_T": 4.659,
+        "KG": 25.733,
+        "GM_T": 4.993,
         "dTdmMmPerG": 0.0839,
         "cob": [
           0,
@@ -1542,50 +1542,50 @@
           -11.16
         ],
         "com": [
-          -6.99,
+          -7.01,
           0,
-          -8.93
+          -9.27
         ]
       },
       "gz": {
         "ok": true,
-        "gmT": 4.659,
-        "minGZMm": 1.231,
+        "gmT": 4.993,
+        "minGZMm": 1.317,
         "steps": [
           {
             "phiDeg": 0,
             "waterZ": 3.53,
-            "gzMm": 0
+            "gzMm": -0.001
           },
           {
             "phiDeg": 15,
             "waterZ": 3.48,
-            "gzMm": 1.231
+            "gzMm": 1.317
           },
           {
             "phiDeg": 30,
             "waterZ": 3.36,
-            "gzMm": 2.522
+            "gzMm": 2.689
           },
           {
             "phiDeg": 45,
             "waterZ": 3.17,
-            "gzMm": 3.942
+            "gzMm": 4.177
           },
           {
             "phiDeg": 60,
             "waterZ": 2.98,
-            "gzMm": 5.545
+            "gzMm": 5.834
           },
           {
             "phiDeg": 75,
             "waterZ": 2.83,
-            "gzMm": 7.296
+            "gzMm": 7.618
           },
           {
             "phiDeg": 90,
             "waterZ": 2.77,
-            "gzMm": 8.933
+            "gzMm": 9.267
           }
         ]
       },
@@ -1593,13 +1593,13 @@
         "declared": true,
         "chambersCm3": [
           48.6,
-          103.9,
-          150.2,
+          103.3,
+          149.6,
           105.7
         ],
-        "sumCm3": 408.4,
+        "sumCm3": 407.2,
         "requiredCm3": 382,
-        "maxSingleCm3": 150.2,
+        "maxSingleCm3": 149.6,
         "maxAllowedCm3": 181,
         "ok": true
       }
@@ -1607,22 +1607,22 @@
     "G7": {
       "gate": "G7",
       "ok": true,
-      "generatedAt": "2026-08-19T17:33:54.263Z",
+      "generatedAt": "2026-08-20T00:33:14.824Z",
       "rhoResinGCm3": 1.15,
       "rows": [
         {
           "part": "p1-front-hull-pod",
           "qty": 1,
-          "volCm3": 57,
-          "massEachG": 65.6,
-          "massTotalG": 65.6
+          "volCm3": 57.61,
+          "massEachG": 66.3,
+          "massTotalG": 66.3
         },
         {
           "part": "p2-rear-hull-pod",
           "qty": 1,
-          "volCm3": 71.03,
-          "massEachG": 81.7,
-          "massTotalG": 81.7
+          "volCm3": 71.69,
+          "massEachG": 82.4,
+          "massTotalG": 82.4
         },
         {
           "part": "p3-tail-assembly",
@@ -1655,9 +1655,9 @@
         {
           "part": "p5-ballast-plug",
           "qty": 2,
-          "volCm3": 5.74,
-          "massEachG": 6.6,
-          "massTotalG": 13.2
+          "volCm3": 6.43,
+          "massEachG": 7.4,
+          "massTotalG": 14.8
         },
         {
           "part": "p6-drain-plug",
@@ -1691,10 +1691,10 @@
           "massG": 6
         }
       ],
-      "ballastG": 107.2,
+      "ballastG": 104.2,
       "coatBudgetG": 30,
       "totals": {
-        "printedG": 177.4,
+        "printedG": 180.4,
         "extrasG": 8.4,
         "allUpG": 323
       },
@@ -1716,7 +1716,7 @@
       "G1": true,
       "G2": {
         "ok": true,
-        "minMm": 0.944
+        "minMm": 0.945
       },
       "G3": true,
       "G4": true
@@ -1727,7 +1727,7 @@
       "G1": true,
       "G2": {
         "ok": true,
-        "minMm": 1.083
+        "minMm": 4.2
       },
       "G3": true,
       "G4": true

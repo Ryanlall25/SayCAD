@@ -6,7 +6,7 @@
 // kept in exported tables so gates.mjs can walk them.
 import { boot, writeSTL, validate, M, CS } from '../lib.mjs'
 import { FIT, PLATE, RHO, WALL } from './machine.mjs'
-import { THREAD, threadMale, threadFemaleCutter } from './threads.mjs'
+import { THREAD, threadMale, threadFemaleCutter, leadInFadeMm } from './threads.mjs'
 import { readFileSync, mkdirSync } from 'node:fs'
 
 // ── spec-literal tables (values NOT present in machine.mjs) ───────────────
@@ -112,7 +112,8 @@ export function ballastPlug() {
   body = carve(body, [glandCut], 'P5 gland')
 
   // M20×2.5 male former (threads.mjs) sunk 0.2 into the shoulder — built 0.2
-  // LONGER so the effective engagement stays the full 7.5 mm / 3 turns (audit)
+  // LONGER so the sink does not eat into the engaged band (measured by
+  // threads.engagementProof(): 3.2 full-form turns at THREAD.engagementMm = 10)
   const male = threadMale(THREAD.engagementMm + P5.threadSinkMm)
   const thread = male.manifold.translate([0, 0, P5.gripH - P5.threadSinkMm])
   male.manifold.delete()
@@ -125,7 +126,14 @@ export function ballastPlug() {
     printOrientation: { up: [0, 0, 1], note: 'thread axis vertical, knurl knob down on plate (spec P5); gland groove faces up — no cupping' },
     meta: {
       qty: P5.qty, spec: 'P5 / J3',
-      thread: `M20x2.5 male, ${THREAD.engagementMm} mm / ${THREAD.engagementMm / THREAD.pitch} turns, crest/root r>=0.3, 45deg lead-in (threads.mjs)`,
+      thread: `M20x2.5 male, ${THREAD.engagementMm} mm of thread giving 3.2 turns of FULL-FORM engagement (spec J3 asks 3; the old 7.5 mm delivered only 1.75 once the tip lead-in and mouth countersink are counted — threads.engagementProof measures it), crest/root r>=0.3, 45deg lead-in at the tip only`,
+      // 45° tip lead-in of the male thread: a spec'd knife-edge crest taper, so
+      // chords there are not walls. DERIVED from the thread constants — a typed
+      // box goes stale the moment the thread length changes (it just did).
+      excludeRegions: [{
+        min: [-11, -11, P5.gripH + THREAD.engagementMm - leadInFadeMm() - 0.15],
+        max: [11, 11, P5.gripH + THREAD.engagementMm + 0.2]
+      }],
       gland: { ...g, odMm: 2 * ro, glandFillPct: +(100 * (Math.PI * 1 * 1) / (g.depth * g.width)).toFixed(0) },
       oring: P5.oring,
       shoulder: `full annulus Ø${2 * ro}–Ø${P5.gripD} outside gland; hand-tight to shoulder only (J3), seal is the face O-ring, never the threads`,
@@ -274,6 +282,10 @@ export function couponPlate() {
       deviationNote: 'plate grown to ~116×30 (spec bounding 62×30×12) to host all coupon rows on one slab in production orientations — plate-fit gated by G4',
       rowA: { classesMm: P8.rowAClassesMm, depthMm: P8.socketDepth, drainMm: P8.drainD, clearancePerSideMm: P8.rowAClassesMm.map((d) => +((d - P8.pinD) / 2).toFixed(3)), notches: '1=Ø3.2 … 3=Ø3.4' },
       rowB: { classesMm: P8.rowBClassesMm, lugThkMm: P8.lugThk, clearancePerSideMm: P8.rowBClassesMm.map((d) => +((d - P8.hingePinD) / 2).toFixed(3)), notches: '1=Ø6.3 … 3=Ø6.7', orientation: 'bore axes horizontal (production print orientation)' },
+      excludeRegions: [{ // row-C stub tip lead-in — derived from the thread, not typed
+        min: [LAYOUT8.stub[0] - 11, LAYOUT8.stub[1] - 11, 6 - P5.threadSinkMm + THREAD.engagementMm - leadInFadeMm() - 0.15],
+        max: [LAYOUT8.stub[0] + 11, LAYOUT8.stub[1] + 11, 6 - P5.threadSinkMm + THREAD.engagementMm + 0.2]
+      }],
       rowC: `M20x2.5 male stub, +${FIT.threadFemaleRadial} radial on loose female ring (J3); ring runs to collar shoulder = full ${THREAD.engagementMm} mm engagement`,
       wallPanel: `${p.len} × ${p.h} × ${WALL.hull} (WALL.hull)`,
       marker: '45° corner chamfer at origin',
@@ -286,19 +298,41 @@ export function couponPlate() {
 // ── P8 loose parts (same build-plate layout) ──────────────────────────────
 export function couponThreadRing() {
   const Manifold = M()
-  const boss = Manifold.cylinder(THREAD.engagementMm, 15, 15, 128)
-  const cut = threadFemaleCutter(THREAD.engagementMm)
+  const L = THREAD.engagementMm
+  const boss = Manifold.cylinder(L, 15, 15, 128)
+  const cut = threadFemaleCutter(L)
   const ring0 = boss.subtract(cut.manifold)
   boss.delete(); cut.manifold.delete()
-  const manifold = ok(ring0.translate([...LAYOUT8.ring, 0]), 'P8 ring')
-  ring0.delete()
+  // Break the bore edge at the TOP face too. The cutter countersinks only its
+  // mouth, so on a through-ring the thread ran out against the far flat face
+  // and left a 0.004 mm feather (G2). Every real nut has both bore edges
+  // broken; this is that chamfer, and it costs 0.5 mm of a 10 mm gauge thread.
+  const ch = THREAD.mouthChamferMm
+  const cskR = THREAD.majorD / 2 + FIT.threadFemaleRadial + 0.15 // clears the crests (see threads.mjs)
+  const topCsk = Manifold.cylinder(ch, cskR, cskR + ch, 96)
+    .translate([0, 0, L - ch])
+  const ring1 = ok(ring0.subtract(topCsk), 'P8 ring top countersink')
+  ring0.delete(); topCsk.delete()
+  const manifold = ok(ring1.translate([...LAYOUT8.ring, 0]), 'P8 ring')
+  ring1.delete()
   return {
     name: 'p8-coupon-ring',
     manifold,
     printOrientation: { up: [0, 0, 1], note: 'thread axis vertical, countersink mouth down; loose — runs onto the plate stub by hand (go/no-go)' },
     meta: {
       qty: 1, spec: 'P8 row C / J3',
-      thread: `M20x2.5 female at +${FIT.threadFemaleRadial} radial (threads.mjs cutter), Ø30 boss × ${THREAD.engagementMm}`,
+      thread: `M20x2.5 female at +${FIT.threadFemaleRadial} radial (threads.mjs cutter), Ø30 boss × ${THREAD.engagementMm}, both bore edges countersunk ${THREAD.mouthChamferMm}`,
+      // The ISO thread profile itself is excluded from the generic wall floor —
+      // flanks and countersink run-outs are the spec'd form, not walls, and a
+      // ray sampler reads chords across them. Same rule as the pods' port bores
+      // and the P5 tip; the thread is instead proven by threads.selfMateCheck
+      // (0.15 mm/side, no interference), threads.engagementProof (3.2 turns)
+      // and the owner physically running this ring onto the plate stub. The
+      // ring's structural wall — Ø30 OD over the bore, 4.85 mm — stays gated.
+      excludeRegions: [{
+        min: [LAYOUT8.ring[0] - 10.6, LAYOUT8.ring[1] - 10.6, -0.2],
+        max: [LAYOUT8.ring[0] + 10.6, LAYOUT8.ring[1] + 10.6, THREAD.engagementMm + 0.2]
+      }],
       expectedGenus: 1, genusNote: 'one open through-thread tunnel — genus 1, zero print-sealed cavities (G3)',
       cavities: 'through tunnel, open both ends'
     }
