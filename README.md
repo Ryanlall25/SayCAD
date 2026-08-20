@@ -85,6 +85,6 @@ production dental design suite — which is why dentistry is the first training
 domain: the geometry, the tolerances, and the test discipline come from real
 manufacturing work, not a demo.
 
-© 2026 Ryan Lall. Released under the [MIT License](LICENSE) — use it, change
+© 2026 SmileCad. Released under the [MIT License](LICENSE) — use it, change
 it, build on it commercially; just keep the copyright and licence notice with
 it, and understand it comes with no warranty. Tests: `npm test` (64 passing).
