@@ -1,6 +1,8 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { CrownCommand, CrownLayer, CrownView, NumericParam } from '../speak/crownParser'
 import type { MaterialId } from '../crown/materials'
+import crownTools from './crownTools.json'
+import prompts from './prompts.json'
 
 /**
  * Browser side of the Claude layer. The server (server/index.mjs) owns the
@@ -195,4 +197,153 @@ export async function photoToBase64(file: File, maxSide = 1600): Promise<{ media
   canvas.getContext('2d')!.drawImage(bmp, 0, 0, canvas.width, canvas.height)
   const url = canvas.toDataURL('image/jpeg', 0.85)
   return { mediaType: 'image/jpeg', data: url.slice(url.indexOf(',') + 1) }
+}
+
+/* ── claude.ai-hosted backend ─────────────────────────────────────────────
+ * When the app is published as a claude.ai artifact there is no server: the
+ * page asks Claude through the artifact runtime's `sample` capability, on the
+ * viewer's own Claude account, with the same prompts and the same tools
+ * (executed here, in the page). Contract: runtime 0.2.90 sample.d.ts.
+ */
+
+interface SampleToolDef {
+  name: string
+  description: string
+  inputSchema?: Record<string, unknown>
+  execute(input: Record<string, unknown>, ctx: { signal: AbortSignal }): unknown
+}
+interface SampleOptions {
+  tools?: SampleToolDef[]
+  images?: Blob[]
+  modelTier?: 'quick' | 'default' | 'complex'
+  cache?: boolean
+  onText?: (u: { text: string; delta: string }) => void
+}
+type SampleTurn = { role: 'user' | 'assistant'; content: string }
+export interface SampleFn {
+  (input: string | SampleTurn[], options?: SampleOptions): Promise<{ text: string; truncated: boolean }>
+  json<T>(input: string | SampleTurn[], options?: SampleOptions): Promise<T>
+  limits(): Promise<{ maxPromptBytes: number; images?: { maxCount: number }; tools?: { maxCount: number } }>
+}
+export interface DownloadsApi {
+  save(req: { filename: string; data: Blob | Uint8Array }): Promise<{ status: string }>
+}
+
+type ClaudeRuntime = { use?: (name: string) => Promise<unknown> }
+
+async function useCapability<T>(name: string): Promise<T | null> {
+  const c = (window as unknown as { claude?: ClaudeRuntime }).claude
+  if (!c?.use) return null
+  try {
+    return ((await c.use(name)) as T | null) ?? null
+  } catch {
+    return null
+  }
+}
+
+export const artifactSample = (): Promise<SampleFn | null> => useCapability<SampleFn>('sample')
+export const artifactDownloads = (): Promise<DownloadsApi | null> => useCapability<DownloadsApi>('downloads')
+
+/** Viewer-facing copy for a runtime `sample` rejection. */
+export function sampleErrorText(e: unknown): string {
+  const code = (e as { code?: string })?.code
+  switch (code) {
+    case 'not_granted':
+    case 'sampling_disabled':
+    case 'not_declared':
+      return 'Claude isn’t allowed for this page — check the artifact’s permissions.'
+    case 'rate_limited':
+      return 'Claude is busy or your usage limit was reached — try again in a bit.'
+    case 'refused':
+      return 'Claude declined that request.'
+    case 'session_expired':
+      return 'Sign in to Claude again.'
+    case 'image_rejected':
+      return 'That photo couldn’t be read — try another.'
+    case 'cancelled':
+      return 'Stopped.'
+    default:
+      return (e as { message?: string })?.message ?? 'The AI request failed.'
+  }
+}
+
+export async function assistViaSample(
+  sample: SampleFn,
+  chat: SampleTurn[],
+  userText: string,
+  stateSummary: string,
+  execute: (cmd: CrownCommand | { kind: 'getChecks' }) => Promise<string>
+): Promise<AssistTurn> {
+  const actions: string[] = []
+  const limits = await sample.limits().catch(() => null)
+  const request = `Current design state:\n${stateSummary}\n\nTechnician: ${userText}`
+  const history = chat.slice(-12)
+  if (limits?.tools) {
+    const defs = (crownTools as Array<{ name: string; description: string; input_schema: Record<string, unknown> }>).slice(0, limits.tools.maxCount)
+    const tools: SampleToolDef[] = defs.map((t) => ({
+      name: t.name,
+      description: t.description.slice(0, 1000),
+      inputSchema: t.input_schema,
+      execute: async (input) => {
+        const cmd = toolToCommand(t.name, input ?? {})
+        if (!cmd) throw new Error('Invalid tool input.')
+        actions.push(`${t.name} ${JSON.stringify(input)}`)
+        return execute(cmd)
+      }
+    }))
+    const { text } = await sample([{ role: 'user', content: prompts.assist }, ...history, { role: 'user', content: request }], { tools, modelTier: 'quick', cache: false })
+    chat.push({ role: 'user', content: userText }, { role: 'assistant', content: text })
+    return { reply: text.split(/\n\s*\n/).pop()?.trim() || 'Done.', actions }
+  }
+  // No page tools in this view: ask for a plan of tool calls as JSON and run it here.
+  const plan = await sample.json<{ calls?: Array<{ tool: string; input: Record<string, unknown> }>; reply?: string }>(
+    [
+      { role: 'user', content: `${prompts.assist}\n\nAvailable tools (JSON Schemas):\n${JSON.stringify(crownTools.map((t) => ({ name: t.name, description: t.description, input: t.input_schema })))}` },
+      ...history,
+      { role: 'user', content: `${request}\n\nReply with only JSON: {"calls": [{"tool": "<name>", "input": {…}}], "reply": "<one short sentence for the technician>"}` }
+    ],
+    { modelTier: 'quick', cache: false }
+  )
+  for (const c of plan.calls ?? []) {
+    const cmd = toolToCommand(String(c.tool), c.input ?? {})
+    if (!cmd) continue
+    actions.push(`${c.tool} ${JSON.stringify(c.input)}`)
+    await execute(cmd)
+  }
+  const reply = typeof plan.reply === 'string' && plan.reply ? plan.reply : 'Done.'
+  chat.push({ role: 'user', content: userText }, { role: 'assistant', content: reply })
+  return { reply, actions }
+}
+
+function base64ToBlob(b64: string, type: string): Blob {
+  const bin = atob(b64)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new Blob([bytes], { type })
+}
+
+export async function reviewViaSample(
+  sample: SampleFn,
+  payload: Parameters<typeof aiReview>[0]
+): Promise<string> {
+  const limits = await sample.limits().catch(() => null)
+  const images = limits?.images ? payload.images.slice(0, limits.images.maxCount).map((i) => base64ToBlob(i.data, i.mediaType)) : undefined
+  const prompt = `${prompts.review}\n\n${images ? `The ${images.length} images are rendered views of the crown on the model (buccal, occlusal, lingual).` : 'No images are available in this view; review from the numbers only.'}\n\nTooth #${payload.tooth}; material ${payload.material}.\nQuality-check report:\n${JSON.stringify(payload.report, null, 1).slice(0, 20000)}\nDesign measures:\n${JSON.stringify(payload.measures).slice(0, 4000)}`
+  const { text } = await sample(prompt, { images, modelTier: 'default', cache: false })
+  return text
+}
+
+export async function rxViaSample(sample: SampleFn, photo: Blob): Promise<RxFields> {
+  const fields = await sample.json<Partial<RxFields>>(
+    `${prompts.rx}\n\nThe image is a photo of a dental lab prescription. Reply with only JSON of this shape: {"teeth": [19], "restoration": "full crown" | null, "material": "zirconia-hs" | "zirconia-ht" | "lithium-disilicate" | "pmma-temp" | "cast-wax" | null, "shade": "A2" | null, "notes": string | null}`,
+    { images: [photo], modelTier: 'default', cache: false }
+  )
+  const materials = ['zirconia-hs', 'zirconia-ht', 'lithium-disilicate', 'pmma-temp', 'cast-wax']
+  return {
+    teeth: Array.isArray(fields.teeth) ? fields.teeth.map(Number).filter((n) => Number.isInteger(n) && n >= 1 && n <= 32) : [],
+    restoration: typeof fields.restoration === 'string' ? fields.restoration : null,
+    material: typeof fields.material === 'string' && materials.includes(fields.material) ? (fields.material as MaterialId) : null,
+    shade: typeof fields.shade === 'string' ? fields.shade : null,
+    notes: typeof fields.notes === 'string' ? fields.notes : null
+  }
 }

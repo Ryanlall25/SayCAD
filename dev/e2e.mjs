@@ -83,13 +83,78 @@ await page.waitForTimeout(300)
 console.log('sculpt toolbar:', await page.locator('.st-sculpt').count() ? 'shown' : 'not shown (tap missed the crown)')
 
 await page.getByRole('button', { name: /Export/ }).click()
-const dl = page.waitForEvent('download')
+const dl = page.waitForEvent('download', { predicate: (d) => d.suggestedFilename().endsWith('.stl') })
 await page.getByRole('button', { name: 'Download STL' }).click()
 const file = await dl
 const path = `${out}/${file.suggestedFilename()}`
 await file.saveAs(path)
 console.log('exported', file.suggestedFilename())
 await page.screenshot({ path: `${out}/phone-4-export.png` })
+
+// ── claude.ai-hosted mode: the artifact build with a stand-in runtime ──────
+// The fake `sample` behaves like the platform: it calls the page's own tool
+// functions and returns text; `downloads.save` captures what would be saved.
+const { createServer } = await import('node:http')
+const { readFile } = await import('node:fs/promises')
+const { join, extname } = await import('node:path')
+const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' }
+const art = createServer(async (req, res) => {
+  const path = join('dist-artifact', decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/\/$/, '/index.html'))
+  try {
+    const body = await readFile(path)
+    res.writeHead(200, { 'content-type': types[extname(path)] ?? 'application/octet-stream' })
+    res.end(body)
+  } catch {
+    res.writeHead(404)
+    res.end()
+  }
+}).listen(8798)
+const page2 = await ctx.newPage()
+page2.on('pageerror', (e) => console.log('pageerror(artifact):', e.message))
+await page2.addInitScript(() => {
+  const calls = []
+  window.__sampleCalls = calls
+  const sample = async (input, opts = {}) => {
+    const turns = typeof input === 'string' ? [{ role: 'user', content: input }] : input
+    const last = turns[turns.length - 1].content
+    calls.push({ tools: (opts.tools ?? []).map((t) => t.name), images: opts.images?.length ?? 0, last: last.slice(-120) })
+    if (opts.tools && /distal/i.test(last)) {
+      const tool = opts.tools.find((t) => t.name === 'adjust_param')
+      const out = await tool.execute({ param: 'contactDistalMm', mode: 'change', value: -0.02 }, { signal: new AbortController().signal })
+      return { text: `Tightened the distal contact.\n\nDone — ${String(out).slice(0, 40)}`, truncated: false, modelTierApplied: 'quick' }
+    }
+    return { text: 'Verdict: ready to mill. No issues found.', truncated: false, modelTierApplied: 'default' }
+  }
+  sample.json = async () => ({ teeth: [19], material: 'lithium-disilicate', restoration: 'crown', shade: 'A2', notes: null })
+  sample.limits = async () => ({ maxPromptBytes: 262144, images: { maxCount: 4, maxInputBytes: 2e7, mediaTypes: ['image/png', 'image/jpeg'] }, tools: { maxCount: 16 } })
+  const downloads = { save: async ({ filename, data }) => { const buf = new Uint8Array(await data.arrayBuffer()); window.__saved = { filename, bytes: Array.from(buf) }; return { status: 'saved' } } }
+  window.claude = { use: async (name) => (name === 'sample' ? sample : name === 'downloads' ? downloads : null) }
+})
+await page2.goto('http://localhost:8798/')
+await page2.getByRole('button', { name: 'Try the demo' }).click()
+await page2.waitForSelector('.st-chip.good, .st-chip.meh, .st-chip.bad', { timeout: 120000 })
+await page2.waitForFunction(() => !document.querySelector('.st-busy'), null, { timeout: 120000 })
+console.log('artifact: AI chip =', await page2.locator('.st-chip.ai').innerText().catch(() => 'missing'))
+await page2.getByLabel('Command').fill('make the distal a touch tighter please')
+await page2.getByLabel('Command').press('Enter')
+await page2.waitForFunction(() => document.querySelector('.st-status')?.textContent?.startsWith('AI:'), null, { timeout: 60000 })
+console.log('artifact ai:', await page2.locator('.st-status').innerText())
+await page2.getByRole('button', { name: /Check/ }).click()
+await page2.getByRole('button', { name: 'AI review' }).click()
+await page2.waitForSelector('.st-review', { timeout: 60000 })
+console.log('artifact review:', await page2.locator('.st-review').innerText())
+const calls = await page2.evaluate(() => window.__sampleCalls)
+console.log('sample calls:', JSON.stringify(calls.map((c) => ({ tools: c.tools.length, images: c.images }))))
+if (calls[1]?.images !== 3) fail('review should send three renders')
+await page2.getByRole('button', { name: /Export/ }).click()
+await page2.getByRole('button', { name: 'Download STL' }).click()
+await page2.waitForFunction(() => window.__saved, null, { timeout: 30000 })
+const saved = await page2.evaluate(() => window.__saved)
+const { writeFileSync } = await import('node:fs')
+writeFileSync(`${out}/${saved.filename}`, Buffer.from(saved.bytes))
+console.log('artifact export:', saved.filename, saved.bytes.length, 'bytes')
+art.close()
+
 await browser.close()
 server.kill()
 console.log('E2E OK')

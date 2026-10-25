@@ -14,7 +14,11 @@ import { extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Anthropic from '@anthropic-ai/sdk'
 import tools from '../src/ai/crownTools.json' with { type: 'json' }
-import { ASSIST_SYSTEM, REVIEW_SYSTEM, RX_SYSTEM } from './prompts.mjs'
+import prompts from '../src/ai/prompts.json' with { type: 'json' }
+
+// System prompts are shared with the in-browser (claude.ai artifact) backend.
+// Static text only — no timestamps or per-request data — so they cache.
+const { assist: ASSIST_SYSTEM, review: REVIEW_SYSTEM, rx: RX_SYSTEM } = prompts
 
 const here = fileURLToPath(new URL('.', import.meta.url))
 const DIST = resolve(here, '..', 'dist')

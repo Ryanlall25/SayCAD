@@ -3,13 +3,19 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Speak it, see it, print it — a conversational CAD that turns plain language into 3D prototypes. Training focus: dental.",
+  "description": "Speak it, see it, print it — a conversational CAD. Crown Studio: AI-assisted crown design on a phone.",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:artifact": "tsc --noEmit && SAYCAD_BASE=./ vite build --outDir dist-artifact",
     "preview": "vite preview",
-    "test": "vitest run"
+    "server": "node server/index.mjs",
+    "start": "npm run build && node server/index.mjs",
+    "test": "vitest run",
+    "e2e": "npm run build && npm run build:artifact && node dev/e2e.mjs",
+    "train": "vite-node scripts/train.ts --",
+    "synthetic-cases": "vite-node scripts/synthetic-cases.ts --"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

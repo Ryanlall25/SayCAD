@@ -22,6 +22,6 @@ createRoot(document.getElementById('root')!).render(
   </StrictMode>
 )
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+if ('serviceWorker' in navigator && import.meta.env.PROD && window.top === window && location.protocol === 'https:') {
   window.addEventListener('load', () => void navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => undefined))
 }

@@ -23,7 +23,24 @@ import { toothClassOf } from '../crown/anatomy'
 import { parseGeometry, exportSTL } from '../core/meshConvert'
 import { CROWN_HELP, parseCrown, type CrownCommand, type NumericParam } from '../speak/crownParser'
 import { createDictation } from '../speak/voice'
-import { accessCode, aiReview, aiStatus, assist, photoToBase64, readRx, setAccessCode, type AiStatus } from '../ai/client'
+import {
+  accessCode,
+  aiReview,
+  aiStatus,
+  artifactDownloads,
+  artifactSample,
+  assist,
+  assistViaSample,
+  photoToBase64,
+  readRx,
+  reviewViaSample,
+  rxViaSample,
+  sampleErrorText,
+  setAccessCode,
+  type DownloadsApi,
+  type SampleFn
+} from '../ai/client'
+import { zip } from '../core/zip'
 import './studio.css'
 
 type Step = 'case' | 'margin' | 'design' | 'check' | 'export'
@@ -112,7 +129,12 @@ export default function CrownStudio(): React.JSX.Element {
   const [listening, setListening] = useState(false)
   const [interim, setInterim] = useState('')
   const [helpOpen, setHelpOpen] = useState(false)
-  const [ai, setAi] = useState<AiStatus>({ ai: false, needsCode: false })
+  // AI comes from the SayCAD server (API key on the server) or, when the app
+  // is hosted on claude.ai, from the artifact runtime on the viewer's account.
+  const [ai, setAi] = useState<{ ai: boolean; mode: 'server' | 'artifact' | 'off'; needsCode: boolean; model?: string; images: boolean }>({ ai: false, mode: 'off', needsCode: false, images: false })
+  const sampleRef = useRef<SampleFn | null>(null)
+  const downloadsRef = useRef<DownloadsApi | null>(null)
+  const sampleChat = useRef<Array<{ role: 'user' | 'assistant'; content: string }>>([])
   const [code, setCode] = useState(accessCode())
   const [review, setReview] = useState<string | null>(null)
   const [rxNote, setRxNote] = useState<string | null>(null)
@@ -142,7 +164,17 @@ export default function CrownStudio(): React.JSX.Element {
     const v = new StudioViewport(mount)
     viewRef.current = v
     engineRef.current = new CrownEngine()
-    void aiStatus().then(setAi)
+    void (async () => {
+      const st = await aiStatus()
+      if (st.ai) return setAi({ ai: true, mode: 'server', needsCode: st.needsCode, model: st.model, images: true })
+      const [sample, downloads] = await Promise.all([artifactSample(), artifactDownloads()])
+      downloadsRef.current = downloads
+      if (sample) {
+        sampleRef.current = sample
+        const lim = await sample.limits().catch(() => null)
+        setAi({ ai: true, mode: 'artifact', needsCode: false, model: 'Claude (your account)', images: Boolean(lim?.images) })
+      } else setAi((a) => ({ ...a, needsCode: st.needsCode }))
+    })()
     return () => {
       v.dispose()
       engineRef.current?.dispose()
@@ -510,10 +542,13 @@ export default function CrownStudio(): React.JSX.Element {
     }
     setBusy('Thinking…')
     try {
-      const r = await assist(aiHistory.current, t, stateSummary(), execute)
+      const r =
+        ai.mode === 'artifact' && sampleRef.current
+          ? await assistViaSample(sampleRef.current, sampleChat.current, t, stateSummary(), execute)
+          : await assist(aiHistory.current, t, stateSummary(), execute)
       say('ai', r.reply)
     } catch (e) {
-      say('app', e instanceof Error ? e.message : String(e))
+      say('app', ai.mode === 'artifact' ? sampleErrorText(e) : e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(null)
     }
@@ -529,23 +564,23 @@ export default function CrownStudio(): React.JSX.Element {
       return
     }
     if (!ai.ai) {
-      setReview('AI review needs the SayCAD server with an Anthropic API key (see README).')
+      setReview('AI review needs the SayCAD server with an Anthropic API key, or the app opened on claude.ai (see README).')
       return
     }
     setBusy('AI reviewing…')
     setStep('check')
     try {
       const images = (['buccal', 'occlusal', 'lingual'] as const).map((view) => ({ mediaType: 'image/png' as const, data: v.snapshot(view) }))
-      const text = await aiReview({
+      const payload = {
         tooth: s.tooth,
         material: MATERIALS[s.params.material].label,
         report: s.design.results,
         measures: { ...s.design.measures, steps: undefined, summary: s.design.summary },
         images
-      })
-      setReview(text)
+      }
+      setReview(ai.mode === 'artifact' && sampleRef.current ? await reviewViaSample(sampleRef.current, payload) : await aiReview(payload))
     } catch (e) {
-      setReview(e instanceof Error ? e.message : String(e))
+      setReview(ai.mode === 'artifact' ? sampleErrorText(e) : e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(null)
     }
@@ -555,7 +590,7 @@ export default function CrownStudio(): React.JSX.Element {
     if (!f) return
     setBusy('Reading the Rx…')
     try {
-      const fields = await readRx(await photoToBase64(f))
+      const fields = ai.mode === 'artifact' && sampleRef.current ? await rxViaSample(sampleRef.current, f) : await readRx(await photoToBase64(f))
       const t = fields.teeth.find((n) => n >= 1 && n <= 32)
       if (t) await execute({ kind: 'setTooth', tooth: t })
       if (fields.material && MATERIALS[fields.material]) setParams((p) => ({ ...p, material: fields.material as MaterialId, cementGapMm: undefined }))
@@ -571,7 +606,7 @@ export default function CrownStudio(): React.JSX.Element {
           .join(' · ') || 'Nothing legible found on the Rx.'
       )
     } catch (e) {
-      setRxNote(e instanceof Error ? e.message : String(e))
+      setRxNote(ai.mode === 'artifact' ? sampleErrorText(e) : e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(null)
     }
@@ -658,6 +693,22 @@ export default function CrownStudio(): React.JSX.Element {
     if (!g) return
     const blob = exportSTL(g)
     const name = `${baseName()}.stl`
+    // claude.ai-hosted: downloads go through the runtime, which accepts .zip
+    // but not .stl — bundle the STL with its design record.
+    if (downloadsRef.current) {
+      const archive = zip([
+        { name, data: new Uint8Array(await blob.arrayBuffer()) },
+        { name: `${baseName()}.design.json`, data: new TextEncoder().encode(designRecord()) }
+      ])
+      try {
+        await downloadsRef.current.save({ filename: `${baseName()}.zip`, data: new Blob([archive], { type: 'application/zip' }) })
+        setStatus(`Saved ${baseName()}.zip (STL + design record).`)
+      } catch (e) {
+        const code = (e as { code?: string }).code
+        setStatus(code === 'declined' ? 'Download cancelled.' : `Download unavailable here (${code ?? 'error'}).`)
+      }
+      return
+    }
     if (share && navigator.canShare) {
       const file = new File([blob], name, { type: 'model/stl' })
       if (navigator.canShare({ files: [file] })) {
@@ -704,7 +755,7 @@ export default function CrownStudio(): React.JSX.Element {
             {counts.fail ? `${counts.fail} fail` : counts.warn ? `${counts.warn} to check` : 'QC ✓'}
           </button>
         )}
-        <span className={`st-chip ${ai.ai ? 'ai' : 'off'}`} title={ai.ai ? `AI: ${ai.model ?? 'on'}` : 'AI server not connected'}>AI {ai.ai ? 'on' : 'off'}</span>
+        <span className={`st-chip ${ai.ai ? 'ai' : 'off'}`} title={ai.ai ? `AI: ${ai.model ?? 'on'}` : 'No AI connected (server or claude.ai)'}>AI {ai.ai ? 'on' : 'off'}</span>
         <button className="st-icon" onClick={() => setHelpOpen((o) => !o)} aria-label="Help">?</button>
       </header>
 
@@ -796,7 +847,7 @@ export default function CrownStudio(): React.JSX.Element {
                 <div className="st-row">
                   <button className="st-primary" onClick={() => fileRef.current?.click()}>Add scans</button>
                   <button className="st-secondary" onClick={() => void loadDemo()}>Demo case</button>
-                  <button className="st-secondary" onClick={() => rxRef.current?.click()} disabled={!ai.ai} title={ai.ai ? 'Photo of the Rx' : 'Needs the AI server'}>Read Rx photo</button>
+                  <button className="st-secondary" onClick={() => rxRef.current?.click()} disabled={!ai.ai || !ai.images} title={ai.ai && ai.images ? 'Photo of the Rx' : 'Needs AI with image access'}>Read Rx photo</button>
                 </div>
                 {rxNote && <p className="st-note">{rxNote}</p>}
                 {files.length > 0 && (
@@ -822,7 +873,9 @@ export default function CrownStudio(): React.JSX.Element {
                     <input value={code} onChange={(e) => { setCode(e.target.value); setAccessCode(e.target.value) }} placeholder="from your lab admin" />
                   </label>
                 )}
-                <p className="st-fine">AI features (free-form requests, Rx photos, AI review) send the design data, renders and photos to Anthropic’s API. Keep patient identifiers out of photos unless your lab has a BAA covering it.</p>
+                <p className="st-fine">
+                  AI features (free-form requests, Rx photos, AI review) send the design data, renders and photos to Claude{ai.mode === 'artifact' ? ' on your Claude account' : ' through Anthropic’s API'}. Keep patient identifiers out of photos unless your lab has a BAA covering it. Scans never leave the device — the design engine runs on it.
+                </p>
               </div>
             )}
 
@@ -942,9 +995,9 @@ export default function CrownStudio(): React.JSX.Element {
                     </label>
                     <div className="st-row">
                       <button className="st-primary" disabled={!d.exportable && override.trim().length < 5} onClick={() => void exportCrown(false)}>Download STL</button>
-                      <button className="st-secondary" disabled={!d.exportable && override.trim().length < 5} onClick={() => void exportCrown(true)}>Share…</button>
+                      {!downloadsRef.current && <button className="st-secondary" disabled={!d.exportable && override.trim().length < 5} onClick={() => void exportCrown(true)}>Share…</button>}
                     </div>
-                    <p className="st-fine">Exports a closed, single-solid STL (watertight-checked) plus a .design.json with the margin, parameters and check results, so the design can be audited or reproduced.</p>
+                    <p className="st-fine">Exports a closed, single-solid STL (watertight-checked) plus a .design.json with the margin, parameters and check results, so the design can be audited or reproduced{downloadsRef.current ? ' — bundled as one .zip here' : ''}.</p>
                   </>
                 )}
               </div>

@@ -9,12 +9,26 @@ import type { DesignData, EngineRequest, MeshData } from './protocol'
  */
 export class CrownEngine {
   private worker: Worker | null = null
+  private workerFailed = false
+  /** Last scans sent, so an in-thread fallback can be re-primed. */
+  private lastLoad: EngineRequest | null = null
   private seq = 0
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
 
   constructor() {
     try {
       this.worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+      // A worker that can't load (blocked by a host's CSP, old browser) fails
+      // asynchronously: drop it and run the engine on this thread instead.
+      this.worker.onerror = (ev) => {
+        ev.preventDefault?.()
+        this.worker?.terminate()
+        this.worker = null
+        this.workerFailed = true
+        const stranded = [...this.pending.values()]
+        this.pending.clear()
+        for (const p of stranded) p.reject(new Error('engine restarted — please repeat that step'))
+      }
       this.worker.onmessage = (e: MessageEvent<{ id: number; ok: boolean; result?: unknown; error?: string }>) => {
         const p = this.pending.get(e.data.id)
         if (!p) return
@@ -30,6 +44,10 @@ export class CrownEngine {
   private async call<T>(req: EngineRequest, transfer: Transferable[] = []): Promise<T> {
     if (!this.worker) {
       const { handleEngineRequest } = await import('./engineCore')
+      if (this.workerFailed && this.lastLoad && req.type !== 'load') {
+        handleEngineRequest(this.lastLoad)
+        this.workerFailed = false
+      }
       return handleEngineRequest(req).result as T
     }
     const id = ++this.seq
@@ -50,6 +68,8 @@ export class CrownEngine {
       transfer.push(a.positions.buffer)
       if (a.indices) transfer.push(a.indices.buffer)
     }
+    // Keep untransferred copies for a possible in-thread fallback.
+    this.lastLoad = { type: 'load', toothNumber, prep: cp(prep), antagonist: antagonist ? cp(antagonist) : null }
     return this.call({ type: 'load', toothNumber, prep: p, antagonist: a }, transfer)
   }
 
