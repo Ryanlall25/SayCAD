@@ -1,0 +1,249 @@
+[
+  {
+    "name": "set_tooth",
+    "description": "Select which tooth is being restored (Universal numbering 1-32). Only when the user names a tooth.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "tooth": {
+          "type": "integer",
+          "description": "Universal tooth number, 1-32."
+        }
+      },
+      "required": [
+        "tooth"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "run_auto_design",
+    "description": "Run the full automatic design (margin, crown, contacts, occlusion, thickness, checks). Needs scans loaded and the prep tapped or a margin already found.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "adjust_param",
+    "description": "Change one numeric design parameter, then the crown is regenerated and re-checked. mode 'change' adds value to the current setting, 'set' replaces it. Parameters (mm unless noted): contactMesialMm / contactDistalMm = target signed distance to the neighbour at the contact (negative = tighter/heavier contact, typical -0.05..0.02); occlusalClearanceMm = minimum distance to the opposing teeth (larger = lower crown, typical 0..0.2); cuspScale = cusp height multiplier (unitless, 0.6..1.4); grooveScale = groove depth multiplier (unitless, 0..2); buccalBulgeMm / lingualBulgeMm = extra contour on that side (-0.4..0.6); heightOffsetMm = raise (+) or lower (-) the occlusal table; rotationDeg = rotate anatomy about the insertion axis (degrees, + toward mesial); mdShiftMm (+ mesial) / blShiftMm (+ buccal) = shift the anatomy; cementGapMm = cement space (0.02..0.12); axisTiltMesialDeg / axisTiltBuccalDeg = lean the path of insertion toward mesial/buccal (degrees, -15..15; changes undercut blockout).",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "param": {
+          "type": "string",
+          "enum": [
+            "contactMesialMm",
+            "contactDistalMm",
+            "occlusalClearanceMm",
+            "cuspScale",
+            "grooveScale",
+            "buccalBulgeMm",
+            "lingualBulgeMm",
+            "heightOffsetMm",
+            "rotationDeg",
+            "mdShiftMm",
+            "blShiftMm",
+            "cementGapMm",
+            "axisTiltMesialDeg",
+            "axisTiltBuccalDeg"
+          ]
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "set",
+            "change"
+          ]
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "param",
+        "mode",
+        "value"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "set_material",
+    "description": "Set the restoration material. This sets minimum thicknesses and the cement gap from the lab's material presets.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "material": {
+          "type": "string",
+          "enum": [
+            "zirconia-hs",
+            "zirconia-ht",
+            "lithium-disilicate",
+            "pmma-temp",
+            "cast-wax"
+          ]
+        }
+      },
+      "required": [
+        "material"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "set_occlusal_contacts",
+    "description": "Whether the design raises cusp tips into contact with the opposing teeth (true, normal) or leaves the crown out of occlusion (false).",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "on"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "sculpt",
+    "description": "Add (+) or remove (-) material at a named region along the surface normal with a smooth falloff. Cusp names depend on the tooth (molars: mesiobuccal, distobuccal, distal (lower only), mesiolingual, distolingual; premolars: buccal, lingual; canine: cusp tip; incisors: incisal edge). Contacts, occlusion and minimum thickness are re-enforced afterwards, so to change contact tightness or occlusal height prefer adjust_param.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "region": {
+          "type": "string",
+          "enum": [
+            "mesial-contact",
+            "distal-contact",
+            "buccal-wall",
+            "lingual-wall",
+            "mesial-marginal-ridge",
+            "distal-marginal-ridge",
+            "central-fossa",
+            "occlusal-table",
+            "mesiobuccal",
+            "distobuccal",
+            "distal",
+            "mesiolingual",
+            "distolingual",
+            "buccal",
+            "lingual",
+            "cusp tip",
+            "incisal edge"
+          ]
+        },
+        "amount_mm": {
+          "type": "number",
+          "description": "Millimetres, between -1 and 1. Typical edits are 0.05-0.3."
+        },
+        "radius_mm": {
+          "type": "number",
+          "description": "Falloff radius in millimetres, between 0.5 and 4. 1.5 is a cusp-sized edit."
+        }
+      },
+      "required": [
+        "region",
+        "amount_mm",
+        "radius_mm"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "flip_buccal",
+    "description": "Flip which side is buccal (use when the user says the buccal/lingual orientation is reversed).",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "set_view",
+    "description": "Point the camera at the crown from a side.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "view": {
+          "type": "string",
+          "enum": [
+            "occlusal",
+            "buccal",
+            "lingual",
+            "mesial",
+            "distal",
+            "fit"
+          ]
+        }
+      },
+      "required": [
+        "view"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "set_layer",
+    "description": "Show or hide a display layer: antagonist (opposing scan), scan (prep arch), heatmap (wall thickness colours), margin (margin line), crown.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "layer": {
+          "type": "string",
+          "enum": [
+            "antagonist",
+            "scan",
+            "heatmap",
+            "margin",
+            "crown"
+          ]
+        },
+        "visible": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "layer",
+        "visible"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_checks",
+    "description": "Return the current quality-check report (thickness, contacts, occlusion, undercuts, margin confidence, orientation) with measured values.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "undo",
+    "description": "Undo the last design change.",
+    "strict": true,
+    "input_schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  }
+]

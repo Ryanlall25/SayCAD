@@ -1,0 +1,15 @@
+{
+  "name": "SayCAD Crowns",
+  "short_name": "Crowns",
+  "description": "Design crowns on your phone — margin, anatomy, contacts, occlusion and checks, by tap, voice or AI.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1f1b",
+  "theme_color": "#17362b",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
