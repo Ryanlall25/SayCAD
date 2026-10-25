@@ -1,6 +1,7 @@
 import type { DesignParams } from '../crown/design'
 import type { FileRole } from '../crown/caseFiles'
 import type { MarginResult } from '../crown/margin'
+import type { CaseOrder } from '../crown/order'
 
 /**
  * On-device case storage (IndexedDB): the scans as loaded plus the design
@@ -31,6 +32,8 @@ export interface CaseMeta {
   margin?: MarginResult | null
   /** Short QC summary, e.g. "QC ✓" or "2 fail". */
   status?: string
+  /** The order from the New Case flow (patient, doctor, shade, …). */
+  order?: CaseOrder
 }
 
 const DB_NAME = 'saycad-crowns'

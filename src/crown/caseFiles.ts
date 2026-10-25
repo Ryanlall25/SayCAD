@@ -6,7 +6,7 @@
  * case.json always wins over guessing.
  */
 
-export type FileRole = 'prep' | 'antagonist' | 'bite' | 'crown' | 'ignore'
+export type FileRole = 'prep' | 'antagonist' | 'bite' | 'preop' | 'crown' | 'ignore'
 
 export interface CaseManifest {
   toothNumber: number

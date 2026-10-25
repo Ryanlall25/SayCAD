@@ -43,6 +43,7 @@ import {
 } from '../ai/client'
 import { zip } from '../core/zip'
 import { clearModels, deleteCase, listCases, loadCase, loadModel, newCaseId, saveCase, saveModel, updateCase, type CaseMeta } from './caseStore'
+import NewCase, { type NewCaseResult } from './NewCase'
 import './studio.css'
 
 /**
@@ -194,6 +195,7 @@ export default function CrownStudio(): React.JSX.Element {
   const [caseId, setCaseId] = useState<string | null>(null)
   const [recent, setRecent] = useState<CaseMeta[]>([])
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [newCase, setNewCase] = useState(false)
 
   // Mutable mirrors for async code paths.
   const state = useRef({ params, flip, margin, design, tooth, step, loaded, useLearned, model, sculptAt, caseId })
@@ -366,7 +368,7 @@ export default function CrownStudio(): React.JSX.Element {
     return runDesign('final', snap)
   }
 
-  async function commitScans(list: ScanFile[], t: number, restore?: CaseMeta): Promise<void> {
+  async function commitScans(list: ScanFile[], t: number, restore?: CaseMeta, info?: { name: string; order?: CaseMeta['order'] }): Promise<void> {
     const prep = list.find((f) => f.role === 'prep')
     const ant = list.find((f) => f.role === 'antagonist')
     const v = viewRef.current
@@ -414,8 +416,8 @@ export default function CrownStudio(): React.JSX.Element {
         const now = new Date().toISOString()
         const stem = list[0]?.name.replace(/\.(stl|ply)$/i, '').slice(0, 28) ?? 'case'
         const ok = await saveCase(
-          { id, name: `#${t} · ${stem}`, tooth: t, createdAt: now, updatedAt: now },
-          list.filter((f) => f.role === 'prep' || f.role === 'antagonist').map((f) => {
+          { id, name: info?.name ?? `#${t} · ${stem}`, tooth: t, createdAt: now, updatedAt: now, order: info?.order },
+          list.filter((f) => f.role === 'prep' || f.role === 'antagonist' || f.role === 'bite' || f.role === 'preop').map((f) => {
             const m = meshData(f.geometry)
             return { name: f.name, role: f.role, positions: m.positions.slice().buffer, indices: m.indices ? m.indices.slice().buffer : null }
           })
@@ -467,6 +469,20 @@ export default function CrownStudio(): React.JSX.Element {
     setFiles(parsed)
     setBusy(null)
     setStatus(`${parsed.length} file(s) read — check the roles, then “Use these scans”.`)
+  }
+
+  /** Scans and order from the New Case deck → the designer. */
+  async function startCase(r: NewCaseResult): Promise<void> {
+    setNewCase(false)
+    const t = r.order.tooth!
+    const list: ScanFile[] = r.scans.map((sc) => ({ name: sc.name, role: sc.slot, geometry: sc.geometry }))
+    setTooth(t)
+    setParams((p) => ({ ...p, material: r.order.material, cementGapMm: undefined }))
+    state.current.params = { ...state.current.params, material: r.order.material, cementGapMm: undefined }
+    setFiles(list)
+    const who = r.order.patient.trim()
+    await commitScans(list, t, undefined, { name: `${who ? `${who.slice(0, 28)} · ` : ''}#${t}`, order: r.order })
+    say('app', `Case started: #${t}, ${MATERIALS[r.order.material].label}, shade ${r.order.shade}${r.order.doctor ? `, for ${r.order.doctor}` : ''}.`)
   }
 
   async function importLibrary(list: FileList | null): Promise<void> {
@@ -1038,7 +1054,7 @@ export default function CrownStudio(): React.JSX.Element {
             <h1>Design a crown in one tap.</h1>
             <p>Load the prep and opposing scans, tap the prepared tooth, and the crown is margined, shaped, fitted to the bite and checked.</p>
             <div className="st-welcome-actions">
-              <button className="st-btn primary large" onClick={() => fileRef.current?.click()}>Load Scans</button>
+              <button className="st-btn primary large" onClick={() => setNewCase(true)}>New Case</button>
               <button className="st-btn tinted large" onClick={() => void loadDemo(true)}>Try the Demo Case</button>
             </div>
             {recent.length > 0 && (
@@ -1193,6 +1209,7 @@ export default function CrownStudio(): React.JSX.Element {
                     </div>
                   ))}
                   <div className="st-actions">
+                    <button className="st-btn tinted" onClick={() => setNewCase(true)}>New Case</button>
                     <button className="st-btn tinted" onClick={() => fileRef.current?.click()}>Add Scans</button>
                     <button className="st-btn tinted" onClick={() => void loadDemo()}>Demo Case</button>
                     <button className="st-btn tinted" onClick={() => rxRef.current?.click()} disabled={!ai.ai || !ai.images}>Read Rx Photo</button>
@@ -1440,6 +1457,7 @@ export default function CrownStudio(): React.JSX.Element {
         )}
       </section>
 
+      {newCase && <NewCase toothName={(n) => TOOTH_NAMES[toothClassOf(n)] ?? ''} onCancel={() => setNewCase(false)} onDone={(r) => void startCase(r)} />}
       <input ref={fileRef} type="file" accept=".stl,.ply" multiple hidden onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }} />
       <input ref={libRef} type="file" accept=".stl,.ply,.eoff" multiple hidden onChange={(e) => { void importLibrary(e.target.files); e.target.value = '' }} />
       <input ref={rxRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void onRxPhoto(e.target.files?.[0]); e.target.value = '' }} />

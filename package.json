@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Speak it, see it, print it — a conversational CAD. Crown Studio: AI-assisted crown design on a phone.",
+  "description": "Speak it, see it, print it \u2014 a conversational CAD. Crown Studio: AI-assisted crown design on a phone.",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
@@ -16,7 +16,8 @@
     "e2e": "npm run build && npm run build:artifact && node dev/e2e.mjs",
     "train": "vite-node scripts/train.ts --",
     "synthetic-cases": "vite-node scripts/synthetic-cases.ts --",
-    "import-library": "vite-node scripts/import-library.ts --"
+    "import-library": "vite-node scripts/import-library.ts --",
+    "e2e:newcase": "node dev/e2e-newcase.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

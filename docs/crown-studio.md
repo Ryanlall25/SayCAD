@@ -106,8 +106,49 @@ margin, axis, anatomy, contacts and occlusion, thickness, quality checks,
 then (with AI on) an automatic AI fix if anything fails and an AI review.
 The "Ask, or say a change" field takes voice or text at any stage.
 
-The interface has been checked in headless phone emulation (`dev/e2e.mjs`)
-only — **not yet on a physical phone by a technician.**
+**New Case** works like exocad's DentalDB order, one swipeable card at a
+time:
+
+1. **Order:** patient, doctor and due date. You can also import an exocad
+   `.dentalProject` (fills in the tooth, restoration and material) or a
+   `.zip` of the whole scanner export.
+2. **Tooth:** tap it on the arch chart (Universal numbering, one crown per
+   case).
+3. **Restoration:** type, material and shade. Only anatomic crowns can be
+   designed today; the other types are listed as "Not yet".
+4. **Scans:** switch on which scans the case has (opposing, pre-op, bite).
+   The deck then asks for them in loading order.
+5. **One card per scan.** Each card names the exact file needed, e.g.
+   "Upload the LOWER jaw scan — the arch with the prep on #19", and shows
+   that jaw on the chart.
+6. **Review**, then the scans open in the designer.
+
+Swiping forward is held until the current card has what it needs, and the
+deck says what that is ("Needed now: LOWER JAW SCAN").
+
+Each upload is checked:
+- size and units (it catches exports in metres);
+- arch, quadrant or single die;
+- triangle count;
+- whether the file name names the other jaw or looks like a crown;
+- whether the two arches are in the bite.
+
+Several files or a zip at once are placed by name (upper/lower,
+maxillary/mandibular, `_u`/`_l`, bite, pre-op).
+
+Limits of New Case today:
+- Bite and pre-op scans are saved with the case but **not used** by the
+  design. There is no bite alignment yet, so the arches must be exported
+  in occlusion.
+- `.dentalProject` import reads `Treatment → Teeth → Tooth`. It has been
+  checked against the layout of exocad's own project files, but the
+  `ReconstructionType` names for real restorations are matched loosely
+  ("anatomic", "coping", "pontic", …). It has not been verified on a
+  restoration order from your exocad.
+
+The interface has been checked in headless phone emulation
+(`dev/e2e.mjs`, `dev/e2e-newcase.mjs`) only — **not yet on a physical
+phone by a technician.**
 
 ---
 
