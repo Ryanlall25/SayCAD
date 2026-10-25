@@ -42,3 +42,21 @@ describe('auto design — mirrored to the upper arch', () => {
     expect(r.report.exportable).toBe(true)
   })
 })
+
+describe('every tooth class produces a closed crown', () => {
+  // Same synthetic prep, read as different lower-left teeth: exercises each
+  // class's template, cusp addressing and the sizing logic.
+  const c = syntheticMolarCase()
+  const pc0 = prepareCase({ toothNumber: 19, prep: c.prep, antagonist: c.antagonist })
+  const margin = autoDesign(pc0, { tap: c.tapPoint }).margin
+  for (const tooth of [18, 20, 21, 22, 23, 24]) {
+    it(`#${tooth}`, () => {
+      const r = autoDesign({ ...pc0, toothNumber: tooth }, { margin })
+      expect(r.watertight.watertight).toBe(true)
+      expect(r.watertight.volumeMm3).toBeGreaterThan(50)
+      expect(r.outer.cuspTips.length).toBeGreaterThan(0)
+      const thick = r.report.results.filter((x) => x.id.startsWith('thickness'))
+      for (const t of thick) expect(t.verdict, `${t.label} ${t.measured}`).toBe('pass')
+    })
+  }
+})

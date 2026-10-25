@@ -3,7 +3,7 @@ import { toothClassOf, type Template } from './anatomy'
 import { runCritics, type CriticReport } from './critics'
 import { DEFAULT_PARAMS, designOuter, resolvedMaterial, type DesignParams, type OuterResult } from './design'
 import { estimateFrame } from './frame'
-import { geometryFrom, geometryToLocal, SurfaceIndex, toLocal, type ToothFrame, type Vec3 } from './geom'
+import { add, geometryFrom, geometryToLocal, normalize, scale, SurfaceIndex, toLocal, type ToothFrame, type Vec3 } from './geom'
 import { angleDiff, type CrownGrid } from './grid'
 import { buildIntaglio, type IntaglioResult } from './intaglio'
 import { detectMargin, type MarginResult } from './margin'
@@ -189,10 +189,20 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
 
   // Frame, local scans and neighbour/antagonist BVHs depend only on the
   // margin, orientation and grid size — reuse them across parameter edits.
-  const envKey = `${marginKey(margin)}|${pc.toothNumber}|${req.flipBuccal ? 1 : 0}|${nu}|${nv}`
+  const tiltM = params.axisTiltMesialDeg
+  const tiltB = params.axisTiltBuccalDeg
+  const envKey = `${marginKey(margin)}|${pc.toothNumber}|${req.flipBuccal ? 1 : 0}|${nu}|${nv}|${tiltM}|${tiltB}`
   let env = envCache.get(pc)
   if (!env || env.key !== envKey) {
-    const fe = estimateFrame(margin.points, margin.axis.up, pc.toothNumber, pc.prepWelded, { flipBuccal: req.flipBuccal })
+    let fe = estimateFrame(margin.points, margin.axis.up, pc.toothNumber, pc.prepWelded, { flipBuccal: req.flipBuccal })
+    if (tiltM || tiltB) {
+      // Technician override of the path of insertion: lean the axis toward
+      // mesial/buccal by the given angles, then rebuild the frame around it.
+      const f0 = fe.frame
+      const t = (deg: number): number => Math.tan((deg * Math.PI) / 180)
+      const up = normalize(add(add(f0.occlusal, scale(f0.mesial, t(tiltM))), scale(f0.buccal, t(tiltB))))
+      fe = { ...estimateFrame(margin.points, up, pc.toothNumber, pc.prepWelded, { flipBuccal: req.flipBuccal }), buccalConfidence: fe.buccalConfidence }
+    }
     const prepLocal = geometryToLocal(fe.frame, pc.prepWelded)
     const antLocal = pc.antagonist ? geometryToLocal(fe.frame, pc.antagonist) : null
     const marginRow = marginRowAt(margin.points.map((p) => toLocal(fe.frame, p)), nu)

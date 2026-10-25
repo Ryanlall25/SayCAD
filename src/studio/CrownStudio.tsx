@@ -41,6 +41,7 @@ import {
   type SampleFn
 } from '../ai/client'
 import { zip } from '../core/zip'
+import { deleteCase, listCases, loadCase, newCaseId, saveCase, updateCase, type CaseMeta } from './caseStore'
 import './studio.css'
 
 type Step = 'case' | 'margin' | 'design' | 'check' | 'export'
@@ -81,7 +82,9 @@ const PARAM_RANGES: Record<NumericParam, [number, number]> = {
   rotationDeg: [-25, 25],
   mdShiftMm: [-1, 1],
   blShiftMm: [-1, 1],
-  cementGapMm: [0, 0.15]
+  cementGapMm: [0, 0.15],
+  axisTiltMesialDeg: [-15, 15],
+  axisTiltBuccalDeg: [-15, 15]
 }
 
 const LAB_NAME = 'SmileHub'
@@ -143,10 +146,13 @@ export default function CrownStudio(): React.JSX.Element {
   const [alignZ, setAlignZ] = useState(false)
   const [override, setOverride] = useState('')
   const [sheetOpen, setSheetOpen] = useState(true)
+  const [caseId, setCaseId] = useState<string | null>(null)
+  const [recent, setRecent] = useState<CaseMeta[]>([])
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
   // Mutable mirrors for async code paths.
-  const state = useRef({ params, flip, margin, design, tooth, step, loaded, useLearned, model, sculptAt })
-  state.current = { params, flip, margin, design, tooth, step, loaded, useLearned, model, sculptAt }
+  const state = useRef({ params, flip, margin, design, tooth, step, loaded, useLearned, model, sculptAt, caseId })
+  state.current = { params, flip, margin, design, tooth, step, loaded, useLearned, model, sculptAt, caseId }
   const undoStack = useRef<Snapshot[]>([])
   const redoStack = useRef<Snapshot[]>([])
   const aiHistory = useRef<Anthropic.Beta.BetaMessageParam[]>([])
@@ -164,6 +170,7 @@ export default function CrownStudio(): React.JSX.Element {
     const v = new StudioViewport(mount)
     viewRef.current = v
     engineRef.current = new CrownEngine()
+    void listCases().then(setRecent)
     void (async () => {
       const st = await aiStatus()
       if (st.ai) return setAi({ ai: true, mode: 'server', needsCode: st.needsCode, model: st.model, images: true })
@@ -228,6 +235,9 @@ export default function CrownStudio(): React.JSX.Element {
               viewRef.current?.setMargin(d.margin.points, d.margin.confidence)
               const fails = d.results.filter((r) => r.verdict === 'fail').length
               const warns = d.results.filter((r) => r.verdict === 'warn').length
+              if (quality === 'final' && state.current.caseId) {
+                void updateCase(state.current.caseId, { params: p, flip: f, margin: m, tooth: state.current.tooth, status: fails ? `${fails} fail` : warns ? `${warns} to check` : 'QC ✓' }).then(() => listCases().then(setRecent))
+              }
               if (quality === 'final')
                 setStatus(fails ? `${fails} check(s) failing — see Check.` : warns ? `Designed. ${warns} item(s) to look at.` : 'Designed — all checks pass.')
               resolve(d)
@@ -265,7 +275,7 @@ export default function CrownStudio(): React.JSX.Element {
     return runDesign('final', snap)
   }
 
-  async function commitScans(list: ScanFile[], t: number): Promise<void> {
+  async function commitScans(list: ScanFile[], t: number, restore?: CaseMeta): Promise<void> {
     const prep = list.find((f) => f.role === 'prep')
     const ant = list.find((f) => f.role === 'antagonist')
     const v = viewRef.current
@@ -291,6 +301,35 @@ export default function CrownStudio(): React.JSX.Element {
       fitToScan(prep.geometry)
       setStep('margin')
       setStatus(`Scans ready (${(r.triangles / 1000).toFixed(0)}k triangles). Tap the prepared tooth.`)
+      if (restore) {
+        setCaseId(restore.id)
+        state.current.caseId = restore.id
+        // Cases saved by older versions may lack newer parameters.
+        const restored: DesignParams = { ...DEFAULT_PARAMS, ...restore.params }
+        setParams(restored)
+        if (restore.flip !== undefined) setFlip(restore.flip)
+        if (restore.margin) {
+          setMargin(restore.margin)
+          setStep('design')
+          await runDesign('final', { margin: restore.margin, params: restored, flip: restore.flip ?? false })
+          viewRef.current?.view('buccal')
+        }
+      } else {
+        // Keep the case on this device so it can be reopened later.
+        const id = newCaseId()
+        setCaseId(id)
+        state.current.caseId = id
+        const now = new Date().toISOString()
+        const stem = list[0]?.name.replace(/\.(stl|ply)$/i, '').slice(0, 28) ?? 'case'
+        const ok = await saveCase(
+          { id, name: `#${t} · ${stem}`, tooth: t, createdAt: now, updatedAt: now },
+          list.filter((f) => f.role === 'prep' || f.role === 'antagonist').map((f) => {
+            const m = meshData(f.geometry)
+            return { name: f.name, role: f.role, positions: m.positions.slice().buffer, indices: m.indices ? m.indices.slice().buffer : null }
+          })
+        )
+        if (ok) void listCases().then(setRecent)
+      }
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e))
     } finally {
@@ -336,6 +375,37 @@ export default function CrownStudio(): React.JSX.Element {
     setFiles(parsed)
     setBusy(null)
     setStatus(`${parsed.length} file(s) read — check the roles, then “Use these scans”.`)
+  }
+
+  async function openCase(id: string): Promise<void> {
+    setBusy('Opening case…')
+    const c = await loadCase(id)
+    if (!c) {
+      setBusy(null)
+      setStatus('That case could not be opened on this device.')
+      return
+    }
+    const list: ScanFile[] = c.scans.map((sc) => {
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sc.positions), 3))
+      if (sc.indices) g.setIndex(new THREE.BufferAttribute(new Uint32Array(sc.indices), 1))
+      return { name: sc.name, role: sc.role, geometry: g }
+    })
+    setFiles(list)
+    setTooth(c.meta.tooth)
+    await commitScans(list, c.meta.tooth, c.meta)
+    say('app', `Opened ${c.meta.name}.`)
+  }
+
+  async function removeCase(id: string): Promise<void> {
+    if (confirmDelete !== id) {
+      setConfirmDelete(id)
+      return
+    }
+    setConfirmDelete(null)
+    await deleteCase(id)
+    if (state.current.caseId === id) setCaseId(null)
+    setRecent(await listCases())
   }
 
   async function loadDemo(autoTap = false): Promise<void> {
@@ -853,6 +923,20 @@ export default function CrownStudio(): React.JSX.Element {
                   <button className="st-secondary" onClick={() => rxRef.current?.click()} disabled={!ai.ai || !ai.images} title={ai.ai && ai.images ? 'Photo of the Rx' : 'Needs AI with image access'}>Read Rx photo</button>
                 </div>
                 {rxNote && <p className="st-note">{rxNote}</p>}
+                {recent.length > 0 && (
+                  <div className="st-recent">
+                    <h3>Cases on this device</h3>
+                    {recent.slice(0, 12).map((c) => (
+                      <div key={c.id} className={`st-case ${c.id === caseId ? 'on' : ''}`}>
+                        <button className="st-case-open" onClick={() => void openCase(c.id)}>
+                          <b>{c.name}</b>
+                          <span>{new Date(c.updatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{c.status ? ` · ${c.status}` : ''}</span>
+                        </button>
+                        <button className="st-link" onClick={() => void removeCase(c.id)}>{confirmDelete === c.id ? 'Tap again to delete' : 'Delete'}</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {files.length > 0 && (
                   <div className="st-files">
                     {files.map((f, k) => (
@@ -897,6 +981,13 @@ export default function CrownStudio(): React.JSX.Element {
                       <button className="st-secondary" onClick={() => void execute({ kind: 'flipBuccal' })}>Flip buccal</button>
                     </div>
                     {editMargin && <p className="st-fine">Tap on the scan where the margin should be — the nearest part of the line moves there and the crown redesigns.</p>}
+                    <Slider label="Axis tilt mesial/distal" unit="°" min={-15} max={15} step={1} value={params.axisTiltMesialDeg} onChange={(v) => slide('axisTiltMesialDeg', v)} hint="+ mesial" />
+                    <Slider label="Axis tilt buccal/lingual" unit="°" min={-15} max={15} step={1} value={params.axisTiltBuccalDeg} onChange={(v) => slide('axisTiltBuccalDeg', v)} hint="+ buccal" />
+                    {design && (
+                      <p className="st-fine">
+                        Undercuts along this path: {design.results.find((r) => r.id === 'undercut')?.measured ?? '—'}
+                      </p>
+                    )}
                     {design && <p className="st-fine">Buccal arrow (B) {Math.round(design.buccalConfidence * 100)}% confident — it should point to the cheek.</p>}
                   </>
                 )}

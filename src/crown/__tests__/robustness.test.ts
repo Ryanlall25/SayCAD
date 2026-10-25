@@ -64,3 +64,19 @@ describe('robustness: arbitrary scanner coordinates + scanner noise', () => {
     expect(r.report.exportable).toBe(false)
   })
 })
+
+describe('insertion axis tilt', () => {
+  it('changes the path of insertion and still yields a closed crown', () => {
+    const c = syntheticMolarCase()
+    const pc = prepareCase({ toothNumber: 19, prep: c.prep, antagonist: c.antagonist })
+    const base = autoDesign(pc, { tap: c.tapPoint })
+    const tilted = autoDesign(pc, { margin: base.margin, params: { axisTiltMesialDeg: 8 } })
+    const angle = Math.acos(Math.min(1, dot(base.frame.occlusal, tilted.frame.occlusal))) * (180 / Math.PI)
+    expect(angle).toBeGreaterThan(7)
+    expect(angle).toBeLessThan(9)
+    expect(dot(tilted.frame.occlusal, base.frame.mesial)).toBeGreaterThan(0)
+    // An 8° lean on a 6° taper creates undercuts on the far wall: they get blocked out.
+    expect(tilted.intaglio.maxUndercutMm).toBeGreaterThan(base.intaglio.maxUndercutMm)
+    expect(tilted.watertight.watertight).toBe(true)
+  })
+})

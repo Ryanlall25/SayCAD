@@ -74,6 +74,10 @@ export interface DesignParams {
   buccalBulgeMm: number
   lingualBulgeMm: number
   heightOffsetMm: number
+  /** Insertion-axis tilt toward mesial (+) / distal (−), degrees. */
+  axisTiltMesialDeg: number
+  /** Insertion-axis tilt toward buccal (+) / lingual (−), degrees. */
+  axisTiltBuccalDeg: number
   rotationDeg: number
   mdShiftMm: number
   blShiftMm: number
@@ -93,6 +97,8 @@ export const DEFAULT_PARAMS: DesignParams = {
   buccalBulgeMm: 0,
   lingualBulgeMm: 0,
   heightOffsetMm: 0,
+  axisTiltMesialDeg: 0,
+  axisTiltBuccalDeg: 0,
   rotationDeg: 0,
   mdShiftMm: 0,
   blShiftMm: 0,

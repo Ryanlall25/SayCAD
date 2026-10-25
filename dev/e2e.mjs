@@ -91,6 +91,20 @@ await file.saveAs(path)
 console.log('exported', file.suggestedFilename())
 await page.screenshot({ path: `${out}/phone-4-export.png` })
 
+// Reopen the saved case after a reload (on-device storage).
+await page.reload()
+await page.waitForSelector('.st-empty')
+await page.getByRole('button', { name: /Case/ }).click()
+await page.waitForSelector('.st-case-open', { timeout: 10000 })
+console.log('saved cases:', await page.locator('.st-case-open').count(), '—', (await page.locator('.st-case-open').first().innerText()).replace(/\s+/g, ' '))
+await page.locator('.st-case-open').first().click()
+await page.waitForSelector('.st-chip.good, .st-chip.meh, .st-chip.bad', { timeout: 120000 })
+await page.waitForFunction(() => !document.querySelector('.st-busy'), null, { timeout: 120000 })
+await page.getByRole('button', { name: /Design/ }).click()
+const reopenedDistal = await page.locator('.st-slider').nth(1).innerText()
+console.log('reopened distal slider:', reopenedDistal.replace(/\s+/g, ' '))
+if (!reopenedDistal.includes('-0.05')) fail('reopened case lost its parameters')
+
 // ── claude.ai-hosted mode: the artifact build with a stand-in runtime ──────
 // The fake `sample` behaves like the platform: it calls the page's own tool
 // functions and returns text; `downloads.save` captures what would be saved.

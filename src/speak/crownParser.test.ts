@@ -48,3 +48,10 @@ describe('crown grammar', () => {
     expect(parseCrown('make it look more like the neighbour').kind).toBe('unknown')
   })
 })
+
+describe('insertion axis grammar', () => {
+  it('tilts the path of insertion', () => {
+    expect(parseCrown('tilt the insertion axis 3 degrees mesial')).toEqual({ kind: 'param', param: 'axisTiltMesialDeg', mode: 'change', value: 3 })
+    expect(parseCrown('lean the axis lingually')).toEqual({ kind: 'param', param: 'axisTiltBuccalDeg', mode: 'change', value: -2 })
+  })
+})

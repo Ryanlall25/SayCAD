@@ -21,6 +21,8 @@ export type NumericParam =
   | 'mdShiftMm'
   | 'blShiftMm'
   | 'cementGapMm'
+  | 'axisTiltMesialDeg'
+  | 'axisTiltBuccalDeg'
 
 export type CrownView = 'occlusal' | 'buccal' | 'lingual' | 'mesial' | 'distal' | 'fit'
 export type CrownLayer = 'antagonist' | 'scan' | 'heatmap' | 'margin' | 'crown'
@@ -191,6 +193,16 @@ export function parseCrown(raw: string): CrownCommand {
     const up = /\b(raise|lift|taller)\b/.test(text)
     return { kind: 'param', param: 'heightOffsetMm', mode: 'change', value: amountMm(text, 0.1) * (up ? 1 : -1) }
   }
+  const tilt = /\b(tilt|lean)\b.*\b(axis|insertion|path)?.*\b(mesial\w*|distal\w*|buccal\w*|lingual\w*|palatal\w*)\b/.exec(text)
+  if (tilt && /\b(axis|insertion|path)\b/.test(text)) {
+    const n = /(\d+(?:\.\d+)?)/.exec(text)
+    const deg = n ? Number(n[1]) : 2
+    const dir = tilt[3]
+    if (/^mesial/.test(dir)) return { kind: 'param', param: 'axisTiltMesialDeg', mode: 'change', value: deg }
+    if (/^distal/.test(dir)) return { kind: 'param', param: 'axisTiltMesialDeg', mode: 'change', value: -deg }
+    if (/^buccal/.test(dir)) return { kind: 'param', param: 'axisTiltBuccalDeg', mode: 'change', value: deg }
+    return { kind: 'param', param: 'axisTiltBuccalDeg', mode: 'change', value: -deg }
+  }
   if (/\brotate\b/.test(text)) {
     const n = /(-?\d+(?:\.\d+)?)/.exec(text)
     const deg = n ? Math.abs(Number(n[1])) : 3
@@ -220,6 +232,7 @@ export const CROWN_HELP: ReadonlyArray<readonly [string, string]> = [
   ['fuller buccal', 'more buccal contour'],
   ['raise the crown 0.1', 'occlusal table up/down'],
   ['rotate 5 degrees', 'rotate the anatomy about the insertion axis'],
+  ['tilt the insertion axis 3 degrees mesial', 'change the path of insertion (less blockout)'],
   ['zirconia · emax · pmma · gold', 'material (sets thickness minimums and cement gap)'],
   ['cement gap 60 microns', 'cement space'],
   ['flip buccal', 'if the buccal arrow points to the tongue'],
