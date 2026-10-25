@@ -89,12 +89,12 @@ export class CrownEngine {
     return this.call({ type: 'design', margin, params, flipBuccal, quality, model })
   }
 
-  importLibrary(files: Array<{ name: string; mesh: MeshData }>, numbering: 'auto' | 'universal' | 'fdi', source: string): Promise<{
+  importLibrary(files: Array<{ name: string; mesh: MeshData }>, numbering: 'auto' | 'universal' | 'fdi', source: string, jaw?: 'upper' | 'lower'): Promise<{
     teeth: Array<{ name: string; tooth: number; cls: string; ok: boolean; error?: string }>
     skipped: string[]
     models: Record<string, string>
   }> {
-    return this.call({ type: 'importLibrary', files, numbering, source })
+    return this.call({ type: 'importLibrary', files, numbering, source, jaw })
   }
 
   dispose(): void {

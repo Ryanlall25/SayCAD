@@ -7,11 +7,15 @@ import * as THREE from 'three'
 import { autoDesign, prepareCase } from '../src/crown/pipeline'
 import { syntheticMolarCase } from '../src/crown/synthetic'
 import { add, scale } from '../src/crown/geom'
+import { parseShapeModel, templateFromModel } from '../src/crown/ssm'
 
 const q = new URLSearchParams(location.search)
 const view = q.get('view') ?? 'buccal'
 const c = syntheticMolarCase()
-const r = autoDesign(prepareCase({ toothNumber: c.toothNumber, prep: c.prep, antagonist: c.antagonist }), { tap: c.tapPoint })
+const tooth = Number(q.get('tooth') ?? c.toothNumber)
+const modelUrl = q.get('model')
+const model = modelUrl ? parseShapeModel(await (await fetch(modelUrl)).text()) : null
+const r = autoDesign(prepareCase({ toothNumber: tooth, prep: c.prep, antagonist: c.antagonist }), { tap: c.tapPoint, template: model ? templateFromModel(model) : undefined })
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
 renderer.setSize(900, 700)

@@ -45,7 +45,7 @@ export function handleEngineRequest(req: EngineRequest): { result: unknown; tran
     case 'importLibrary': {
       const names = req.files.map((f) => f.name)
       const teeth = req.files.flatMap((f) => {
-        const n = libraryToothNumber(f.name, req.numbering, names)
+        const n = libraryToothNumber(f.name, req.numbering, names, req.jaw)
         return n ? [{ name: f.name, toothNumber: n, geometry: toGeometry(f.mesh) }] : []
       })
       const imported = analyseLibrary(teeth)

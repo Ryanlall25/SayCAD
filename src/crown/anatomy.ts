@@ -25,8 +25,10 @@ export type ToothClass =
   | 'upperMolar'
   | 'lowerPremolar'
   | 'upperPremolar'
-  | 'anterior'
-  | 'canine'
+  | 'upperAnterior'
+  | 'lowerAnterior'
+  | 'upperCanine'
+  | 'lowerCanine'
 
 export interface CuspSpec {
   name: string
@@ -69,8 +71,8 @@ export function toothClassOf(n: number): ToothClass {
   const fromMid = n <= 8 ? 8 - n : n <= 16 ? n - 9 : n <= 24 ? 24 - n : n - 25
   if (fromMid >= 5) return upper ? 'upperMolar' : 'lowerMolar'
   if (fromMid >= 3) return upper ? 'upperPremolar' : 'lowerPremolar'
-  if (fromMid === 2) return 'canine'
-  return 'anterior'
+  if (fromMid === 2) return upper ? 'upperCanine' : 'lowerCanine'
+  return upper ? 'upperAnterior' : 'lowerAnterior'
 }
 
 export function anatomySpec(cls: ToothClass): AnatomySpec {
@@ -124,17 +126,19 @@ export function anatomySpec(cls: ToothClass): AnatomySpec {
         ],
         marginalRidgeHeight: 1.2, grooveDepth: 0.4, squareness: 2.4
       }
-    case 'canine':
+    case 'upperCanine':
+    case 'lowerCanine':
       return {
-        cls, mdWidth: 7.5, blWidth: 7.8, cervicalRatioMD: 0.72, cervicalRatioBL: 0.9,
+        cls, mdWidth: cls === 'upperCanine' ? 7.5 : 7.0, blWidth: cls === 'upperCanine' ? 7.8 : 7.5, cervicalRatioMD: 0.72, cervicalRatioBL: 0.9,
         contactHeight: 6.0, buccalContourHeight: 2.0, lingualContourHeight: 2.5, occlusalEdge: 7.0,
         occlusalRatioMD: 0.78, occlusalRatioBL: 0.45, fossaDepth: -0.5,
         cusps: [{ name: 'cusp tip', u: 0.05, w: 0.25, height: 2.6, radius: 3.4 }],
         marginalRidgeHeight: 0.6, grooveDepth: 0.0, squareness: 2.2
       }
-    case 'anterior':
+    case 'upperAnterior':
+    case 'lowerAnterior':
       return {
-        cls, mdWidth: 8.5, blWidth: 7.0, cervicalRatioMD: 0.75, cervicalRatioBL: 0.9,
+        cls, mdWidth: cls === 'upperAnterior' ? 8.5 : 5.5, blWidth: cls === 'upperAnterior' ? 7.0 : 6.0, cervicalRatioMD: 0.75, cervicalRatioBL: 0.9,
         contactHeight: 7.5, buccalContourHeight: 1.5, lingualContourHeight: 1.5, occlusalEdge: 8.6,
         occlusalRatioMD: 0.95, occlusalRatioBL: 0.3, fossaDepth: -0.4,
         cusps: [{ name: 'incisal edge', u: 0, w: 0.3, height: 1.4, radius: 6.5 }],

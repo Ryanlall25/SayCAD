@@ -25,10 +25,32 @@ export interface LibraryTooth {
   geometry: THREE.BufferGeometry
 }
 
-/** Universal number from a file name; FDI (11–48) is converted when `fdi`. */
-export function libraryToothNumber(fileName: string, numbering: 'universal' | 'fdi' | 'auto', all: string[] = []): number | null {
+/**
+ * Two layouts exist in the wild:
+ *  - 'arch': teeth placed in their arch positions (frames read from the arch);
+ *  - 'canonical': every tooth centred on its own origin in a fixed anatomical
+ *    frame — exocad library files use mesial = +x, labial/buccal = +y,
+ *    occlusal = +z (verified on a real library: cusp tips and the sharper
+ *    incisal corners sit toward +x; lingual fossae face −y).
+ * 'auto' picks canonical when every tooth's bounding box is centred near the origin.
+ */
+export type LibraryLayout = 'auto' | 'arch' | 'canonical'
+
+/**
+ * Universal number from a file name; FDI (11–48) is converted when `fdi`.
+ * With `jaw`, bare names 1–8 are positions from the midline in that jaw
+ * (exocad library folders: 1 = central incisor … 8 = third molar), read as
+ * the patient's right quadrant (the anatomy is the same on both sides).
+ */
+export function libraryToothNumber(
+  fileName: string,
+  numbering: 'universal' | 'fdi' | 'auto',
+  all: string[] = [],
+  jaw?: 'upper' | 'lower'
+): number | null {
   const n = numberIn(fileName)
   if (n === null) return null
+  if (jaw && n >= 1 && n <= 8) return fdiToUniversal((jaw === 'upper' ? 10 : 40) + n)
   const useFdi = numbering === 'fdi' || (numbering === 'auto' && all.map(numberIn).some((x) => x !== null && x > 32))
   return useFdi ? fdiToUniversal(n) : n >= 1 && n <= 32 ? n : null
 }
@@ -96,8 +118,27 @@ export interface ImportedTooth {
   error?: string
 }
 
-export function analyseLibrary(teeth: LibraryTooth[]): ImportedTooth[] {
+function isCanonical(teeth: LibraryTooth[]): boolean {
+  return teeth.every((t) => {
+    t.geometry.computeBoundingBox()
+    const c = new THREE.Vector3()
+    t.geometry.boundingBox!.getCenter(c)
+    return Math.hypot(c.x, c.y) < 2.5
+  })
+}
+
+export function analyseLibrary(teeth: LibraryTooth[], layout: LibraryLayout = 'auto'): ImportedTooth[] {
   const welded = teeth.map((t) => ({ ...t, geometry: weld(t.geometry) }))
+  if (layout === 'canonical' || (layout === 'auto' && isCanonical(teeth))) {
+    return welded.map((t) => {
+      const cls = toothClassOf(t.toothNumber)
+      const base = boundaryCentroid(t.geometry) ?? centroid(t.geometry)
+      const frame: ToothFrame = { origin: base, mesial: [1, 0, 0], buccal: [0, 1, 0], occlusal: [0, 0, 1] }
+      const sampled = sampleCrownOuter(t.geometry, frame, 128, 56)
+      if (!sampled) return { name: t.name, toothNumber: t.toothNumber, cls, frame, shape: null, error: 'could not trace the tooth outline' }
+      return { name: t.name, toothNumber: t.toothNumber, cls, frame, shape: normaliseToReference(sampled.grid, cls) }
+    })
+  }
   const info = welded.map((t) => {
     const c = centroid(t.geometry)
     const base = boundaryCentroid(t.geometry)

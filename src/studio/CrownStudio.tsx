@@ -21,6 +21,7 @@ import { MATERIALS, type MaterialId } from '../crown/materials'
 import { assignRoles, toothFromNames, type FileRole } from '../crown/caseFiles'
 import { toothClassOf } from '../crown/anatomy'
 import { parseGeometry, exportSTL } from '../core/meshConvert'
+import { parseEoff } from '../crown/eoff'
 import { CROWN_HELP, parseCrown, type CrownCommand, type NumericParam } from '../speak/crownParser'
 import { createDictation } from '../speak/voice'
 import {
@@ -115,6 +116,7 @@ export default function CrownStudio(): React.JSX.Element {
   const rxRef = useRef<HTMLInputElement>(null)
   const libRef = useRef<HTMLInputElement>(null)
   const [libNote, setLibNote] = useState<string | null>(null)
+  const [libJaw, setLibJaw] = useState<'auto' | 'upper' | 'lower'>('auto')
   const [modelsVersion, setModelsVersion] = useState(0)
 
   const [step, setStep] = useState<Step>('case')
@@ -400,13 +402,14 @@ export default function CrownStudio(): React.JSX.Element {
       const files: Array<{ name: string; mesh: MeshData }> = []
       for (const f of picked) {
         try {
-          files.push({ name: f.name, mesh: meshData(await parseGeometry(f)) })
+          const g = /\.eoff$/i.test(f.name) ? parseEoff(await f.arrayBuffer()) : await parseGeometry(f)
+          files.push({ name: f.name, mesh: meshData(g) })
         } catch {
           /* unreadable file: reported as skipped below */
         }
       }
       setBusy('Learning the library’s tooth forms…')
-      const r = await engineRef.current!.importLibrary(files, 'auto', 'tooth library')
+      const r = await engineRef.current!.importLibrary(files, 'auto', 'imported library', libJaw === 'auto' ? undefined : libJaw)
       for (const [cls, json] of Object.entries(r.models)) await saveModel(cls, json)
       const ok = r.teeth.filter((t) => t.ok)
       const bad = r.teeth.filter((t) => !t.ok)
@@ -973,9 +976,14 @@ export default function CrownStudio(): React.JSX.Element {
                 <div className="st-stack">
                   <div className="st-row">
                     <button className="st-secondary" onClick={() => libRef.current?.click()}>Import tooth library</button>
+                    <select aria-label="Library jaw" value={libJaw} onChange={(e) => setLibJaw(e.target.value as 'auto' | 'upper' | 'lower')}>
+                      <option value="auto">numbers in names</option>
+                      <option value="upper">upper set (1–8 from midline)</option>
+                      <option value="lower">lower set (1–8 from midline)</option>
+                    </select>
                     {model && <button className="st-link" onClick={() => void clearModels().then(() => { setLibNote('Imported libraries removed from this device.'); setModelsVersion((v) => v + 1) })}>Remove imported</button>}
                   </div>
-                  <p className="st-fine">Select all of a library’s tooth STLs at once (names must contain the tooth number, Universal or FDI). The forms become the starting anatomy for each tooth class, kept on this device only. Use libraries you’re licensed to use.</p>
+                  <p className="st-fine">Select all of a library’s tooth files at once (STL, PLY or exocad .eoff). Names must contain the tooth number (Universal or FDI); for exocad folders named 1–8, pick the jaw first and import upper and lower separately. The forms become the starting anatomy for each tooth class, kept on this device only. Use libraries you’re licensed to use.</p>
                   {libNote && <p className="st-note">{libNote}</p>}
                 </div>
                 {recent.length > 0 && (
@@ -1169,7 +1177,7 @@ export default function CrownStudio(): React.JSX.Element {
       </footer>
 
       <input ref={fileRef} type="file" accept=".stl,.ply" multiple hidden onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }} />
-      <input ref={libRef} type="file" accept=".stl,.ply" multiple hidden onChange={(e) => { void importLibrary(e.target.files); e.target.value = '' }} />
+      <input ref={libRef} type="file" accept=".stl,.ply,.eoff" multiple hidden onChange={(e) => { void importLibrary(e.target.files); e.target.value = '' }} />
       <input ref={rxRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void onRxPhoto(e.target.files?.[0]); e.target.value = '' }} />
     </div>
   )

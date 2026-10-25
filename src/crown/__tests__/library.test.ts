@@ -54,7 +54,7 @@ describe('tooth library import', () => {
       expect(dot(t.frame.mesial, lib[k].frame.mesial)).toBeGreaterThan(0.95)
     }
     const models = libraryModels(imported, 'synthetic library')
-    expect(Object.keys(models).sort()).toEqual(['anterior', 'canine', 'lowerMolar', 'lowerPremolar'])
+    expect(Object.keys(models).sort()).toEqual(['lowerAnterior', 'lowerCanine', 'lowerMolar', 'lowerPremolar'])
     // The learned molar is the library's molar (normalised the same way).
     const ref = normaliseToReference(buildTemplate('lowerMolar', { nu: 128, nv: 56 }).grid, 'lowerMolar')
     // Compare surfaces (points may slide along the surface between samplings).
