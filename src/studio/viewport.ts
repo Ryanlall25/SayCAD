@@ -92,7 +92,7 @@ export class StudioViewport {
       if (!w || !h) return
       this.renderer.setSize(w, h)
       this.camera.aspect = w / h
-      this.camera.updateProjectionMatrix()
+      this.applyInsets()
       this.rig.handleResize()
     }
     resize()
@@ -125,6 +125,43 @@ export class StudioViewport {
     if (!d || !this.tapHandler) return
     if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 8 || performance.now() - d.t > 450) return
     this.tapHandler(this.pick(e.clientX, e.clientY))
+  }
+
+  private insets = { top: 0, bottom: 0 }
+
+  /**
+   * Keeps the model centred in the part of the screen chrome doesn't cover
+   * (the nav bar above, the sheet below) by shifting the projection — the
+   * camera itself doesn't move, so orbiting still feels centred.
+   */
+  setObscured(top: number, bottom: number): void {
+    const changed = Math.abs(top - this.insets.top) > 4 || Math.abs(bottom - this.insets.bottom) > 4
+    this.insets = { top, bottom }
+    this.applyInsets()
+    // The distance depends on the visible area, so re-frame the last view
+    // once the chrome has stopped moving.
+    if (changed && this.lastView) {
+      window.clearTimeout(this.reframeTimer)
+      this.reframeTimer = window.setTimeout(() => this.lastView && this.view(this.lastView, true), 120)
+    }
+  }
+
+  private reframeTimer = 0
+
+  private lastView: CrownView | null = null
+
+  private applyInsets(): void {
+    const w = this.mount.clientWidth
+    const h = this.mount.clientHeight
+    const shift = (this.insets.bottom - this.insets.top) / 2
+    if (w && h && Math.abs(shift) > 1) this.camera.setViewOffset(w, h, 0, shift, w, h)
+    else this.camera.clearViewOffset()
+    this.camera.updateProjectionMatrix()
+  }
+
+  /** Neutral studio backdrop that follows the system appearance. */
+  setAppearance(dark: boolean): void {
+    this.scene.background = new THREE.Color(dark ? 0x1c1c1e : 0xd9dde3)
   }
 
   onTap(handler: (p: Pick | null) => void): void {
@@ -299,6 +336,11 @@ export class StudioViewport {
     arrow(f.mesial, 0x6cc3a5, 'M')
   }
 
+  /** Orientation arrows (B/M) — useful while checking margin and axis only. */
+  setFrameVisible(on: boolean): void {
+    this.groups.frame.visible = on
+  }
+
   setMarker(p: Vec3 | null, radiusMm = 1.5): void {
     StudioViewport.clear(this.groups.marker)
     if (!p) return
@@ -328,11 +370,19 @@ export class StudioViewport {
   }
 
   /** Camera to a named side of the tooth (needs a frame), or fit everything. */
-  view(v: CrownView, animate = true): void {
+  view(v: CrownView, animate = true, square = false): void {
     const f = this.frame
     const s = this.focusSphere()
     if (!s) return
-    const dist = fitDistanceFor(this.camera, Math.max(s.radius, 7)) * 1.25
+    this.lastView = v
+    // Frame for the part of the screen the chrome leaves visible.
+    // Fit the narrower of the width (portrait phones) and the uncovered height.
+    const w = this.mount.clientWidth || 1
+    const h = this.mount.clientHeight || 1
+    const visible = Math.max(160, h - this.insets.top - this.insets.bottom)
+    const tanV = Math.tan((Math.PI * this.camera.fov) / 360)
+    const half = Math.atan(tanV * (square ? 1 : Math.min(w / h, visible / h)))
+    const dist = (Math.max(s.radius, 7) / Math.sin(half)) * 1.1
     let dir = new THREE.Vector3(0.0, 0.6, 1).normalize()
     let up = new THREE.Vector3(0, 1, 0)
     if (f) {
@@ -362,11 +412,13 @@ export class StudioViewport {
 
   /** PNG (base64, no prefix) of the scene from a named view — for AI review. */
   snapshot(v: CrownView, size = 768): string {
+    const prevView = this.lastView
     const prev = { pos: this.camera.position.clone(), up: this.camera.up.clone(), target: this.rig.target.clone(), aspect: this.camera.aspect }
     const w = this.renderer.domElement.width
     const h = this.renderer.domElement.height
     this.rig.cancelAnim()
-    this.view(v, false)
+    this.camera.clearViewOffset()
+    this.view(v, false, true)
     this.renderer.setSize(size, size, false)
     this.camera.aspect = 1
     this.camera.updateProjectionMatrix()
@@ -374,16 +426,18 @@ export class StudioViewport {
     const url = this.renderer.domElement.toDataURL('image/png')
     this.renderer.setSize(w / this.renderer.getPixelRatio(), h / this.renderer.getPixelRatio(), false)
     this.camera.aspect = prev.aspect
-    this.camera.updateProjectionMatrix()
+    this.applyInsets()
     this.camera.position.copy(prev.pos)
     this.camera.up.copy(prev.up)
     this.rig.target.copy(prev.target)
+    this.lastView = prevView
     this.camera.lookAt(prev.target)
     return url.slice(url.indexOf(',') + 1)
   }
 
   dispose(): void {
     cancelAnimationFrame(this.raf)
+    window.clearTimeout(this.reframeTimer)
     this.ro.disconnect()
     this.renderer.domElement.removeEventListener('pointerdown', this.onDown)
     this.renderer.domElement.removeEventListener('pointerup', this.onUp)

@@ -90,6 +90,27 @@ Every design is a pure function of (scans, margin, parameters). Undo is
 
 ---
 
+## 2b. The interface
+
+The workflow mirrors exocad's wizard (Scans → Margin → Axis → Anatomy →
+Adapt → Check → Export) as a tappable stage rail; each stage ends with
+**Continue**. The layout follows Apple's HIG for iPhone: a translucent nav
+bar with the case title and QC/AI status, the 3D model full-screen behind,
+and a bottom sheet with three detents (peek / half / full) that holds the
+stage's controls as grouped lists, segmented controls and switches (44 pt
+targets, system font, light and dark appearance). The camera keeps the
+crown centred in the part of the screen the sheet leaves visible.
+
+One tap on the prep runs the whole pipeline as a visible "Design run":
+margin, axis, anatomy, contacts and occlusion, thickness, quality checks,
+then (with AI on) an automatic AI fix if anything fails and an AI review.
+The "Ask, or say a change" field takes voice or text at any stage.
+
+The interface has been checked in headless phone emulation (`dev/e2e.mjs`)
+only — **not yet on a physical phone by a technician.**
+
+---
+
 ## 3. AI: what Claude does and doesn't do
 
 Claude never moves vertices. It edits the design through the same commands
@@ -200,8 +221,9 @@ reasonable start for posterior crowns; anterior anatomy needs its own set.
 1. **Not validated on real scans.** See §1.
 2. **Single posterior crowns first.** Anterior templates exist but are basic;
    bridges, inlays/onlays, veneers and implant crowns are not built.
-3. **No manual insertion-axis tilt.** The axis comes from the margin and
-   blockout handles undercuts; a tilt control is a planned addition.
+3. **Insertion-axis tilt is manual only.** The axis comes from the margin
+   plane; the Axis stage tilts it (mesial/distal, buccal/lingual) and
+   blockout follows. There is no automatic best-path search yet.
 4. **Heavily subgingival or unclear margins** will need the one-tap fix more
    often. The confidence colouring shows where.
 5. **Design runs on the phone.** About 1 s per edit on a desktop-class CPU;

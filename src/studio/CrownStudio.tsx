@@ -45,14 +45,50 @@ import { zip } from '../core/zip'
 import { clearModels, deleteCase, listCases, loadCase, loadModel, newCaseId, saveCase, saveModel, updateCase, type CaseMeta } from './caseStore'
 import './studio.css'
 
-type Step = 'case' | 'margin' | 'design' | 'check' | 'export'
+/**
+ * The stages mirror the exocad crown wizard (margin → insertion axis →
+ * library tooth → adaptation/free-forming → checks → export) so a
+ * technician finds every decision where they expect it — but each stage is
+ * done for them on the first pass and only revisited to override.
+ */
+type Step = 'case' | 'margin' | 'axis' | 'anatomy' | 'design' | 'check' | 'export'
 const STEPS: Array<[Step, string]> = [
-  ['case', 'Case'],
+  ['case', 'Scans'],
   ['margin', 'Margin'],
-  ['design', 'Design'],
+  ['axis', 'Axis'],
+  ['anatomy', 'Anatomy'],
+  ['design', 'Adapt'],
   ['check', 'Check'],
   ['export', 'Export']
 ]
+
+type Detent = 'peek' | 'half' | 'full'
+
+interface RunStage {
+  key: string
+  label: string
+  status: 'pending' | 'active' | 'done' | 'warn' | 'fail' | 'skipped'
+  detail?: string
+}
+
+const TOOTH_NAMES: Record<string, string> = {
+  upperMolar: 'upper molar',
+  lowerMolar: 'lower molar',
+  upperPremolar: 'upper premolar',
+  lowerPremolar: 'lower premolar',
+  upperCanine: 'upper canine',
+  lowerCanine: 'lower canine',
+  upperAnterior: 'upper incisor',
+  lowerAnterior: 'lower incisor'
+}
+
+function haptic(ms = 8): void {
+  try {
+    navigator.vibrate?.(ms)
+  } catch {
+    /* not supported */
+  }
+}
 
 interface ScanFile {
   name: string
@@ -106,6 +142,8 @@ function download(blob: Blob, name: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 5000)
 }
 
+type CriticResultLite = DesignData['results'][number]
+
 const fmt = (x: number | null | undefined, d = 2): string => (x === null || x === undefined || !Number.isFinite(x) ? '—' : x.toFixed(d))
 
 export default function CrownStudio(): React.JSX.Element {
@@ -150,7 +188,9 @@ export default function CrownStudio(): React.JSX.Element {
   const [useLearned, setUseLearned] = useState(true)
   const [alignZ, setAlignZ] = useState(false)
   const [override, setOverride] = useState('')
-  const [sheetOpen, setSheetOpen] = useState(true)
+  const [detent, setDetent] = useState<Detent>('peek')
+  const [run, setRun] = useState<RunStage[] | null>(null)
+  const [dark, setDark] = useState(() => typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches)
   const [caseId, setCaseId] = useState<string | null>(null)
   const [recent, setRecent] = useState<CaseMeta[]>([])
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -193,6 +233,40 @@ export default function CrownStudio(): React.JSX.Element {
       viewRef.current = null
     }
   }, [])
+
+  useEffect(() => {
+    if (typeof matchMedia === 'undefined') return
+    const mq = matchMedia('(prefers-color-scheme: dark)')
+    const on = (): void => setDark(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  useEffect(() => viewRef.current?.setAppearance(dark), [dark])
+
+  useEffect(() => viewRef.current?.setFrameVisible(step === 'margin' || step === 'axis'), [step, design])
+
+  // Keep the model centred above the sheet as it changes height.
+  const sheetRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const measure = (): void => {
+      const sheet = sheetRef.current?.getBoundingClientRect()
+      const rail = (document.querySelector('.st-rail') ?? document.querySelector('.st-nav'))?.getBoundingClientRect()
+      if (!sheet) return
+      viewRef.current?.setObscured(rail ? rail.bottom : 0, window.innerHeight - sheet.top)
+    }
+    measure()
+    // Measure again once the detent animation has finished, however long it took.
+    const el = sheetRef.current
+    el?.addEventListener('transitionend', measure)
+    const ro = el ? new ResizeObserver(measure) : null
+    if (el) ro!.observe(el)
+    window.addEventListener('resize', measure)
+    return () => {
+      el?.removeEventListener('transitionend', measure)
+      ro?.disconnect()
+      window.removeEventListener('resize', measure)
+    }
+  }, [detent, loaded])
 
   // Learned anatomy for the tooth's class, if the lab has trained one.
   useEffect(() => {
@@ -317,6 +391,7 @@ export default function CrownStudio(): React.JSX.Element {
       v.view('fit', false)
       fitToScan(prep.geometry)
       setStep('margin')
+      setDetent('peek') // keep the model clear for the tap
       setStatus(`Scans ready (${(r.triangles / 1000).toFixed(0)}k triangles). Tap the prepared tooth.`)
       if (restore) {
         setCaseId(restore.id)
@@ -474,21 +549,95 @@ export default function CrownStudio(): React.JSX.Element {
     if (autoTap) await tapPrep(c.tapPoint)
   }
 
+  /** Marks one stage of the design run (the card the sheet shows). */
+  function stage(key: string, status: RunStage['status'], detail?: string): void {
+    setRun((r) => (r ? r.map((x) => (x.key === key ? { ...x, status, detail: detail ?? x.detail } : x)) : r))
+  }
+
+  /**
+   * The end-to-end AI crown: one tap on the prep runs every wizard stage in
+   * order, shows each result as it lands, lets Claude try to clear anything
+   * failing, has Claude review the result, and stops on the checks — the
+   * technician's decision point.
+   */
   async function tapPrep(point: [number, number, number]): Promise<void> {
+    const withAi = ai.ai
+    setRun([
+      { key: 'margin', label: 'Margin line', status: 'active' },
+      { key: 'axis', label: 'Insertion axis', status: 'pending' },
+      { key: 'anatomy', label: 'Anatomy', status: 'pending' },
+      { key: 'adapt', label: 'Contacts & occlusion', status: 'pending' },
+      { key: 'thickness', label: 'Material thickness', status: 'pending' },
+      { key: 'checks', label: 'Quality checks', status: 'pending' },
+      { key: 'ai', label: 'AI review', status: withAi ? 'pending' : 'skipped', detail: withAi ? undefined : 'AI not connected' }
+    ])
+    setStep('margin')
+    setDetent('half')
     setBusy('Finding the margin…')
+    let m: MarginResult
     try {
-      const m = await engineRef.current!.margin(point)
-      pushHistory()
-      setMargin(m)
-      viewRef.current?.setMargin(m.points, m.confidence)
-      const low = m.confidence.filter((c) => c < 0.35).length
-      setStatus(low ? `Margin found — ${low} uncertain sample(s) in red. Designing…` : 'Margin found. Designing…')
-      setStep('design')
-      const d = await runDesign('final', { margin: m })
-      if (d) viewRef.current?.view('buccal')
+      m = await engineRef.current!.margin(point)
     } catch (e) {
+      stage('margin', 'fail', e instanceof Error ? e.message : String(e))
       setStatus(e instanceof Error ? e.message : String(e))
       setBusy(null)
+      return
+    }
+    pushHistory()
+    setMargin(m)
+    viewRef.current?.setMargin(m.points, m.confidence)
+    const sure = Math.round(100 * (1 - m.confidence.filter((c) => c < 0.35).length / m.confidence.length))
+    stage('margin', sure >= 85 ? 'done' : 'warn', `${sure}% clear finish line`)
+    stage('axis', 'active')
+    const d = await runDesign('final', { margin: m })
+    if (!d) {
+      stage('axis', 'fail', 'design failed')
+      return
+    }
+    haptic()
+    const r = (id: string): CriticResultLite | undefined => d.results.find((x) => x.id === id)
+    const v = (x?: CriticResultLite): RunStage['status'] => (!x ? 'done' : x.verdict === 'pass' ? 'done' : x.verdict === 'warn' ? 'warn' : 'fail')
+    stage('axis', v(r('undercut')), r('undercut')?.measured.split(',')[0] ?? 'set')
+    stage('anatomy', 'done', state.current.useLearned && state.current.model ? state.current.model.source : 'textbook template')
+    const contactWorst = [r('contact-mesial'), r('contact-distal'), r('occlusion')].sort((a, b) => rank(b) - rank(a))[0]
+    stage('adapt', v(contactWorst), `M ${fmt(d.summary.mesialContactMm)} · D ${fmt(d.summary.distalContactMm)} · occl ${fmt(d.summary.occlusalMinMm)} mm`)
+    const thickWorst = [r('thickness-axial'), r('thickness-occlusal')].sort((a, b) => rank(b) - rank(a))[0]
+    stage('thickness', v(thickWorst), `${fmt(d.summary.minAxialThicknessMm)} axial · ${fmt(d.summary.minOcclusalThicknessMm)} occlusal mm`)
+    const passes = d.results.filter((x) => x.verdict === 'pass').length
+    let final = d
+    stage('checks', d.exportable ? (passes === d.results.length ? 'done' : 'warn') : 'fail', `${passes}/${d.results.length} pass`)
+    if (withAi) {
+      if (!d.exportable) {
+        stage('checks', 'active', 'asking Claude to fix…')
+        await fixWithAi()
+        final = state.current.design ?? d
+        const p2 = final.results.filter((x) => x.verdict === 'pass').length
+        stage('checks', final.exportable ? 'done' : 'fail', `${p2}/${final.results.length} pass${final.exportable ? ' after AI fix' : ''}`)
+      }
+      stage('ai', 'active')
+      await runReview()
+      stage('ai', 'done', 'see below')
+    }
+    setStep('check')
+    viewRef.current?.view('buccal')
+    setStatus(final.exportable ? 'Crown designed and checked — ready to export.' : 'Crown designed — some checks need you. See Check.')
+  }
+
+  function rank(x?: CriticResultLite): number {
+    return !x ? 0 : x.verdict === 'fail' ? 2 : x.verdict === 'warn' ? 1 : 0
+  }
+
+  /** Lets Claude clear failing checks through the normal tools. */
+  async function fixWithAi(): Promise<void> {
+    const prompt = 'Some quality checks are failing or flagged. Change design parameters to clear them where a parameter can (call get_checks after each change). If the prep or scan itself prevents it, do not force it: say in one sentence what the dentist or technician has to change.'
+    try {
+      const r =
+        ai.mode === 'artifact' && sampleRef.current
+          ? await assistViaSample(sampleRef.current, sampleChat.current, prompt, stateSummary(), execute)
+          : await assist(aiHistory.current, prompt, stateSummary(), execute)
+      say('ai', r.reply)
+    } catch (e) {
+      say('app', ai.mode === 'artifact' ? sampleErrorText(e) : e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -519,6 +668,7 @@ export default function CrownStudio(): React.JSX.Element {
       setSculptAt({ i, j, point: p.point })
       viewRef.current?.setMarker(p.point, sculptRadius)
       if (s.step !== 'design') setStep('design')
+      if (detent === 'peek') setDetent('half')
     }
   }
 
@@ -863,318 +1013,432 @@ export default function CrownStudio(): React.JSX.Element {
   const framed = typeof window !== 'undefined' && window.top !== window
   const d = design
   const counts = d ? { pass: d.results.filter((r) => r.verdict === 'pass').length, warn: d.results.filter((r) => r.verdict === 'warn').length, fail: d.results.filter((r) => r.verdict === 'fail').length } : null
+  const stepIndex = STEPS.findIndex(([k]) => k === step)
+  const stageState = (k: Step): 'done' | 'current' | 'todo' | 'attention' => {
+    if (k === step) return 'current'
+    const reached = k === 'case' ? loaded : k === 'margin' ? Boolean(margin) : Boolean(d)
+    if (!reached) return 'todo'
+    if (k === 'check' && counts && counts.fail) return 'attention'
+    return 'done'
+  }
+  const next = (): void => {
+    const n = STEPS[Math.min(STEPS.length - 1, stepIndex + 1)][0]
+    setStep(n)
+    haptic()
+  }
+  const lastLine = chat.length ? `${chat[chat.length - 1].who === 'ai' ? 'AI · ' : ''}${chat[chat.length - 1].text}` : status
+  const toothLabel = `#${tooth} · ${TOOTH_NAMES[toothClassOf(tooth)] ?? ''}`
 
   return (
-    <div className="studio">
-      <header className="st-head">
-        <div className="st-brand">
-          <span className="st-lab">{LAB_NAME}</span>
-          <span className="st-dept">Crowns</span>
-        </div>
-        <span className="st-spacer" />
-        <button className="st-chip" onClick={() => setStep('case')} title="Tooth">#{tooth}</button>
-        {counts && (
-          <button className={`st-chip ${counts.fail ? 'bad' : counts.warn ? 'meh' : 'good'}`} onClick={() => setStep('check')}>
-            {counts.fail ? `${counts.fail} fail` : counts.warn ? `${counts.warn} to check` : 'QC ✓'}
-          </button>
-        )}
-        <span className={`st-chip ${ai.ai ? 'ai' : 'off'}`} title={ai.ai ? `AI: ${ai.model ?? 'on'}` : 'No AI connected (server or claude.ai)'}>AI {ai.ai ? 'on' : 'off'}</span>
-        <button className="st-icon" onClick={() => setHelpOpen((o) => !o)} aria-label="Help">?</button>
-      </header>
-
+    <div className={`studio ${dark ? 'dark' : ''}`}>
       <div className="st-stage" ref={mountRef}>
-        {busy && (
-          <div className="st-busy">
-            <span className="st-spin" /> {busy}
+        {!loaded && !busy && (
+          <div className="st-welcome">
+            <p className="st-eyebrow">{LAB_NAME} · Crowns</p>
+            <h1>Design a crown in one tap.</h1>
+            <p>Load the prep and opposing scans, tap the prepared tooth, and the crown is margined, shaped, fitted to the bite and checked.</p>
+            <div className="st-welcome-actions">
+              <button className="st-btn primary large" onClick={() => fileRef.current?.click()}>Load Scans</button>
+              <button className="st-btn tinted large" onClick={() => void loadDemo(true)}>Try the Demo Case</button>
+            </div>
+            {recent.length > 0 && (
+              <div className="st-group st-welcome-recents">
+                <div className="st-group-head">Recent</div>
+                {recent.slice(0, 3).map((c) => (
+                  <div key={c.id} className="st-row-item">
+                    <button className="st-row-main st-row-btn" onClick={() => void openCase(c.id)}>
+                      <b>{c.name}</b>
+                      <span>{new Date(c.updatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{c.status ? ` · ${c.status}` : ''}</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
-        {!loaded && !busy && (
-          <div className="st-empty">
-            <h1>Design a crown on your phone</h1>
-            <p>Load the case scans, tap the prepared tooth, and the engine finds the margin, designs the crown and checks it.</p>
-            <div className="st-row">
-              <button className="st-primary" onClick={() => fileRef.current?.click()}>Load scans</button>
-              <button className="st-secondary" onClick={() => void loadDemo(true)}>Try the demo</button>
-            </div>
+        {loaded && !margin && !busy && <div className="st-coach">Tap the prepared tooth</div>}
+        {(listening || interim) && <div className="st-coach live">{interim || 'Listening…'}</div>}
+        {busy && (
+          <div className="st-hud" role="status">
+            <span className="st-spinner" /> {busy}
           </div>
         )}
         {loaded && (
-          <div className="st-views">
+          <div className="st-viewbar" role="toolbar" aria-label="Views">
             {(['occlusal', 'buccal', 'lingual', 'mesial', 'distal'] as const).map((v) => (
-              <button key={v} onClick={() => viewRef.current?.view(v)} title={v}>{v[0].toUpperCase()}</button>
+              <button key={v} onClick={() => viewRef.current?.view(v)} title={`${v[0].toUpperCase()}${v.slice(1)} view`} aria-label={`${v} view`}>
+                {v[0].toUpperCase()}
+              </button>
             ))}
-            <span className="sep" />
-            <button onClick={() => setLayerState('antagonist')} title="Antagonist">A</button>
-            <button onClick={() => setLayerState('heatmap')} title="Thickness map">T</button>
+            <span className="st-viewbar-sep" />
+            <button onClick={() => setLayerState('antagonist')} title="Show or hide the opposing jaw" aria-label="Opposing jaw">◐</button>
+            <button onClick={() => setLayerState('heatmap')} title="Thickness map" aria-label="Thickness map">▤</button>
           </div>
-        )}
-        {(listening || interim) && <div className="st-transcript">{interim || 'Listening…'}</div>}
-        {helpOpen && (
-          <aside className="st-help">
-            <h2>How it works</h2>
-            <ol>
-              <li>Load the prep-arch scan and the opposing scan (STL/PLY), or the demo.</li>
-              <li>Tap the prepared tooth. The margin, crown, contacts, occlusion and thickness are done for you.</li>
-              <li>Adjust by talking, typing, the sliders, or by tapping the crown and adding/removing.</li>
-              <li>Check, then export the STL for milling.</li>
-            </ol>
-            <h2>Things you can say</h2>
-            <table>
-              <tbody>
-                {CROWN_HELP.map(([s, d2]) => (
-                  <tr key={s}>
-                    <td>“{s}”</td>
-                    <td>{d2}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <p className="st-fine">
-              {ai.ai ? 'Anything else goes to Claude, which edits the design with the same commands.' : 'With the AI server running, anything else you say goes to Claude.'} One finger turns the model, two fingers zoom and pan.
-            </p>
-            <button className="st-secondary" onClick={() => setHelpOpen(false)}>Close</button>
-          </aside>
         )}
       </div>
 
-      <section className={`st-sheet ${sheetOpen ? '' : 'closed'}`}>
-        <nav className="st-tabs">
-          {STEPS.map(([k, label], n) => (
-            <button key={k} className={step === k ? 'on' : ''} onClick={() => { setStep(k); setSheetOpen(true) }}>
-              <span>{n + 1}</span> {label}
+      <header className="st-nav">
+        <button className="st-nav-title" onClick={() => { setStep('case'); setDetent('half') }}>
+          <span className="st-nav-case">{loaded ? toothLabel : 'New case'}</span>
+          <span className="st-nav-sub">{MATERIALS[params.material].label}</span>
+        </button>
+        <span className="st-flex" />
+        {counts && (
+          <button className={`st-pill ${counts.fail ? 'bad' : counts.warn ? 'meh' : 'good'}`} onClick={() => setStep('check')}>
+            {counts.fail ? `${counts.fail} Issue${counts.fail > 1 ? 's' : ''}` : counts.warn ? `${counts.warn} to Review` : 'Ready'}
+          </button>
+        )}
+        <span className={`st-pill ${ai.ai ? 'ai' : 'off'}`} title={ai.ai ? `Claude · ${ai.model ?? ''}` : 'AI not connected'}>
+          ✦ {ai.ai ? 'AI' : 'AI Off'}
+        </span>
+        <button className="st-round" onClick={() => setHelpOpen((o) => !o)} aria-label="Help">?</button>
+      </header>
+
+      {loaded && (
+        <nav className="st-rail" aria-label="Design stages">
+          {STEPS.map(([k, label]) => (
+            <button key={k} className={`st-rail-item ${stageState(k)}`} onClick={() => { setStep(k); if (detent === 'peek') setDetent('half'); haptic() }} aria-current={k === step ? 'step' : undefined}>
+              <span className="st-rail-dot" />
+              {label}
             </button>
           ))}
-          <button className="st-collapse" onClick={() => setSheetOpen((o) => !o)} aria-label="Toggle panel">{sheetOpen ? '▾' : '▴'}</button>
         </nav>
-        {sheetOpen && (
-          <div className="st-panel">
-            {step === 'case' && (
-              <div className="st-stack">
-                <label className="st-field">
-                  <span>Tooth (Universal)</span>
-                  <select value={tooth} onChange={(e) => void execute({ kind: 'setTooth', tooth: Number(e.target.value) })}>
-                    {Array.from({ length: 32 }, (_, k) => k + 1).map((n) => (
-                      <option key={n} value={n}>#{n} — {toothClassOf(n).replace(/([A-Z])/g, ' $1').toLowerCase()}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="st-field">
-                  <span>Material</span>
-                  <select value={params.material} onChange={(e) => void execute({ kind: 'material', material: e.target.value as MaterialId })}>
-                    {Object.values(MATERIALS).map((m) => (
-                      <option key={m.id} value={m.id}>{m.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <p className="st-fine">{MATERIALS[params.material].note} Min {MATERIALS[params.material].minAxialMm} mm axial / {MATERIALS[params.material].minOcclusalMm} mm occlusal, cement {MATERIALS[params.material].cementGapMm} mm.</p>
-                <div className="st-row">
-                  <button className="st-primary" onClick={() => fileRef.current?.click()}>Add scans</button>
-                  <button className="st-secondary" onClick={() => void loadDemo()}>Demo case</button>
-                  <button className="st-secondary" onClick={() => rxRef.current?.click()} disabled={!ai.ai || !ai.images} title={ai.ai && ai.images ? 'Photo of the Rx' : 'Needs AI with image access'}>Read Rx photo</button>
+      )}
+
+      {helpOpen && (
+        <div className="st-modal" role="dialog" aria-label="Help" onClick={() => setHelpOpen(false)}>
+          <div className="st-modal-card" onClick={(e) => e.stopPropagation()}>
+            <h2>How it works</h2>
+            <ol className="st-howto">
+              <li>Load the prep-arch and opposing scans (STL/PLY), or the demo.</li>
+              <li>Tap the prepared tooth. Margin, axis, anatomy, contacts, occlusion and thickness are done in one pass, then checked.</li>
+              <li>Revisit any stage to override it — or just say what you want.</li>
+              <li>Export the STL for milling.</li>
+            </ol>
+            <h2>Things you can say</h2>
+            <dl className="st-say">
+              {CROWN_HELP.map(([say2, what]) => (
+                <div key={say2}>
+                  <dt>“{say2}”</dt>
+                  <dd>{what}</dd>
                 </div>
-                {rxNote && <p className="st-note">{rxNote}</p>}
-                <div className="st-stack">
-                  <div className="st-row">
-                    <button className="st-secondary" onClick={() => libRef.current?.click()}>Import tooth library</button>
-                    <select aria-label="Library jaw" value={libJaw} onChange={(e) => setLibJaw(e.target.value as 'auto' | 'upper' | 'lower')}>
-                      <option value="auto">numbers in names</option>
-                      <option value="upper">upper set (1–8 from midline)</option>
-                      <option value="lower">lower set (1–8 from midline)</option>
-                    </select>
-                    {model && <button className="st-link" onClick={() => void clearModels().then(() => { setLibNote('Imported libraries removed from this device.'); setModelsVersion((v) => v + 1) })}>Remove imported</button>}
+              ))}
+            </dl>
+            <p className="st-foot">One finger turns the model, two fingers zoom and pan.{ai.ai ? ' Anything else you say goes to Claude, which edits with the same commands.' : ''}</p>
+            <button className="st-btn primary" onClick={() => setHelpOpen(false)}>Done</button>
+          </div>
+        </div>
+      )}
+
+      <section ref={sheetRef} className={`st-sheet ${detent}`} aria-label="Design panel">
+        <button className="st-grabber" aria-label="Resize panel" onClick={() => setDetent((x) => (x === 'peek' ? 'half' : x === 'half' ? 'full' : 'peek'))}>
+          <span />
+        </button>
+        <form className="st-ask" onSubmit={(e) => { e.preventDefault(); void submit(input) }}>
+          <span className="st-ask-icon">✦</span>
+          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={framed ? 'Ask or type a change' : 'Ask, or say a change'} aria-label="Command" enterKeyHint="send" onFocus={() => detent === 'peek' && setDetent('half')} />
+          {dictation?.supported && !framed && (
+            <button type="button" className={listening ? 'st-mic on' : 'st-mic'} onClick={() => (listening ? dictation.stop() : dictation.start())} aria-label="Speak">
+              {listening ? '■' : '🎙'}
+            </button>
+          )}
+        </form>
+        <p className="st-status" role="status">{lastLine}</p>
+
+        {detent !== 'peek' && (
+          <div className="st-content">
+            {run && (step === 'margin' || step === 'check') && (
+              <div className="st-group">
+                <div className="st-group-head">Design run</div>
+                {run.map((r) => (
+                  <div key={r.key} className={`st-runrow ${r.status}`}>
+                    <span className="st-runicon">{r.status === 'done' ? '✓' : r.status === 'warn' ? '!' : r.status === 'fail' ? '✕' : r.status === 'active' ? '' : '·'}</span>
+                    <span className="st-runlabel">{r.label}</span>
+                    <span className="st-rundetail">{r.detail ?? (r.status === 'active' ? 'working…' : '')}</span>
                   </div>
-                  <p className="st-fine">Select all of a library’s tooth files at once (STL, PLY or exocad .eoff). Names must contain the tooth number (Universal or FDI); for exocad folders named 1–8, pick the jaw first and import upper and lower separately. The forms become the starting anatomy for each tooth class, kept on this device only. Use libraries you’re licensed to use.</p>
-                  {libNote && <p className="st-note">{libNote}</p>}
+                ))}
+              </div>
+            )}
+
+            {step === 'case' && (
+              <>
+                <h2 className="st-h">Case</h2>
+                <div className="st-group">
+                  <div className="st-group-head">Tooth</div>
+                  <ToothChart value={tooth} onPick={(n) => void execute({ kind: 'setTooth', tooth: n })} />
+                </div>
+                <div className="st-group">
+                  <div className="st-group-head">Material</div>
+                  <div className="st-segmented wrap">
+                    {Object.values(MATERIALS).map((m) => (
+                      <button key={m.id} className={params.material === m.id ? 'on' : ''} onClick={() => void execute({ kind: 'material', material: m.id })}>
+                        {m.label.replace(/ \(.*\)/, '')}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="st-foot">{MATERIALS[params.material].label}: min {MATERIALS[params.material].minAxialMm} mm axial / {MATERIALS[params.material].minOcclusalMm} mm occlusal, cement {MATERIALS[params.material].cementGapMm} mm. {MATERIALS[params.material].note}</p>
+                </div>
+                <div className="st-group">
+                  <div className="st-group-head">Scans</div>
+                  {files.map((f, k) => (
+                    <div key={f.name + k} className="st-row-item">
+                      <span className="st-row-main">{f.name}</span>
+                      <select aria-label={`Role of ${f.name}`} value={f.role} onChange={(e) => setFiles((fs) => fs.map((x, i) => (i === k ? { ...x, role: e.target.value as FileRole } : x)))}>
+                        <option value="prep">Prep arch</option>
+                        <option value="antagonist">Opposing</option>
+                        <option value="bite">Bite (unused)</option>
+                        <option value="crown">Crown (reference)</option>
+                        <option value="ignore">Ignore</option>
+                      </select>
+                    </div>
+                  ))}
+                  <div className="st-actions">
+                    <button className="st-btn tinted" onClick={() => fileRef.current?.click()}>Add Scans</button>
+                    <button className="st-btn tinted" onClick={() => void loadDemo()}>Demo Case</button>
+                    <button className="st-btn tinted" onClick={() => rxRef.current?.click()} disabled={!ai.ai || !ai.images}>Read Rx Photo</button>
+                  </div>
+                  {rxNote && <p className="st-note">{rxNote}</p>}
+                  {files.length > 0 && <button className="st-btn primary block" onClick={() => void commitScans(files, tooth)}>Use These Scans</button>}
                 </div>
                 {recent.length > 0 && (
-                  <div className="st-recent">
-                    <h3>Cases on this device</h3>
-                    {recent.slice(0, 12).map((c) => (
-                      <div key={c.id} className={`st-case ${c.id === caseId ? 'on' : ''}`}>
-                        <button className="st-case-open" onClick={() => void openCase(c.id)}>
+                  <div className="st-group">
+                    <div className="st-group-head">Recent cases on this device</div>
+                    {recent.slice(0, 10).map((c) => (
+                      <div key={c.id} className={`st-row-item ${c.id === caseId ? 'on' : ''}`}>
+                        <button className="st-row-main st-row-btn" onClick={() => void openCase(c.id)}>
                           <b>{c.name}</b>
                           <span>{new Date(c.updatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}{c.status ? ` · ${c.status}` : ''}</span>
                         </button>
-                        <button className="st-link" onClick={() => void removeCase(c.id)}>{confirmDelete === c.id ? 'Tap again to delete' : 'Delete'}</button>
+                        <button className="st-link danger" onClick={() => void removeCase(c.id)}>{confirmDelete === c.id ? 'Confirm' : 'Delete'}</button>
                       </div>
                     ))}
                   </div>
                 )}
-                {files.length > 0 && (
-                  <div className="st-files">
-                    {files.map((f, k) => (
-                      <div key={f.name + k} className="st-file">
-                        <span className="st-fname">{f.name}</span>
-                        <select value={f.role} onChange={(e) => setFiles((fs) => fs.map((x, i) => (i === k ? { ...x, role: e.target.value as FileRole } : x)))}>
-                          <option value="prep">prep arch</option>
-                          <option value="antagonist">antagonist</option>
-                          <option value="bite">bite (unused)</option>
-                          <option value="crown">crown (reference)</option>
-                          <option value="ignore">ignore</option>
-                        </select>
-                      </div>
-                    ))}
-                    <button className="st-primary" onClick={() => void commitScans(files, tooth)}>Use these scans</button>
+                <div className="st-group">
+                  <div className="st-group-head">Tooth library</div>
+                  <div className="st-actions">
+                    <button className="st-btn tinted" onClick={() => libRef.current?.click()}>Import Library</button>
+                    <select aria-label="Library jaw" value={libJaw} onChange={(e) => setLibJaw(e.target.value as 'auto' | 'upper' | 'lower')}>
+                      <option value="auto">Numbers in names</option>
+                      <option value="upper">Upper set (1–8)</option>
+                      <option value="lower">Lower set (1–8)</option>
+                    </select>
+                    {model && <button className="st-link danger" onClick={() => void clearModels().then(() => { setLibNote('Imported libraries removed from this device.'); setModelsVersion((v) => v + 1) })}>Remove Imported</button>}
                   </div>
-                )}
+                  <p className="st-foot">STL, PLY or exocad .eoff, one file per tooth. Kept on this device.</p>
+                  {libNote && <p className="st-note">{libNote}</p>}
+                </div>
                 {ai.needsCode && (
-                  <label className="st-field">
-                    <span>AI access code</span>
-                    <input value={code} onChange={(e) => { setCode(e.target.value); setAccessCode(e.target.value) }} placeholder="from your lab admin" />
-                  </label>
+                  <div className="st-group">
+                    <div className="st-group-head">AI access code</div>
+                    <input className="st-field" value={code} onChange={(e) => { setCode(e.target.value); setAccessCode(e.target.value) }} placeholder="From your lab admin" />
+                  </div>
                 )}
-                <p className="st-fine">
-                  AI features (free-form requests, Rx photos, AI review) send the design data, renders and photos to Claude{ai.mode === 'artifact' ? ' on your Claude account' : ' through Anthropic’s API'}. Keep patient identifiers out of photos unless your lab has a BAA covering it. Scans never leave the device — the design engine runs on it.
-                </p>
-              </div>
+                <p className="st-foot">Scans stay on this device; the design engine runs here. AI features send design data and renders to Claude{ai.mode === 'artifact' ? ' on your account' : ''}. Keep patient identifiers out of photos unless your agreement covers them.</p>
+                {loaded && <button className="st-btn primary block" onClick={next}>Continue</button>}
+              </>
             )}
 
             {step === 'margin' && (
-              <div className="st-stack">
-                {!loaded && <p>Load the scans first.</p>}
-                {loaded && !margin && <p className="st-big">Tap the top of the prepared tooth.</p>}
+              <>
+                <h2 className="st-h">Margin</h2>
+                {!loaded && <p className="st-lead">Load the scans first.</p>}
+                {loaded && !margin && <p className="st-lead">Tap the prepared tooth. One tap finds the finish line and designs the crown.</p>}
                 {margin && (
                   <>
-                    <p>
-                      Margin: {margin.points.length} samples, {Math.round(100 * (1 - margin.confidence.filter((c) => c < 0.35).length / margin.confidence.length))}% high-confidence (green). Red sections are where the finish line was unclear.
+                    <p className="st-lead">
+                      {Math.round(100 * (1 - margin.confidence.filter((c) => c < 0.35).length / margin.confidence.length))}% of the line follows a clear finish line (green). Red stretches are where it was unclear — check those.
                     </p>
-                    <div className="st-row">
-                      <button className={editMargin ? 'st-primary' : 'st-secondary'} onClick={() => setEditMargin((e) => !e)}>{editMargin ? 'Done fixing' : 'Fix margin'}</button>
-                      <button className="st-secondary" onClick={() => { pushHistory(); setMargin(null); setDesign(null); viewRef.current?.setMargin(null); viewRef.current?.setCrown(null) }}>Re-tap prep</button>
-                      <button className="st-secondary" onClick={() => void execute({ kind: 'flipBuccal' })}>Flip buccal</button>
+                    <div className="st-segmented">
+                      <button className={!editMargin ? 'on' : ''} onClick={() => setEditMargin(false)}>View</button>
+                      <button className={editMargin ? 'on' : ''} onClick={() => setEditMargin(true)}>Tap to Adjust</button>
                     </div>
-                    {editMargin && <p className="st-fine">Tap on the scan where the margin should be — the nearest part of the line moves there and the crown redesigns.</p>}
-                    <Slider label="Axis tilt mesial/distal" unit="°" min={-15} max={15} step={1} value={params.axisTiltMesialDeg} onChange={(v) => slide('axisTiltMesialDeg', v)} hint="+ mesial" />
-                    <Slider label="Axis tilt buccal/lingual" unit="°" min={-15} max={15} step={1} value={params.axisTiltBuccalDeg} onChange={(v) => slide('axisTiltBuccalDeg', v)} hint="+ buccal" />
-                    {design && (
-                      <p className="st-fine">
-                        Undercuts along this path: {design.results.find((r) => r.id === 'undercut')?.measured ?? '—'}
-                      </p>
-                    )}
-                    {design && <p className="st-fine">Buccal arrow (B) {Math.round(design.buccalConfidence * 100)}% confident — it should point to the cheek.</p>}
+                    {editMargin && <p className="st-foot">Tap the scan where the margin should run; the nearest stretch moves there and the crown follows.</p>}
+                    <div className="st-actions">
+                      <button className="st-btn tinted" onClick={() => { pushHistory(); setMargin(null); setDesign(null); setRun(null); viewRef.current?.setMargin(null); viewRef.current?.setCrown(null) }}>Redetect</button>
+                      <button className="st-btn tinted" onClick={() => void execute({ kind: 'flipBuccal' })}>Flip Buccal</button>
+                    </div>
+                    {d && <p className="st-foot">Buccal arrow (B) {Math.round(d.buccalConfidence * 100)}% sure — it should point to the cheek.</p>}
+                    <button className="st-btn primary block" onClick={next}>Continue</button>
                   </>
                 )}
-              </div>
+              </>
+            )}
+
+            {step === 'axis' && (
+              <>
+                <h2 className="st-h">Insertion Axis</h2>
+                <p className="st-lead">Set from the margin and prep walls. Lean it only to reduce blocked-out undercuts.</p>
+                <div className="st-group">
+                  <Slider label="Mesial / distal" unit="°" min={-15} max={15} step={1} value={params.axisTiltMesialDeg} onChange={(v) => slide('axisTiltMesialDeg', v)} hint="+ mesial" />
+                  <Slider label="Buccal / lingual" unit="°" min={-15} max={15} step={1} value={params.axisTiltBuccalDeg} onChange={(v) => slide('axisTiltBuccalDeg', v)} hint="+ buccal" />
+                  <p className="st-foot">Undercut: {d?.results.find((r) => r.id === 'undercut')?.measured ?? '—'}</p>
+                </div>
+                <button className="st-btn primary block" onClick={next} disabled={!d}>Continue</button>
+              </>
+            )}
+
+            {step === 'anatomy' && (
+              <>
+                <h2 className="st-h">Anatomy</h2>
+                <div className="st-group">
+                  <div className="st-row-item">
+                    <span className="st-row-main">
+                      <b>{model && useLearned ? model.source : 'Textbook template'}</b>
+                      <span>{model ? 'Library tooth for this position' : 'No library for this tooth type yet'}</span>
+                    </span>
+                    {model && <button className="st-link" onClick={() => { setUseLearned((u) => !u); setTimeout(() => void runDesign('final'), 0) }}>{useLearned ? 'Use Textbook' : 'Use Library'}</button>}
+                  </div>
+                </div>
+                <div className="st-group">
+                  <Slider label="Cusp height" unit="×" min={0.6} max={1.4} step={0.05} value={params.cuspScale} onChange={(v) => slide('cuspScale', v)} />
+                  <Slider label="Groove depth" unit="×" min={0} max={2} step={0.1} value={params.grooveScale} onChange={(v) => slide('grooveScale', v)} />
+                  <Slider label="Rotation" unit="°" min={-15} max={15} step={1} value={params.rotationDeg} onChange={(v) => slide('rotationDeg', v)} />
+                  <Slider label="Buccal contour" unit="mm" min={-0.4} max={0.6} step={0.05} value={params.buccalBulgeMm} onChange={(v) => slide('buccalBulgeMm', v)} />
+                  <Slider label="Lingual contour" unit="mm" min={-0.4} max={0.6} step={0.05} value={params.lingualBulgeMm} onChange={(v) => slide('lingualBulgeMm', v)} />
+                </div>
+                <button className="st-btn primary block" onClick={next} disabled={!d}>Continue</button>
+              </>
             )}
 
             {step === 'design' && (
-              <div className="st-stack">
-                {!d && <p>{margin ? 'Designing…' : 'Tap the prep on the Margin step first.'}</p>}
+              <>
+                <h2 className="st-h">Adapt</h2>
+                {!d && <p className="st-lead">{margin ? 'Designing…' : 'Tap the prepared tooth first.'}</p>}
                 {d && (
                   <>
-                    <div className="st-anat">
-                      Anatomy: {model && useLearned ? `learned — ${model.source}` : 'textbook template'}
-                      {model && (
-                        <button className="st-link" onClick={() => { setUseLearned((u) => !u); setTimeout(() => void runDesign('final'), 0) }}>
-                          {useLearned ? 'use textbook' : 'use learned'}
-                        </button>
+                    <div className="st-group">
+                      <div className="st-group-head">Free-form</div>
+                      {sculptAt ? (
+                        <div className="st-actions">
+                          <button className="st-btn tinted" onClick={() => void sculptHere(-0.1)}>− 0.1</button>
+                          <button className="st-btn tinted" onClick={() => void sculptHere(-0.05)}>− 0.05</button>
+                          <button className="st-btn tinted" onClick={() => void sculptHere(0.05)}>+ 0.05</button>
+                          <button className="st-btn tinted" onClick={() => void sculptHere(0.1)}>+ 0.1</button>
+                          <div className="st-segmented small">
+                            {[0.8, 1.5, 2.5].map((r) => (
+                              <button key={r} className={sculptRadius === r ? 'on' : ''} onClick={() => { setSculptRadius(r); viewRef.current?.setMarker(sculptAt.point, r) }}>{r} mm</button>
+                            ))}
+                          </div>
+                          <button className="st-link" onClick={() => { setSculptAt(null); viewRef.current?.setMarker(null) }}>Done</button>
+                        </div>
+                      ) : (
+                        <p className="st-foot">Tap the crown to add or remove material at a spot. Contacts, occlusion and thickness are re-checked after every edit.</p>
                       )}
                     </div>
-                    {sculptAt ? (
-                      <div className="st-sculpt">
-                        <span>Spot selected</span>
-                        <button onClick={() => void sculptHere(-0.1)}>−0.1</button>
-                        <button onClick={() => void sculptHere(-0.05)}>−0.05</button>
-                        <button onClick={() => void sculptHere(0.05)}>+0.05</button>
-                        <button onClick={() => void sculptHere(0.1)}>+0.1</button>
-                        <select value={sculptRadius} onChange={(e) => { setSculptRadius(Number(e.target.value)); viewRef.current?.setMarker(sculptAt.point, Number(e.target.value)) }}>
-                          {[0.8, 1.5, 2.5].map((r) => (
-                            <option key={r} value={r}>r {r} mm</option>
-                          ))}
-                        </select>
-                        <button className="st-link" onClick={() => { setSculptAt(null); viewRef.current?.setMarker(null) }}>✕</button>
+                    <div className="st-group">
+                      <div className="st-group-head">Contacts & occlusion</div>
+                      <Slider label="Mesial contact" unit="mm" min={-0.1} max={0.15} step={0.01} value={params.contactMesialMm} onChange={(v) => slide('contactMesialMm', v)} hint="− tighter" />
+                      <Slider label="Distal contact" unit="mm" min={-0.1} max={0.15} step={0.01} value={params.contactDistalMm} onChange={(v) => slide('contactDistalMm', v)} hint="− tighter" />
+                      <Slider label="Occlusal clearance" unit="mm" min={0} max={0.3} step={0.01} value={params.occlusalClearanceMm} onChange={(v) => slide('occlusalClearanceMm', v)} hint="+ lower" />
+                      <div className="st-row-item">
+                        <span className="st-row-main">Occlusal stops</span>
+                        <label className="st-switch">
+                          <input type="checkbox" checked={params.occlusalContacts} onChange={(e) => void execute({ kind: 'occlusalContacts', on: e.target.checked })} />
+                          <span />
+                        </label>
                       </div>
-                    ) : (
-                      <p className="st-fine">Tap the crown to add or remove material at a spot.</p>
-                    )}
-                    <Slider label="Mesial contact" unit="mm" min={-0.1} max={0.15} step={0.01} value={params.contactMesialMm} onChange={(v) => slide('contactMesialMm', v)} hint="− tighter" />
-                    <Slider label="Distal contact" unit="mm" min={-0.1} max={0.15} step={0.01} value={params.contactDistalMm} onChange={(v) => slide('contactDistalMm', v)} hint="− tighter" />
-                    <Slider label="Occlusal clearance" unit="mm" min={0} max={0.3} step={0.01} value={params.occlusalClearanceMm} onChange={(v) => slide('occlusalClearanceMm', v)} hint="+ lower" />
-                    <Slider label="Cusp height" unit="×" min={0.6} max={1.4} step={0.05} value={params.cuspScale} onChange={(v) => slide('cuspScale', v)} />
-                    <Slider label="Buccal contour" unit="mm" min={-0.4} max={0.6} step={0.05} value={params.buccalBulgeMm} onChange={(v) => slide('buccalBulgeMm', v)} />
-                    <Slider label="Lingual contour" unit="mm" min={-0.4} max={0.6} step={0.05} value={params.lingualBulgeMm} onChange={(v) => slide('lingualBulgeMm', v)} />
-                    <Slider label="Rotation" unit="°" min={-15} max={15} step={1} value={params.rotationDeg} onChange={(v) => slide('rotationDeg', v)} />
-                    <div className="st-row">
-                      <button className="st-secondary" onClick={() => void execute({ kind: 'undo' })}>Undo</button>
-                      <button className="st-secondary" onClick={() => void execute({ kind: 'redo' })}>Redo</button>
-                      <button className="st-secondary" onClick={() => void redesignWith({ params: { ...DEFAULT_PARAMS, material: params.material } }, 'Reset to defaults')}>Reset</button>
                     </div>
-                    <p className="st-fine">
+                    <div className="st-actions">
+                      <button className="st-btn tinted" onClick={() => void execute({ kind: 'undo' })}>Undo</button>
+                      <button className="st-btn tinted" onClick={() => void execute({ kind: 'redo' })}>Redo</button>
+                      <button className="st-btn tinted" onClick={() => void redesignWith({ params: { ...DEFAULT_PARAMS, material: params.material } }, 'Reset to defaults')}>Reset</button>
+                    </div>
+                    <p className="st-foot">
                       Space M {fmt(d.measures.spaceMesialMm)} / D {fmt(d.measures.spaceDistalMm)} mm · crown {fmt(d.measures.mdWidthMm, 1)} × {fmt(d.measures.blWidthMm, 1)} mm · {fmt(d.volumeMm3, 0)} mm³ · {Object.values(d.timingsMs).reduce((a, b) => a + b, 0)} ms
                     </p>
+                    <button className="st-btn primary block" onClick={next}>Continue</button>
                   </>
                 )}
-              </div>
+              </>
             )}
 
             {step === 'check' && (
-              <div className="st-stack">
-                {!d && <p>No design yet.</p>}
+              <>
+                <h2 className="st-h">Check</h2>
+                {!d && <p className="st-lead">No design yet.</p>}
                 {d && (
                   <>
-                    <ul className="st-checks">
-                      {d.results.map((r) => (
-                        <li key={r.id} className={r.verdict}>
-                          <span className="st-v">{r.verdict === 'pass' ? '✓' : r.verdict === 'warn' ? '!' : '✕'}</span>
-                          <div>
-                            <b>{r.label}</b> <span className="st-m">{r.measured}</span>
-                            <div className="st-fine">{r.message}{r.fix ? ` ${r.fix}` : ''}</div>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="st-row">
-                      <button className="st-secondary" onClick={() => setLayerState('heatmap')}>{viewRef.current?.heatmapOn ? 'Hide' : 'Show'} thickness map</button>
-                      <button className="st-primary" onClick={() => void runReview()} disabled={!ai.ai}>AI review</button>
+                    <div className={`st-verdict ${counts!.fail ? 'bad' : counts!.warn ? 'meh' : 'good'}`}>
+                      <b>{counts!.fail ? 'Needs attention before milling' : counts!.warn ? 'Ready — a few things to glance at' : 'Ready to mill'}</b>
+                      <span>{counts!.pass} of {d.results.length} checks pass</span>
                     </div>
-                    {review && <div className="st-review">{review}</div>}
+                    <div className="st-group">
+                      {d.results.map((r) => (
+                        <div key={r.id} className={`st-check ${r.verdict}`}>
+                          <span className="st-check-icon">{r.verdict === 'pass' ? '✓' : r.verdict === 'warn' ? '!' : '✕'}</span>
+                          <div className="st-check-body">
+                            <div className="st-check-top">
+                              <b>{r.label}</b>
+                              <span>{r.measured}</span>
+                            </div>
+                            {r.verdict !== 'pass' && <p>{r.message}{r.fix ? ` ${r.fix}` : ''}</p>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="st-legend" aria-label="Thickness colors">
+                      <span><i className="c-red" /> below minimum</span>
+                      <span><i className="c-amber" /> near minimum</span>
+                      <span><i className="c-green" /> comfortable</span>
+                      <span><i className="c-blue" /> bulky</span>
+                    </div>
+                    <div className="st-actions">
+                      <button className="st-btn tinted" onClick={() => setLayerState('heatmap')}>{viewRef.current?.heatmapOn ? 'Hide' : 'Show'} Thickness</button>
+                      <button className="st-btn tinted" onClick={() => void runReview()} disabled={!ai.ai}>AI Review</button>
+                      {counts!.fail + counts!.warn > 0 && (
+                        <button className="st-btn tinted" disabled={!ai.ai} onClick={async () => { setBusy('Claude is fixing…'); await fixWithAi(); setBusy(null) }}>Fix with AI</button>
+                      )}
+                    </div>
+                    {review && <div className="st-review"><div className="st-group-head">AI review</div>{review}</div>}
+                    <button className="st-btn primary block" onClick={next}>Continue to Export</button>
                   </>
                 )}
-              </div>
+              </>
             )}
 
             {step === 'export' && (
-              <div className="st-stack">
-                {!d && <p>No design yet.</p>}
+              <>
+                <h2 className="st-h">Export</h2>
+                {!d && <p className="st-lead">No design yet.</p>}
                 {d && (
                   <>
                     {!d.exportable && (
-                      <div className="st-warnbox">
-                        <b>Checks failing:</b> {d.results.filter((r) => r.verdict === 'fail').map((r) => `${r.label} (${r.measured})`).join(', ')}.
-                        <label className="st-field">
-                          <span>Export anyway — reason (saved with the design)</span>
-                          <input value={override} onChange={(e) => setOverride(e.target.value)} placeholder="e.g. doctor approved reduced occlusal thickness" />
-                        </label>
+                      <div className="st-verdict bad">
+                        <b>Checks failing</b>
+                        <span>{d.results.filter((r) => r.verdict === 'fail').map((r) => `${r.label} (${r.measured})`).join(', ')}</span>
+                        <input className="st-field" value={override} onChange={(e) => setOverride(e.target.value)} placeholder="Reason to export anyway (saved with the design)" />
                       </div>
                     )}
-                    <label className="st-check">
-                      <input type="checkbox" checked={alignZ} onChange={(e) => setAlignZ(e.target.checked)} /> Align insertion axis to +Z (for CAM)
-                    </label>
-                    <div className="st-row">
-                      <button className="st-primary" disabled={!d.exportable && override.trim().length < 5} onClick={() => void exportCrown(false)}>Download STL</button>
-                      {!downloadsRef.current && <button className="st-secondary" disabled={!d.exportable && override.trim().length < 5} onClick={() => void exportCrown(true)}>Share…</button>}
+                    <div className="st-group">
+                      <div className="st-row-item">
+                        <span className="st-row-main">
+                          <b>{baseName()}.stl</b>
+                          <span>Closed single solid · {fmt(d.volumeMm3, 0)} mm³ · {MATERIALS[params.material].label}</span>
+                        </span>
+                      </div>
+                      <div className="st-row-item">
+                        <span className="st-row-main">Insertion axis along +Z (for CAM)</span>
+                        <label className="st-switch">
+                          <input type="checkbox" checked={alignZ} onChange={(e) => setAlignZ(e.target.checked)} />
+                          <span />
+                        </label>
+                      </div>
                     </div>
-                    <p className="st-fine">Exports a closed, single-solid STL (watertight-checked) plus a .design.json with the margin, parameters and check results, so the design can be audited or reproduced{downloadsRef.current ? ' — bundled as one .zip here' : ''}.</p>
+                    <button className="st-btn primary block" disabled={!d.exportable && override.trim().length < 5} onClick={() => { haptic(15); void exportCrown(false) }}>
+                      {downloadsRef.current ? 'Download (.zip)' : 'Download STL'}
+                    </button>
+                    {!downloadsRef.current && (
+                      <button className="st-btn tinted block" disabled={!d.exportable && override.trim().length < 5} onClick={() => void exportCrown(true)}>Share…</button>
+                    )}
+                    <p className="st-foot">Includes a .design.json with margin, parameters and checks, so the crown can be audited or reproduced.</p>
                   </>
                 )}
-              </div>
+              </>
             )}
           </div>
         )}
       </section>
-
-      <footer className="st-cmd">
-        <form onSubmit={(e) => { e.preventDefault(); void submit(input) }}>
-          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={framed ? 'Type or use your keyboard mic — “tighter mesial contact”' : ai.ai ? 'Say or type anything — “tighter mesial contact”' : 'Try “tighter mesial contact”, “flatter cusps”…'} aria-label="Command" enterKeyHint="send" />
-          {dictation?.supported && !framed && (
-            <button type="button" className={listening ? 'st-mic on' : 'st-mic'} onClick={() => (listening ? dictation.stop() : dictation.start())} aria-label="Speak">
-              {listening ? '◼' : '🎙'}
-            </button>
-          )}
-          <button type="submit" className="st-send" aria-label="Send">➤</button>
-        </form>
-        <p className="st-status" role="status">{chat.length ? `${chat[chat.length - 1].who === 'ai' ? 'AI: ' : ''}${chat[chat.length - 1].text}` : status}</p>
-      </footer>
 
       <input ref={fileRef} type="file" accept=".stl,.ply" multiple hidden onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }} />
       <input ref={libRef} type="file" accept=".stl,.ply,.eoff" multiple hidden onChange={(e) => { void importLibrary(e.target.files); e.target.value = '' }} />
@@ -1184,8 +1448,31 @@ export default function CrownStudio(): React.JSX.Element {
 
   function setLayerState(layer: 'antagonist' | 'heatmap'): void {
     viewRef.current?.setLayer(layer, 'toggle')
-    setStatus(`${layer === 'heatmap' ? 'Thickness map' : 'Antagonist'} ${viewRef.current?.layerVisible(layer) ? 'on' : 'off'}.`)
+    setStatus(`${layer === 'heatmap' ? 'Thickness map' : 'Opposing jaw'} ${viewRef.current?.layerVisible(layer) ? 'on' : 'off'}.`)
+    haptic()
   }
+}
+
+/** Universal tooth chart: upper arch 1–16 over lower 32–17, as on an Rx. */
+function ToothChart(props: { value: number; onPick: (n: number) => void }): React.JSX.Element {
+  const upper = Array.from({ length: 16 }, (_, i) => i + 1)
+  const lower = Array.from({ length: 16 }, (_, i) => 32 - i)
+  const row = (ns: number[]): React.JSX.Element => (
+    <div className="st-chart-row">
+      {ns.map((n) => (
+        <button key={n} className={props.value === n ? 'on' : ''} onClick={() => props.onPick(n)} aria-label={`Tooth ${n}`} aria-pressed={props.value === n}>
+          {n}
+        </button>
+      ))}
+    </div>
+  )
+  return (
+    <div className="st-chart">
+      {row(upper)}
+      {row(lower)}
+      <div className="st-chart-key"><span>Patient right</span><span>Patient left</span></div>
+    </div>
+  )
 }
 
 function sub(a: [number, number, number], b: [number, number, number]): [number, number, number] {
@@ -1196,8 +1483,8 @@ function Slider(props: { label: string; unit: string; min: number; max: number; 
   return (
     <label className="st-slider">
       <span className="st-sl-label">
-        {props.label} <b>{props.value.toFixed(props.step < 0.1 ? 2 : props.step < 1 ? 1 : 0)}</b>
-        {props.unit} {props.hint && <i>{props.hint}</i>}
+        <span>{props.label}{props.hint && <i> {props.hint}</i>}</span>
+        <b>{props.value.toFixed(props.step < 0.1 ? 2 : props.step < 1 ? 1 : 0)} {props.unit}</b>
       </span>
       <input type="range" min={props.min} max={props.max} step={props.step} value={props.value} onChange={(e) => props.onChange(Number(e.target.value))} />
     </label>

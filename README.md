@@ -20,7 +20,10 @@ tooth, and the engine finds the margin, designs the crown (anatomy, contacts,
 occlusion, minimum thickness), checks it and exports a millable STL. Adjust
 by talking, typing, sliders, tapping the crown, or asking Claude, which edits
 the design through the same commands. It learns crown anatomy from a lab's
-own finished cases (`npm run train`).
+own finished cases (`npm run train`). The interface follows exocad's
+design wizard (Scans → Margin → Axis → Anatomy → Adapt → Check → Export)
+laid out to Apple's iPhone guidelines: the model full-screen and a
+bottom sheet for each stage.
 
 ```bash
 npm install
