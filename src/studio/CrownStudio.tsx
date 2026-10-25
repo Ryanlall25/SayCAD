@@ -442,13 +442,17 @@ export default function CrownStudio(): React.JSX.Element {
   }
 
   async function onFiles(list: FileList | null): Promise<void> {
-    if (!list || !list.length) return
+    const scansPicked = Array.from(list ?? []).filter((f) => /\.(stl|ply)$/i.test(f.name))
+    if (!scansPicked.length) {
+      if (list?.length) setStatus('Pick STL or PLY scan files (or use New Case for a .zip export).')
+      return
+    }
     setBusy('Reading files…')
     const parsed: ScanFile[] = []
-    const names = Array.from(list).map((f) => f.name)
+    const names = scansPicked.map((f) => f.name)
     const t = toothFromNames(names) ?? tooth
     const roles = assignRoles(names, { toothNumber: t })
-    for (const f of Array.from(list)) {
+    for (const f of scansPicked) {
       try {
         const g = await parseGeometry(f)
         parsed.push({ name: f.name, role: roles[f.name] === 'ignore' ? 'prep' : roles[f.name], geometry: g })
@@ -487,7 +491,7 @@ export default function CrownStudio(): React.JSX.Element {
 
   async function importLibrary(list: FileList | null): Promise<void> {
     if (!list || !list.length) return
-    const picked = Array.from(list) // the input is cleared right after this call
+    const picked = Array.from(list).filter((f) => /\.(stl|ply|eoff)$/i.test(f.name)) // the input is cleared right after this call
     setBusy(`Reading ${picked.length} library file(s)…`)
     try {
       const files: Array<{ name: string; mesh: MeshData }> = []
@@ -1458,8 +1462,9 @@ export default function CrownStudio(): React.JSX.Element {
       </section>
 
       {newCase && <NewCase toothName={(n) => TOOTH_NAMES[toothClassOf(n)] ?? ''} onCancel={() => setNewCase(false)} onDone={(r) => void startCase(r)} />}
-      <input ref={fileRef} type="file" accept=".stl,.ply" multiple hidden onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }} />
-      <input ref={libRef} type="file" accept=".stl,.ply,.eoff" multiple hidden onChange={(e) => { void importLibrary(e.target.files); e.target.value = '' }} />
+      {/* No `accept` filter on scan pickers: iOS greys out .stl/.eoff files; parsing reports unreadable ones. */}
+      <input ref={fileRef} type="file" multiple hidden onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }} />
+      <input ref={libRef} type="file" multiple hidden onChange={(e) => { void importLibrary(e.target.files); e.target.value = '' }} />
       <input ref={rxRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void onRxPhoto(e.target.files?.[0]); e.target.value = '' }} />
     </div>
   )

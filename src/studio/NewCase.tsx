@@ -454,8 +454,9 @@ export default function NewCase(props: {
         </div>
       </footer>
 
-      <input ref={fileRef} type="file" accept=".stl,.ply,.zip,.dentalProject" multiple hidden onChange={(e) => { const f = Array.from(e.target.files ?? []); e.target.value = ''; void onFiles(f) }} />
-      <input ref={projectRef} type="file" accept=".dentalProject,.xml,.zip" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void onProject(f) }} />
+      {/* No `accept` filter: iOS greys out files whose type it doesn't know (.stl, .dentalProject); names are checked after picking. */}
+      <input ref={fileRef} type="file" multiple hidden onChange={(e) => { const f = Array.from(e.target.files ?? []); e.target.value = ''; void onFiles(f) }} />
+      <input ref={projectRef} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void onProject(f) }} />
     </div>
   )
 }
