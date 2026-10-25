@@ -41,4 +41,5 @@ export type EngineRequest =
   | { type: 'setTooth'; toothNumber: number }
   | { type: 'margin'; tap: Vec3 }
   | { type: 'editMargin'; points: Vec3[]; tapped: Vec3 }
+  | { type: 'importLibrary'; files: Array<{ name: string; mesh: MeshData }>; numbering: 'auto' | 'universal' | 'fdi'; source: string }
   | { type: 'design'; margin: MarginResult; params: Partial<DesignParams>; flipBuccal: boolean; quality: 'preview' | 'final'; model: string | null }

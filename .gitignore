@@ -4,3 +4,6 @@ dist/
 .DS_Store
 *.local.test.ts
 dist-artifact/
+
+# Learned / imported anatomy models: lab data or third-party library derivatives.
+public/models/*.json

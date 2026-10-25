@@ -21,6 +21,9 @@ says what the engine does, what has been proven and what has not.
 | Anatomy is clinically acceptable | **Not proven.** The built-in anatomy is a parametric textbook template. | — |
 | Learned anatomy beats the template | **Not proven.** The training pipeline works end to end, but it has only seen synthetic stand-ins, where it does *not* beat the template (expected: those stand-ins were made from the template). | `ssm.test.ts`, `scripts/train.ts` report |
 | Works on real 3Shape / exocad / Medit exports | **Not yet tested** — no real case has been run. | — |
+| Finds chamfer and shoulder margins, incl. gingiva 0.15 mm away | **Proven on synthetic scans** | 0.04–0.06 mm mean (`margin.test.ts`) |
+| Feather-edge / vertical preps | **Not auto-detected** — the app says so and the margin is drawn by tapping points around the prep | `margin.test.ts` |
+| Imports a tooth library in arch layout (STL soup, FDI or Universal names) | **Proven on a synthetic library** — not yet on a real library file | `library.test.ts`, e2e |
 
 **The next step that matters is running `scripts/train.ts` on the lab's real
 cases.** Its report answers the open questions with numbers: how far the
@@ -141,6 +144,23 @@ anyone who loads the page can spend the lab's API credit. The model defaults to
 
 Development: `npm run dev` (Vite on :5173) and `npm run server` (API on :8787)
 in two terminals; Vite proxies `/api`.
+
+### Using a tooth library (e.g. the MOD Institute exocad libraries)
+
+A purchased or free tooth library can replace the textbook template as the
+starting anatomy. SayCAD does not ship any library (each carries its
+publisher's licence): download the one you're entitled to, then either
+
+- **in the app:** Case → *Import tooth library*, select all of the library's
+  tooth STLs at once; the forms are kept on that device only; or
+- **on a computer:** `npm run import-library -- ./library-folder --name "MOD library"`
+  (writes git-ignored models to `public/models/`).
+
+File names must contain the tooth number, Universal (`19.stl`) or FDI
+(`Lower_36.stl`, converted automatically). The teeth must be in their arch
+positions as the library ships them (at least 3 per arch): each tooth's
+orientation is read from that layout. Learned case models and library models
+use the same slot; the most recent import wins for a tooth class.
 
 ### Training on the lab's cases
 

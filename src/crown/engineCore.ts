@@ -5,6 +5,7 @@ import { detectMargin } from './margin'
 import { autoDesign, prepareCase, type PreparedCase } from './pipeline'
 import type { DesignData, EngineRequest, MeshData } from './protocol'
 import { parseShapeModel, templateFromModel, type ShapeModel } from './ssm'
+import { analyseLibrary, libraryModels, libraryToothNumber } from './library'
 
 /**
  * Engine request handler — runs inside the worker (or in-thread as a
@@ -40,6 +41,23 @@ export function handleEngineRequest(req: EngineRequest): { result: unknown; tran
     case 'editMargin': {
       if (!prepared) throw new Error('Load the scans first.')
       return { result: editMargin(req.points, req.tapped, prepared.prepIndex), transfer: [] }
+    }
+    case 'importLibrary': {
+      const names = req.files.map((f) => f.name)
+      const teeth = req.files.flatMap((f) => {
+        const n = libraryToothNumber(f.name, req.numbering, names)
+        return n ? [{ name: f.name, toothNumber: n, geometry: toGeometry(f.mesh) }] : []
+      })
+      const imported = analyseLibrary(teeth)
+      const models = libraryModels(imported, req.source)
+      return {
+        result: {
+          teeth: imported.map((t) => ({ name: t.name, tooth: t.toothNumber, cls: t.cls, ok: Boolean(t.shape), error: t.error })),
+          skipped: names.filter((n) => !teeth.some((t) => t.name === n)),
+          models: Object.fromEntries(Object.entries(models).map(([cls, m]) => [cls, JSON.stringify(m)]))
+        },
+        transfer: []
+      }
     }
     case 'design': {
       if (!prepared) throw new Error('Load the scans first.')

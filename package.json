@@ -15,7 +15,8 @@
     "test": "vitest run",
     "e2e": "npm run build && npm run build:artifact && node dev/e2e.mjs",
     "train": "vite-node scripts/train.ts --",
-    "synthetic-cases": "vite-node scripts/synthetic-cases.ts --"
+    "synthetic-cases": "vite-node scripts/synthetic-cases.ts --",
+    "import-library": "vite-node scripts/import-library.ts --"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

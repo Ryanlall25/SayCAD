@@ -105,6 +105,23 @@ const reopenedDistal = await page.locator('.st-slider').nth(1).innerText()
 console.log('reopened distal slider:', reopenedDistal.replace(/\s+/g, ' '))
 if (!reopenedDistal.includes('-0.05')) fail('reopened case lost its parameters')
 
+// Tooth library import (optional: LIB_DIR=<folder of tooth STLs>).
+if (process.env.LIB_DIR) {
+  const { readdirSync } = await import('node:fs')
+  const libFiles = readdirSync(process.env.LIB_DIR).filter((f) => /\.stl$/i.test(f)).map((f) => `${process.env.LIB_DIR}/${f}`)
+  await page.getByRole('button', { name: /Case/ }).click()
+  await page.locator('input[type=file]').nth(1).setInputFiles(libFiles)
+  await page.waitForSelector('.st-note >> text=teeth imported', { timeout: 120000 })
+  console.log('library:', (await page.locator('.st-note', { hasText: 'teeth imported' }).innerText()).slice(0, 120))
+  await page.waitForFunction(() => !document.querySelector('.st-busy'), null, { timeout: 120000 })
+  await page.getByRole('button', { name: /Design/ }).click()
+  const anat = await page.locator('.st-anat').innerText()
+  console.log('anatomy:', anat)
+  if (!anat.includes('tooth library')) fail('imported library not used')
+  console.log('QC with library anatomy:', await page.locator('.st-head .st-chip').nth(1).innerText())
+  await page.screenshot({ path: `${out}/phone-5-library.png` })
+}
+
 // ── claude.ai-hosted mode: the artifact build with a stand-in runtime ──────
 // The fake `sample` behaves like the platform: it calls the page's own tool
 // functions and returns text; `downloads.save` captures what would be saved.

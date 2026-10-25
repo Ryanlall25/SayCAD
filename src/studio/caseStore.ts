@@ -34,7 +34,7 @@ export interface CaseMeta {
 }
 
 const DB_NAME = 'saycad-crowns'
-const VERSION = 1
+const VERSION = 2
 
 function openDb(): Promise<IDBDatabase | null> {
   return new Promise((resolve) => {
@@ -44,6 +44,7 @@ function openDb(): Promise<IDBDatabase | null> {
         const db = req.result
         if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' })
         if (!db.objectStoreNames.contains('scans')) db.createObjectStore('scans')
+        if (!db.objectStoreNames.contains('models')) db.createObjectStore('models')
       }
       req.onsuccess = () => resolve(req.result)
       req.onerror = () => resolve(null)
@@ -117,5 +118,22 @@ export async function deleteCase(id: string): Promise<void> {
   await tx(['meta', 'scans'], 'readwrite', (t) => {
     t.objectStore('meta').delete(id)
     t.objectStore('scans').delete(id)
+  })
+}
+
+/** Anatomy models imported on this device (e.g. from a tooth library), by tooth class. */
+export async function saveModel(cls: string, json: string): Promise<boolean> {
+  return (await tx(['models'], 'readwrite', (t) => {
+    t.objectStore('models').put(json, cls)
+  })) !== null
+}
+
+export async function loadModel(cls: string): Promise<string | null> {
+  return (await tx<string>(['models'], 'readonly', (t) => t.objectStore('models').get(cls))) ?? null
+}
+
+export async function clearModels(): Promise<void> {
+  await tx(['models'], 'readwrite', (t) => {
+    t.objectStore('models').clear()
   })
 }

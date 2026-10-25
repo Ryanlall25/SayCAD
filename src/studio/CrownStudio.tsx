@@ -41,7 +41,7 @@ import {
   type SampleFn
 } from '../ai/client'
 import { zip } from '../core/zip'
-import { deleteCase, listCases, loadCase, newCaseId, saveCase, updateCase, type CaseMeta } from './caseStore'
+import { clearModels, deleteCase, listCases, loadCase, loadModel, newCaseId, saveCase, saveModel, updateCase, type CaseMeta } from './caseStore'
 import './studio.css'
 
 type Step = 'case' | 'margin' | 'design' | 'check' | 'export'
@@ -113,6 +113,9 @@ export default function CrownStudio(): React.JSX.Element {
   const engineRef = useRef<CrownEngine | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const rxRef = useRef<HTMLInputElement>(null)
+  const libRef = useRef<HTMLInputElement>(null)
+  const [libNote, setLibNote] = useState<string | null>(null)
+  const [modelsVersion, setModelsVersion] = useState(0)
 
   const [step, setStep] = useState<Step>('case')
   const [tooth, setTooth] = useState<number>(19)
@@ -141,7 +144,7 @@ export default function CrownStudio(): React.JSX.Element {
   const [code, setCode] = useState(accessCode())
   const [review, setReview] = useState<string | null>(null)
   const [rxNote, setRxNote] = useState<string | null>(null)
-  const [model, setModel] = useState<{ json: string; count: number } | null>(null)
+  const [model, setModel] = useState<{ json: string; count: number; source: string } | null>(null)
   const [useLearned, setUseLearned] = useState(true)
   const [alignZ, setAlignZ] = useState(false)
   const [override, setOverride] = useState('')
@@ -193,23 +196,35 @@ export default function CrownStudio(): React.JSX.Element {
   useEffect(() => {
     let cancelled = false
     const cls = toothClassOf(tooth)
-    fetch(`${import.meta.env.BASE_URL}models/ssm-${cls}.json`)
+    const use = (txt: string): void => {
+      try {
+        const m = JSON.parse(txt) as { count: number; source?: string }
+        setModel({ json: txt, count: m.count, source: m.source ?? `${m.count} cases` })
+      } catch {
+        setModel(null)
+      }
+    }
+    void loadModel(cls).then((stored) => {
+      if (cancelled) return
+      if (stored) return use(stored)
+      fetch(`${import.meta.env.BASE_URL}models/ssm-${cls}.json`)
       .then((r) => (r.ok ? r.text() : null))
       .then((txt) => {
         if (cancelled) return
         if (!txt || !txt.trim().startsWith('{')) return setModel(null)
         try {
-          const m = JSON.parse(txt) as { count: number }
-          setModel({ json: txt, count: m.count })
+          const m = JSON.parse(txt) as { count: number; source?: string }
+          setModel({ json: txt, count: m.count, source: m.source ?? `${m.count} cases` })
         } catch {
           setModel(null)
         }
       })
       .catch(() => !cancelled && setModel(null))
+    })
     return () => {
       cancelled = true
     }
-  }, [tooth])
+  }, [tooth, modelsVersion])
 
   /* ── engine calls ──────────────────────────────────────────────────── */
 
@@ -375,6 +390,38 @@ export default function CrownStudio(): React.JSX.Element {
     setFiles(parsed)
     setBusy(null)
     setStatus(`${parsed.length} file(s) read — check the roles, then “Use these scans”.`)
+  }
+
+  async function importLibrary(list: FileList | null): Promise<void> {
+    if (!list || !list.length) return
+    const picked = Array.from(list) // the input is cleared right after this call
+    setBusy(`Reading ${picked.length} library file(s)…`)
+    try {
+      const files: Array<{ name: string; mesh: MeshData }> = []
+      for (const f of picked) {
+        try {
+          files.push({ name: f.name, mesh: meshData(await parseGeometry(f)) })
+        } catch {
+          /* unreadable file: reported as skipped below */
+        }
+      }
+      setBusy('Learning the library’s tooth forms…')
+      const r = await engineRef.current!.importLibrary(files, 'auto', 'tooth library')
+      for (const [cls, json] of Object.entries(r.models)) await saveModel(cls, json)
+      const ok = r.teeth.filter((t) => t.ok)
+      const bad = r.teeth.filter((t) => !t.ok)
+      setLibNote(
+        `${ok.length} teeth imported → ${Object.keys(r.models).length} tooth classes now use the library.` +
+          (bad.length ? ` Not used: ${bad.map((t) => `${t.name} (${t.error})`).join(', ')}.` : '') +
+          (r.skipped.length ? ` No tooth number in: ${r.skipped.join(', ')}.` : '')
+      )
+      setModelsVersion((v) => v + 1)
+      if (state.current.margin) setTimeout(() => void runDesign('final'), 0)
+    } catch (e) {
+      setLibNote(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
   }
 
   async function openCase(id: string): Promise<void> {
@@ -749,7 +796,7 @@ export default function CrownStudio(): React.JSX.Element {
         params: s.params,
         flipBuccal: s.flip,
         margin: s.margin?.points,
-        anatomy: s.useLearned && s.model ? `learned (${s.model.count} cases)` : 'textbook',
+        anatomy: s.useLearned && s.model ? `learned — ${s.model.source}` : 'textbook',
         checks: s.design?.results,
         exportOverride: s.design && !s.design.exportable ? override : undefined
       },
@@ -923,6 +970,14 @@ export default function CrownStudio(): React.JSX.Element {
                   <button className="st-secondary" onClick={() => rxRef.current?.click()} disabled={!ai.ai || !ai.images} title={ai.ai && ai.images ? 'Photo of the Rx' : 'Needs AI with image access'}>Read Rx photo</button>
                 </div>
                 {rxNote && <p className="st-note">{rxNote}</p>}
+                <div className="st-stack">
+                  <div className="st-row">
+                    <button className="st-secondary" onClick={() => libRef.current?.click()}>Import tooth library</button>
+                    {model && <button className="st-link" onClick={() => void clearModels().then(() => { setLibNote('Imported libraries removed from this device.'); setModelsVersion((v) => v + 1) })}>Remove imported</button>}
+                  </div>
+                  <p className="st-fine">Select all of a library’s tooth STLs at once (names must contain the tooth number, Universal or FDI). The forms become the starting anatomy for each tooth class, kept on this device only. Use libraries you’re licensed to use.</p>
+                  {libNote && <p className="st-note">{libNote}</p>}
+                </div>
                 {recent.length > 0 && (
                   <div className="st-recent">
                     <h3>Cases on this device</h3>
@@ -1000,7 +1055,7 @@ export default function CrownStudio(): React.JSX.Element {
                 {d && (
                   <>
                     <div className="st-anat">
-                      Anatomy: {model && useLearned ? `learned from ${model.count} ${LAB_NAME} case(s)` : 'textbook template'}
+                      Anatomy: {model && useLearned ? `learned — ${model.source}` : 'textbook template'}
                       {model && (
                         <button className="st-link" onClick={() => { setUseLearned((u) => !u); setTimeout(() => void runDesign('final'), 0) }}>
                           {useLearned ? 'use textbook' : 'use learned'}
@@ -1114,6 +1169,7 @@ export default function CrownStudio(): React.JSX.Element {
       </footer>
 
       <input ref={fileRef} type="file" accept=".stl,.ply" multiple hidden onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }} />
+      <input ref={libRef} type="file" accept=".stl,.ply" multiple hidden onChange={(e) => { void importLibrary(e.target.files); e.target.value = '' }} />
       <input ref={rxRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void onRxPhoto(e.target.files?.[0]); e.target.value = '' }} />
     </div>
   )
