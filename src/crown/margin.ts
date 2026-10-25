@@ -108,7 +108,7 @@ export function centreAxis(scan: SurfaceIndex, seed: Vec3, up: Vec3, depth = 1.2
 }
 
 /** Reads one radial profile and returns ranked finish-line candidates. */
-export function profileCandidates(raw: ProfilePoint[], topH: number): Array<{ r: number; h: number; score: number }> {
+export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0.45): Array<{ r: number; h: number; score: number }> {
   const step = 0.04
   const sampled = resample(raw, step)
   const line = smoothLine(sampled, 1.5)
@@ -145,7 +145,7 @@ export function profileCandidates(raw: ProfilePoint[], topH: number): Array<{ r:
   const out: Array<{ r: number; h: number; score: number; order: number }> = []
   const back = Math.round(1.2 / step)
   for (let i = Math.max(wallStart + 2, L + 1); i < n - L - 1; i++) {
-    if (!(tau[i] < -0.45 && tau[i] <= tau[i - 1] && tau[i] <= tau[i + 1])) continue
+    if (!(tau[i] < -minTurn && tau[i] <= tau[i - 1] && tau[i] <= tau[i + 1])) continue
     // Not too far below the prep top: margins sit within ~10 mm of it.
     if (topH - line[i].h > 10) continue
     let chamfer = 0
@@ -238,7 +238,8 @@ function detectOnce(
   centre: Vec3,
   up: Vec3,
   K: number,
-  radius: number
+  radius: number,
+  minTurn = 0.45
 ): { result: MarginResult; ok: boolean } {
   // Prep top on the axis.
   const topHit = scan.raycast(add(centre, scale(up, 15)), scale(up, -1), 0, 30)
@@ -252,7 +253,7 @@ function detectOnce(
     const th = (k / K) * Math.PI * 2
     thetas.push(th)
     const prof = mainProfile(slicer.slice(th), topH)
-    const list = prof ? profileCandidates(prof, topH) : []
+    const list = prof ? profileCandidates(prof, topH, minTurn) : []
     cands.push(list.map((c) => ({ ...c, point: profileToWorld(frame, th, { r: c.r, h: c.h }) })))
   }
   const typicalR = median(cands.flatMap((c) => c.slice(0, 1).map((x) => x.r))) || 4
@@ -270,7 +271,9 @@ function detectOnce(
   const smooth = smoothLoop(filled, 2)
   // Snap back onto the surface after smoothing.
   const snapped = smooth.map((p) => scan.closest(p, 1)?.point ?? p)
-  const conf = scores.map((s) => clamp(s / 1.6, 0, 1))
+  // In the low-threshold (feather-edge) pass every sample is a guess carried
+  // by continuity, so confidence is capped below the "trust it" line.
+  const conf = scores.map((s) => clamp(s / 1.6, 0, minTurn < 0.45 ? 0.3 : 1))
   return { ok: true, result: { points: snapped, thetas, axis: frame, confidence: conf, top, missingFraction: missingCount / K } }
 }
 
@@ -280,8 +283,22 @@ export function detectMargin(scan: SurfaceIndex, tap: Vec3, opts: MarginOptions 
   const radius = opts.radius ?? 8
   let up = opts.up ? normalize(opts.up) : estimateUp(scan, tap)
   let centre = centreAxis(scan, tap, up)
-  let { result, ok } = detectOnce(scan, centre, up, K, radius)
-  if (!ok) return result
+  // Chamfers and shoulders turn sharply at the finish line; a feather edge
+  // barely turns (≈ 5–10°). If the sharp-corner pass can't close a loop,
+  // retry accepting shallow corners and let continuity carry it.
+  let minTurn = 0.45
+  let { result, ok } = detectOnce(scan, centre, up, K, radius, minTurn)
+  if (!ok) {
+    const retry = detectOnce(scan, centre, up, K, radius, 0.06)
+    // A shallow-corner loop is only kept if it looks like a margin: a smooth
+    // ring around the stump, not a path wandering onto gingiva or neighbours.
+    if (retry.ok && plausibleLoop(retry.result)) {
+      minTurn = 0.06
+      result = retry.result
+      ok = true
+    }
+  }
+  if (!ok) return { ...result, points: [] }
   // Re-centre on the found loop, re-estimate the axis, cut again.
   for (let pass = 0; pass < 2; pass++) {
     const fit = pca3(result.points)
@@ -292,11 +309,99 @@ export function detectMargin(scan: SurfaceIndex, tap: Vec3, opts: MarginOptions 
     if (!opts.up) up = normalize(add(scale(up, 0.5), scale(n, 0.5)))
     const m = fit.mean
     centre = add(m, scale(up, dot(sub(result.top, m), up) * 0.45))
-    const again = detectOnce(scan, centre, up, K, radius)
+    const again = detectOnce(scan, centre, up, K, radius, minTurn)
     if (!again.ok) break
     result = again.result
   }
   return result
+}
+
+/** Ring-shaped, smooth, and below the prep top: what any margin looks like. */
+export function plausibleLoop(m: MarginResult): boolean {
+  const pts = m.points
+  if (pts.length < 16) return false
+  const c = pca3(pts).mean
+  const up = m.axis.up
+  const rs = pts.map((p) => {
+    const d = sub(p, c)
+    const h = dot(d, up)
+    return Math.hypot(d[0] - up[0] * h, d[1] - up[1] * h, d[2] - up[2] * h)
+  })
+  const mean = rs.reduce((a, b) => a + b, 0) / rs.length
+  const sd = Math.sqrt(rs.reduce((a, r) => a + (r - mean) ** 2, 0) / rs.length)
+  let jumps = 0
+  for (let i = 0; i < pts.length; i++) if (dist(pts[i], pts[(i + 1) % pts.length]) > Math.max(0.6, (4 * Math.PI * mean) / pts.length)) jumps++
+  const hs = pts.map((p) => dot(sub(p, m.top), up))
+  return mean > 2 && mean < 7.5 && sd / mean < 0.22 && jumps <= pts.length * 0.02 && Math.max(...hs) < -0.5
+}
+
+/**
+ * Margin from points the technician tapped around the prep (any order):
+ * ordered by angle about their centroid, joined with a closed spline,
+ * resampled and snapped onto the scan. For finish lines the detector
+ * can't see (feather-edge / vertical preps, heavily subgingival margins).
+ */
+export function marginFromTaps(scan: SurfaceIndex, taps: Vec3[], K = 180): MarginResult {
+  if (taps.length < 4) throw new Error('Tap at least 4 points around the margin.')
+  const fit = pca3(taps)
+  let up = fit.axes[0]
+  // The prep top is a short ray away along +up; the root side is not.
+  const ahead = scan.raycast(fit.mean, up, 0, 20)
+  const behind = scan.raycast(fit.mean, scale(up, -1), 0, 20)
+  if ((behind?.distance ?? Infinity) < (ahead?.distance ?? Infinity)) up = scale(up, -1)
+  const frame = axisFrame(fit.mean, up)
+  const side = cross(up, frame.ref)
+  const ordered = [...taps]
+    .map((p) => {
+      const d = sub(p, fit.mean)
+      return { p, a: Math.atan2(dot(d, side), dot(d, frame.ref)) }
+    })
+    .sort((x, y) => x.a - y.a)
+    .map((x) => x.p)
+  // Closed Catmull–Rom through the taps, then snapped to the surface.
+  const n = ordered.length
+  const dense: Vec3[] = []
+  const per = Math.ceil((K * 2) / n)
+  for (let i = 0; i < n; i++) {
+    const p0 = ordered[(i - 1 + n) % n]
+    const p1 = ordered[i]
+    const p2 = ordered[(i + 1) % n]
+    const p3 = ordered[(i + 2) % n]
+    for (let k = 0; k < per; k++) {
+      const t = k / per
+      const t2 = t * t
+      const t3 = t2 * t
+      const q: Vec3 = [0, 0, 0]
+      for (let a = 0; a < 3; a++) {
+        q[a] = 0.5 * (2 * p1[a] + (-p0[a] + p2[a]) * t + (2 * p0[a] - 5 * p1[a] + 4 * p2[a] - p3[a]) * t2 + (-p0[a] + 3 * p1[a] - 3 * p2[a] + p3[a]) * t3)
+      }
+      dense.push(q)
+    }
+  }
+  // Resample to K points evenly by arc length.
+  const cum = [0]
+  for (let i = 1; i <= dense.length; i++) cum.push(cum[i - 1] + dist(dense[i - 1], dense[i % dense.length]))
+  const total = cum[cum.length - 1]
+  const points: Vec3[] = []
+  let j = 0
+  for (let k = 0; k < K; k++) {
+    const target = (total * k) / K
+    while (j < dense.length - 1 && cum[j + 1] < target) j++
+    const a = dense[j]
+    const b = dense[(j + 1) % dense.length]
+    const t = (target - cum[j]) / Math.max(1e-9, cum[j + 1] - cum[j])
+    const q: Vec3 = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+    points.push(scan.closest(q, 2)?.point ?? q)
+  }
+  const topHit = scan.raycast(add(fit.mean, scale(up, 15)), scale(up, -1), 0, 30)
+  return {
+    points,
+    thetas: points.map((_, k) => (2 * Math.PI * k) / K),
+    axis: axisFrame(fit.mean, up),
+    confidence: points.map(() => 1),
+    top: topHit ? topHit.point : add(fit.mean, scale(up, 4)),
+    missingFraction: 0
+  }
 }
 
 function fillGaps(points: Array<Vec3 | null>): Vec3[] {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SurfaceIndex, dot } from '../geom'
-import { detectMargin, marginError } from '../margin'
+import { detectMargin, marginError, marginFromTaps } from '../margin'
 import { mirrorToUpper, syntheticMolarCase } from '../synthetic'
 
 describe('margin detection (synthetic #19 chamfer prep)', () => {
@@ -25,5 +25,32 @@ describe('margin detection (synthetic #19 chamfer prep)', () => {
     const err = marginError(m.points, u.margin)
     expect(err.mean).toBeLessThan(0.08)
     expect(dot(m.axis.up, u.axis)).toBeGreaterThan(0.99)
+  })
+})
+
+describe('finish-line variants', () => {
+  it('finds shoulder margins, and chamfers with the gingiva 0.15 mm away', () => {
+    for (const opts of [{ finish: 'shoulder' as const }, { marginAboveGumMm: 0.15 }]) {
+      const c = syntheticMolarCase(opts)
+      const m = detectMargin(new SurfaceIndex(c.prep), c.tapPoint)
+      expect(marginError(m.points, c.margin).mean).toBeLessThan(0.08)
+    }
+  })
+
+  it('says so instead of guessing when it cannot see a feather edge', () => {
+    const c = syntheticMolarCase({ finish: 'featherEdge' })
+    const scan = new SurfaceIndex(c.prep)
+    const m = detectMargin(scan, c.tapPoint)
+    if (m.points.length) {
+      // If a loop is returned it must be right and flagged for review.
+      expect(marginError(m.points, c.margin).mean).toBeLessThan(0.2)
+      expect(Math.max(...m.confidence)).toBeLessThan(0.35)
+    }
+    // The manual route: a handful of taps on the true margin, in any order.
+    const taps = [0, 40, 75, 110, 150, 185, 220, 260, 300, 330].map((k) => c.margin[(k * 7) % 360])
+    const drawn = marginFromTaps(scan, taps)
+    expect(drawn.points.length).toBe(180)
+    expect(marginError(drawn.points, c.margin).mean).toBeLessThan(0.12)
+    expect(dot(drawn.axis.up, c.axis)).toBeGreaterThan(0.97)
   })
 })

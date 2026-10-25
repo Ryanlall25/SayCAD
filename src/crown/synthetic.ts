@@ -43,6 +43,10 @@ export interface SyntheticOptions {
   resolutionMm?: number
   /** Occlusal reduction: how far the antagonist sits above the prep top. */
   antagonistGapMm?: number
+  /** Finish-line geometry. Default 'chamfer'. */
+  finish?: FinishLine
+  /** Buccal/lingual margin height above the gingiva, mm (default 0.6). */
+  marginAboveGumMm?: number
 }
 
 const ARCH_R = 40
@@ -77,6 +81,13 @@ function localOf(p: ToothPose, x: number, z: number): [number, number] {
   return [dx * p.mesial[0] + dz * p.mesial[1], dx * p.buccal[0] + dz * p.buccal[1]]
 }
 
+export type FinishLine = 'chamfer' | 'shoulder' | 'featherEdge'
+
+interface PrepConfig {
+  finish: FinishLine
+  gum: number
+}
+
 const superRadius = (dx: number, dz: number, a: number, b: number, p: number): number =>
   Math.pow(Math.abs(dx) ** p / a ** p + Math.abs(dz) ** p / b ** p, -1 / p)
 
@@ -86,20 +97,32 @@ function smin(a: number, b: number, k: number): number {
   return Math.min(a, b) - (h * h * k) / 4
 }
 
-function marginHeight(cosMD: number): number {
-  return 0.6 + 0.7 * cosMD * cosMD
+function marginHeight(cosMD: number, gum = 0.6): number {
+  return gum + 0.7 * cosMD * cosMD
 }
 
 /** Prep surface height at local (xm, zb), mm, gingiva at y = 0. */
-function prepHeight(xm: number, zb: number): number {
+function prepHeight(xm: number, zb: number, cfg: PrepConfig = { finish: 'chamfer', gum: 0.6 }): number {
   const r = Math.hypot(xm, zb)
   const dx = r > 1e-9 ? xm / r : 1
   const dz = r > 1e-9 ? zb / r : 0
   const R = superRadius(dx, dz, PREP_A, PREP_B, PREP_P)
   const q = R - r // mm inside the margin outline along this ray
-  const ym = marginHeight(dx)
+  const ym = marginHeight(dx, cfg.gum)
   let wall: number
-  if (q < 0) wall = ym + q * 5 // unprepared root face below the margin
+  if (cfg.finish === 'featherEdge') {
+    // No ledge: the tapered wall runs to the margin, where the unprepared
+    // root continues at a different slope — a shallow, hard-to-see corner.
+    wall = q < 0 ? ym + q * 4 : ym + q * TAPER_SLOPE
+  } else if (cfg.finish === 'shoulder') {
+    // 1.0 mm flat shoulder, 0.15 mm internal line-angle radius.
+    const S = 1.0
+    const r0 = 0.15
+    if (q < 0) wall = ym + q * 5
+    else if (q < S - r0) wall = ym
+    else if (q < S) wall = ym + r0 - Math.sqrt(Math.max(0, r0 * r0 - (q - (S - r0)) ** 2))
+    else wall = ym + r0 + (q - S) * TAPER_SLOPE
+  } else if (q < 0) wall = ym + q * 5 // unprepared root face below the margin
   else if (q < CHAMFER) wall = ym + CHAMFER - Math.sqrt(CHAMFER * CHAMFER - q * q) // rounded chamfer floor
   else wall = ym + CHAMFER + (q - CHAMFER) * TAPER_SLOPE
   // Reduced occlusal surface: a gently domed table with shallow cusp memory.
@@ -173,6 +196,7 @@ function heightField(
 export function syntheticMolarCase(opts: SyntheticOptions = {}): SyntheticCase {
   const h = opts.resolutionMm ?? 0.1
   const gap = opts.antagonistGapMm ?? 2.2
+  const cfg: PrepConfig = { finish: opts.finish ?? 'chamfer', gum: opts.marginAboveGumMm ?? 0.6 }
 
   const s0 = 34 // arc length of #19's centre from the midline
   const prepPose = poseAt(s0)
@@ -186,7 +210,7 @@ export function syntheticMolarCase(opts: SyntheticOptions = {}): SyntheticCase {
   const lowerAt = (x: number, z: number): number => {
     let y = gingiva(x, z)
     const [px, pz] = localOf(prepPose, x, z)
-    if (Math.hypot(px, pz) < 7) y = Math.max(y, prepHeight(px, pz))
+    if (Math.hypot(px, pz) < 7) y = Math.max(y, prepHeight(px, pz, cfg))
     const [ax, az] = localOf(pm, x, z)
     y = Math.max(y, neighbourHeight(ax, az, PREMOLAR_MD, 8.0, premolarCusps))
     const [bx, bz] = localOf(m2, x, z)
@@ -233,7 +257,7 @@ export function syntheticMolarCase(opts: SyntheticOptions = {}): SyntheticCase {
     const zb = dz * R
     const x = prepPose.center[0] + prepPose.mesial[0] * xm + prepPose.buccal[0] * zb
     const z = prepPose.center[1] + prepPose.mesial[1] * xm + prepPose.buccal[1] * zb
-    margin.push([x, marginHeight(dx), z])
+    margin.push([x, marginHeight(dx, cfg.gum), z])
   }
 
   return {
@@ -245,8 +269,8 @@ export function syntheticMolarCase(opts: SyntheticOptions = {}): SyntheticCase {
     axis: [0, 1, 0],
     buccal: [prepPose.buccal[0], 0, prepPose.buccal[1]],
     mesial: [prepPose.mesial[0], 0, prepPose.mesial[1]],
-    tapPoint: [prepPose.center[0], prepHeight(0, 0), prepPose.center[1]],
-    prepTopY: prepHeight(0, 0)
+    tapPoint: [prepPose.center[0], prepHeight(0, 0, cfg), prepPose.center[1]],
+    prepTopY: prepHeight(0, 0, cfg)
   }
 }
 
