@@ -738,6 +738,9 @@ export default function CrownStudio(): React.JSX.Element {
   const dictation = dictationRef.current
 
   /* ── render ────────────────────────────────────────────────────────── */
+  // Inside claude.ai the frame refuses the microphone; the phone keyboard's
+  // own dictation key still types into the command box.
+  const framed = typeof window !== 'undefined' && window.top !== window
   const d = design
   const counts = d ? { pass: d.results.filter((r) => r.verdict === 'pass').length, warn: d.results.filter((r) => r.verdict === 'warn').length, fail: d.results.filter((r) => r.verdict === 'fail').length } : null
 
@@ -1008,8 +1011,8 @@ export default function CrownStudio(): React.JSX.Element {
 
       <footer className="st-cmd">
         <form onSubmit={(e) => { e.preventDefault(); void submit(input) }}>
-          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={ai.ai ? 'Say or type anything — “tighter mesial contact”' : 'Try “tighter mesial contact”, “flatter cusps”…'} aria-label="Command" enterKeyHint="send" />
-          {dictation?.supported && (
+          <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={framed ? 'Type or use your keyboard mic — “tighter mesial contact”' : ai.ai ? 'Say or type anything — “tighter mesial contact”' : 'Try “tighter mesial contact”, “flatter cusps”…'} aria-label="Command" enterKeyHint="send" />
+          {dictation?.supported && !framed && (
             <button type="button" className={listening ? 'st-mic on' : 'st-mic'} onClick={() => (listening ? dictation.stop() : dictation.start())} aria-label="Speak">
               {listening ? '◼' : '🎙'}
             </button>
