@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { assignToSlots, checkScan, NEW_ORDER, occlusionWarning, orderFromProject, parseDentalProject, scanSlots, slotForName, type ScanStats } from './order'
+import { assignToSlots, checkScan, NEW_ORDER, occlusionWarning, orderFromProject, parseDentalProject, scanSlots, slotForName, type ScanStats } from '../order'
 
 const stats = (size: [number, number, number], at: [number, number, number] = [0, 0, 0], triangles = 300000): ScanStats => ({
   triangles,

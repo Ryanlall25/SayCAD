@@ -106,48 +106,50 @@ margin, axis, anatomy, contacts and occlusion, thickness, quality checks,
 then (with AI on) an automatic AI fix if anything fails and an AI review.
 The "Ask, or say a change" field takes voice or text at any stage.
 
-**New Case** works like exocad's DentalDB order, one swipeable card at a
-time:
+**New Crown** asks for the minimum, in three swipeable cards:
+1. **Tooth:** tap it on the arch chart. Material, shade and an optional
+   patient name sit on the same card.
+2. **Prep-arch scan.**
+3. **Opposing-arch scan.**
 
-1. **Order:** patient, doctor and due date. You can also import an exocad
-   `.dentalProject` (fills in the tooth, restoration and material) or a
-   `.zip` of the whole scanner export.
-2. **Tooth:** tap it on the arch chart (Universal numbering, one crown per
-   case).
-3. **Restoration:** type, material and shade. Only anatomic crowns can be
-   designed today; the other types are listed as "Not yet".
-4. **Scans:** switch on which scans the case has (opposing, pre-op, bite).
-   The deck then asks for them in loading order.
-5. **One card per scan.** Each card names the exact file needed, e.g.
-   "Upload the LOWER jaw scan — the arch with the prep on #19", and shows
-   that jaw on the chart.
-6. **Review**, then the scans open in the designer.
-
-Swiping forward is held until the current card has what it needs, and the
-deck says what that is ("Needed now: LOWER JAW SCAN").
+Each scan card names the exact file needed ("Upload the LOWER jaw scan —
+the arch with the prep on #19"). Swiping forward is held until it has
+that file ("Needed now: LOWER JAW SCAN"). A scanner `.zip` or an exocad
+`.dentalProject` can fill everything at once; files are placed by name.
 
 Each upload is checked:
 - size and units (it catches exports in metres);
 - arch, quadrant or single die;
 - triangle count;
-- whether the file name names the other jaw or looks like a crown;
-- whether the two arches are in the bite.
+- a file name that names the other jaw, or looks like a crown;
+- whether the arches are in the bite.
 
-Several files or a zip at once are placed by name (upper/lower,
-maxillary/mandibular, `_u`/`_l`, bite, pre-op).
+**No tap needed.** After Design Crown, the prep is found from the bite
+(`src/crown/findPrep.ts`):
+- Natural teeth touch the opposing arch; a prepped stump sits 0.6–4 mm
+  short of it.
+- A clearance map over the arch, eroded by 2 mm, leaves the stump as the
+  one large blob.
+- If the arches aren't in the bite, or two teeth are out of contact, the
+  app says so and asks for a tap.
 
-Limits of New Case today:
-- Bite and pre-op scans are saved with the case but **not used** by the
-  design. There is no bite alignment yet, so the arches must be exported
-  in occlusion.
-- `.dentalProject` import reads `Treatment → Teeth → Tooth`. It has been
-  checked against the layout of exocad's own project files, but the
-  `ReconstructionType` names for real restorations are matched loosely
-  ("anatomic", "coping", "pontic", …). It has not been verified on a
-  restoration order from your exocad.
+Proven on synthetic cases: lower, mirrored upper, and an arbitrary
+scanner frame, with a margin error under 0.1 mm against the true margin.
+Not yet tried on real scans.
+
+The result screen shows the verdict and **Export Crown**. **Adjust
+Design** (or Help → Pro tools) opens the full stage rail: Scans, Margin,
+Axis, Anatomy, Adapt, Check, Export.
+
+**Tooth library:** the free library imported so far has centrals,
+laterals, canines and premolars, upper and lower. Those positions use the
+library tooth's real anatomy. **It has no molars.** Molar crowns still use
+the textbook template, and the design run says so ("textbook — no library
+tooth for this position"). Import molar library teeth (Pro tools → Anatomy
+→ library import, or `npm run import-library`) to change that.
 
 The interface has been checked in headless phone emulation
-(`dev/e2e.mjs`, `dev/e2e-newcase.mjs`) only — **not yet on a physical
+(`dev/e2e.mjs` for Pro tools, `dev/e2e-newcase.mjs` for New Crown) only — **not yet on a physical
 phone by a technician.**
 
 ---

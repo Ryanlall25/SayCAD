@@ -196,6 +196,22 @@ export default function CrownStudio(): React.JSX.Element {
   const [recent, setRecent] = useState<CaseMeta[]>([])
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [newCase, setNewCase] = useState(false)
+  // Simple mode shows the AI result and one Export button; Pro mode adds the stage rail.
+  const [pro, setProState] = useState(() => {
+    try {
+      return localStorage.getItem('saycad.pro') === '1'
+    } catch {
+      return false
+    }
+  })
+  const setPro = (on: boolean): void => {
+    setProState(on)
+    try {
+      localStorage.setItem('saycad.pro', on ? '1' : '0')
+    } catch {
+      /* storage unavailable */
+    }
+  }
 
   // Mutable mirrors for async code paths.
   const state = useRef({ params, flip, margin, design, tooth, step, loaded, useLearned, model, sculptAt, caseId })
@@ -475,6 +491,25 @@ export default function CrownStudio(): React.JSX.Element {
     setStatus(`${parsed.length} file(s) read — check the roles, then “Use these scans”.`)
   }
 
+  /** Finds the prep from the bite and designs straight away; falls back to asking for a tap. */
+  async function autoFind(): Promise<void> {
+    setBusy('Finding the prepared tooth…')
+    let guess
+    try {
+      guess = await engineRef.current!.findPrep()
+    } catch (e) {
+      guess = { point: null, reason: e instanceof Error ? e.message : String(e) }
+    } finally {
+      setBusy(null)
+    }
+    if (!guess.point) {
+      setStatus(guess.reason ?? 'Tap the prepared tooth.')
+      return
+    }
+    say('app', `Found the prep on #${state.current.tooth} from the bite.`)
+    await tapPrep(guess.point)
+  }
+
   /** Scans and order from the New Case deck → the designer. */
   async function startCase(r: NewCaseResult): Promise<void> {
     setNewCase(false)
@@ -487,6 +522,7 @@ export default function CrownStudio(): React.JSX.Element {
     const who = r.order.patient.trim()
     await commitScans(list, t, undefined, { name: `${who ? `${who.slice(0, 28)} · ` : ''}#${t}`, order: r.order })
     say('app', `Case started: #${t}, ${MATERIALS[r.order.material].label}, shade ${r.order.shade}${r.order.doctor ? `, for ${r.order.doctor}` : ''}.`)
+    if (list.some((f) => f.role === 'antagonist')) await autoFind()
   }
 
   async function importLibrary(list: FileList | null): Promise<void> {
@@ -618,7 +654,7 @@ export default function CrownStudio(): React.JSX.Element {
     const r = (id: string): CriticResultLite | undefined => d.results.find((x) => x.id === id)
     const v = (x?: CriticResultLite): RunStage['status'] => (!x ? 'done' : x.verdict === 'pass' ? 'done' : x.verdict === 'warn' ? 'warn' : 'fail')
     stage('axis', v(r('undercut')), r('undercut')?.measured.split(',')[0] ?? 'set')
-    stage('anatomy', 'done', state.current.useLearned && state.current.model ? state.current.model.source : 'textbook template')
+    stage('anatomy', state.current.useLearned && state.current.model ? 'done' : 'warn', state.current.useLearned && state.current.model ? state.current.model.source : 'textbook — no library tooth for this position')
     const contactWorst = [r('contact-mesial'), r('contact-distal'), r('occlusion')].sort((a, b) => rank(b) - rank(a))[0]
     stage('adapt', v(contactWorst), `M ${fmt(d.summary.mesialContactMm)} · D ${fmt(d.summary.distalContactMm)} · occl ${fmt(d.summary.occlusalMinMm)} mm`)
     const thickWorst = [r('thickness-axial'), r('thickness-occlusal')].sort((a, b) => rank(b) - rank(a))[0]
@@ -1055,10 +1091,10 @@ export default function CrownStudio(): React.JSX.Element {
         {!loaded && !busy && (
           <div className="st-welcome">
             <p className="st-eyebrow">{LAB_NAME} · Crowns</p>
-            <h1>Design a crown in one tap.</h1>
-            <p>Load the prep and opposing scans, tap the prepared tooth, and the crown is margined, shaped, fitted to the bite and checked.</p>
+            <h1>AI crowns from two scans.</h1>
+            <p>Pick the tooth, add the prep and opposing scans. The prep is found from the bite, and the crown is margined, shaped from the tooth library, fitted and checked.</p>
             <div className="st-welcome-actions">
-              <button className="st-btn primary large" onClick={() => setNewCase(true)}>New Case</button>
+              <button className="st-btn primary large" onClick={() => setNewCase(true)}>New Crown</button>
               <button className="st-btn tinted large" onClick={() => void loadDemo(true)}>Try the Demo Case</button>
             </div>
             {recent.length > 0 && (
@@ -1114,7 +1150,7 @@ export default function CrownStudio(): React.JSX.Element {
         <button className="st-round" onClick={() => setHelpOpen((o) => !o)} aria-label="Help">?</button>
       </header>
 
-      {loaded && (
+      {loaded && pro && (
         <nav className="st-rail" aria-label="Design stages">
           {STEPS.map(([k, label]) => (
             <button key={k} className={`st-rail-item ${stageState(k)}`} onClick={() => { setStep(k); if (detent === 'peek') setDetent('half'); haptic() }} aria-current={k === step ? 'step' : undefined}>
@@ -1130,11 +1166,19 @@ export default function CrownStudio(): React.JSX.Element {
           <div className="st-modal-card" onClick={(e) => e.stopPropagation()}>
             <h2>How it works</h2>
             <ol className="st-howto">
-              <li>Load the prep-arch and opposing scans (STL/PLY), or the demo.</li>
-              <li>Tap the prepared tooth. Margin, axis, anatomy, contacts, occlusion and thickness are done in one pass, then checked.</li>
-              <li>Revisit any stage to override it — or just say what you want.</li>
-              <li>Export the STL for milling.</li>
+              <li>New Crown: pick the tooth, then add the prep-arch and opposing scans (STL/PLY, or the scanner's .zip).</li>
+              <li>The prep is found from the bite (or tap it), and margin, axis, library anatomy, contacts, occlusion and thickness are done in one pass, then checked.</li>
+              <li>Export — or Adjust Design to open every stage, or just say what you want.</li>
             </ol>
+            <div className="st-group">
+              <div className="st-row-item">
+                <span className="st-row-main"><b>Pro tools</b><span>Show the stage rail (Margin, Axis, Anatomy, Adapt…)</span></span>
+                <label className="st-switch">
+                  <input type="checkbox" checked={pro} onChange={(e) => setPro(e.target.checked)} aria-label="Pro tools" />
+                  <span />
+                </label>
+              </div>
+            </div>
             <h2>Things you can say</h2>
             <dl className="st-say">
               {CROWN_HELP.map(([say2, what]) => (
@@ -1219,7 +1263,7 @@ export default function CrownStudio(): React.JSX.Element {
                     <button className="st-btn tinted" onClick={() => rxRef.current?.click()} disabled={!ai.ai || !ai.images}>Read Rx Photo</button>
                   </div>
                   {rxNote && <p className="st-note">{rxNote}</p>}
-                  {files.length > 0 && <button className="st-btn primary block" onClick={() => void commitScans(files, tooth)}>Use These Scans</button>}
+                  {files.length > 0 && <button className="st-btn primary block" onClick={async () => { await commitScans(files, tooth); if (files.some((f) => f.role === 'antagonist')) await autoFind() }}>Use These Scans</button>}
                 </div>
                 {recent.length > 0 && (
                   <div className="st-group">
@@ -1412,7 +1456,16 @@ export default function CrownStudio(): React.JSX.Element {
                       )}
                     </div>
                     {review && <div className="st-review"><div className="st-group-head">AI review</div>{review}</div>}
-                    <button className="st-btn primary block" onClick={next}>Continue to Export</button>
+                    {pro ? (
+                      <button className="st-btn primary block" onClick={next}>Continue to Export</button>
+                    ) : (
+                      <>
+                        <button className="st-btn primary block" disabled={!d.exportable} onClick={() => { haptic(15); void exportCrown(false) }}>
+                          {d.exportable ? 'Export Crown' : 'Fix the failing checks to export'}
+                        </button>
+                        <button className="st-btn tinted block" onClick={() => { setPro(true); setStep('design'); haptic() }}>Adjust Design</button>
+                      </>
+                    )}
                   </>
                 )}
               </>

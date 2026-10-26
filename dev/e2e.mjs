@@ -15,6 +15,8 @@ const fail = (m) => { console.error('E2E FAIL:', m); server.kill(); process.exit
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
 const ctx = await browser.newContext({ ...devices['iPhone 13'], acceptDownloads: true })
+// This run exercises the Pro tools (stage rail); dev/e2e-newcase.mjs covers simple mode.
+await ctx.addInitScript(() => localStorage.setItem('saycad.pro', '1'))
 const page = await ctx.newPage()
 page.on('pageerror', (e) => console.log('pageerror:', e.message))
 page.on('console', (m) => m.type() === 'error' && console.log('console:', m.text()))

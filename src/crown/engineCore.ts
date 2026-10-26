@@ -6,6 +6,8 @@ import { autoDesign, prepareCase, type PreparedCase } from './pipeline'
 import type { DesignData, EngineRequest, MeshData } from './protocol'
 import { parseShapeModel, templateFromModel, type ShapeModel } from './ssm'
 import { analyseLibrary, libraryModels, libraryToothNumber } from './library'
+import { findPrep } from './findPrep'
+import { SurfaceIndex } from './geom'
 
 /**
  * Engine request handler — runs inside the worker (or in-thread as a
@@ -37,6 +39,10 @@ export function handleEngineRequest(req: EngineRequest): { result: unknown; tran
       const m = detectMargin(prepared.prepIndex, req.tap)
       if (m.points.length < 16) throw new Error('No margin found there — tap the top of the prepared tooth.')
       return { result: m, transfer: [] }
+    }
+    case 'findPrep': {
+      if (!prepared) throw new Error('Load the scans first.')
+      return { result: findPrep(prepared.prepIndex, prepared.antagonist ? new SurfaceIndex(prepared.antagonist.clone()) : null), transfer: [] }
     }
     case 'editMargin': {
       if (!prepared) throw new Error('Load the scans first.')

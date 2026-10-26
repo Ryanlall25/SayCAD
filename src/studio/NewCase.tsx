@@ -11,7 +11,6 @@ import {
   occlusionWarning,
   orderFromProject,
   parseDentalProject,
-  RESTORATIONS,
   SCAN_FILE,
   scanSlots,
   SHADES,
@@ -23,11 +22,11 @@ import {
 } from '../crown/order'
 
 /**
- * New case, the way exocad's DentalDB builds an order — patient, tooth,
- * restoration, which scans exist — then one card per scan, asking for
- * exactly the file needed at that moment. Cards swipe like iOS pages;
- * swiping forward is held until the current card has what it needs, and
- * the deck says what that is.
+ * New crown in three swipeable cards: the tooth (with material and shade),
+ * then one card per scan, asking for exactly the file needed at that
+ * moment — the prep arch, then the opposing arch. Swiping forward is held
+ * until the card has what it needs, and the deck says what that is. A
+ * scanner .zip (or exocad .dentalProject) can fill everything at once.
  */
 
 export interface LoadedScan {
@@ -43,7 +42,7 @@ export interface NewCaseResult {
   scans: LoadedScan[]
 }
 
-type Card = { kind: 'start' } | { kind: 'tooth' } | { kind: 'restoration' } | { kind: 'scans' } | { kind: 'scan'; slot: ScanSlot; n: number; of: number } | { kind: 'review' }
+type Card = { kind: 'tooth' } | { kind: 'scan'; slot: ScanSlot; n: number; of: number }
 
 const MATERIAL_SHORT: Record<MaterialId, string> = {
   'zirconia-hs': 'Zirconia HS',
@@ -68,12 +67,15 @@ const vibrate = (ms: number): void => {
   }
 }
 
+const cardsFor = (slots: ScanSlot[]): Card[] => [{ kind: 'tooth' }, ...slots.map((slot, n) => ({ kind: 'scan' as const, slot, n: n + 1, of: slots.length }))]
+
 export default function NewCase(props: {
   toothName: (n: number) => string
   onCancel: () => void
   onDone: (r: NewCaseResult) => void
 }): React.JSX.Element {
-  const [order, setOrder] = useState<CaseOrder>({ ...NEW_ORDER })
+  // Opposing scan always: the bite drives contacts and finding the prep.
+  const [order, setOrder] = useState<CaseOrder>({ ...NEW_ORDER, antagonist: true, preop: false, bite: false })
   const [scans, setScans] = useState<Partial<Record<SlotId, LoadedScan>>>({})
   const [index, setIndex] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
@@ -82,33 +84,22 @@ export default function NewCase(props: {
   const [drag, setDrag] = useState(0)
   const [pending, setPending] = useState<File[] | null>(null) // scans dropped before the tooth was known
   const fileRef = useRef<HTMLInputElement>(null)
-  const projectRef = useRef<HTMLInputElement>(null)
   const deckRef = useRef<HTMLDivElement>(null)
   const pickFor = useRef<SlotId | null>(null)
 
   const toothName = order.tooth ? props.toothName(order.tooth) : ''
   const slots = useMemo(() => scanSlots(order, toothName), [order, toothName])
-  const cards: Card[] = useMemo(
-    () => [
-      { kind: 'start' },
-      { kind: 'tooth' },
-      { kind: 'restoration' },
-      { kind: 'scans' },
-      ...slots.map((slot, n) => ({ kind: 'scan' as const, slot, n: n + 1, of: slots.length })),
-      { kind: 'review' }
-    ],
-    [slots]
-  )
+  const cards = useMemo(() => cardsFor(slots), [slots])
   const card = cards[Math.min(index, cards.length - 1)]
+  const last = index === cards.length - 1
 
-  // Drop scans whose slot no longer exists (e.g. pre-op switched off).
+  // Picking the other jaw's tooth swaps which scan is the prep: start over.
+  const jaw = order.tooth ? jawOf(order.tooth) : null
+  const prevJaw = useRef(jaw)
   useEffect(() => {
-    setScans((s) => {
-      const ids = new Set(slots.map((x) => x.id))
-      const next = Object.fromEntries(Object.entries(s).filter(([k]) => ids.has(k as SlotId)))
-      return Object.keys(next).length === Object.keys(s).length ? s : next
-    })
-  }, [slots])
+    if (prevJaw.current && jaw && prevJaw.current !== jaw) setScans({})
+    prevJaw.current = jaw
+  }, [jaw])
 
   // Place held scans once the tooth (and so the jaws) is known.
   useEffect(() => {
@@ -121,21 +112,16 @@ export default function NewCase(props: {
   /** What the card still needs before moving on, or null when it's complete. */
   function needed(c: Card): string | null {
     if (c.kind === 'tooth' && order.tooth === null) return 'Tap the tooth to restore.'
-    if (c.kind === 'restoration' && !RESTORATIONS.find((r) => r.id === order.restoration)?.ready) return 'Only anatomic crowns can be designed so far.'
     if (c.kind === 'scan' && c.slot.required && !scans[c.slot.id]) return `Needed now: ${c.slot.title.toUpperCase()}.`
     return null
   }
-  const blockedAt = (): number => cards.findIndex((c) => needed(c) !== null)
 
   function go(to: number): void {
     const target = Math.max(0, Math.min(cards.length - 1, to))
-    if (target > index) {
-      const need = needed(cards[index])
-      if (need) {
-        setNudge((x) => x + 1)
-        vibrate(20)
-        return
-      }
+    if (target > index && needed(cards[index])) {
+      setNudge((x) => x + 1)
+      vibrate(20)
+      return
     }
     setIndex(target)
     vibrate(6)
@@ -144,7 +130,7 @@ export default function NewCase(props: {
   /* ── swipe ────────────────────────────────────────────────────────── */
   const gesture = useRef<{ x: number; y: number; t: number; active: boolean; id: number } | null>(null)
   function onPointerDown(e: React.PointerEvent): void {
-    if ((e.target as Element).closest('select, textarea, input[type=range], input[type=date]')) return
+    if ((e.target as Element).closest('select, textarea, input[type=range]')) return
     gesture.current = { x: e.clientX, y: e.clientY, t: performance.now(), active: false, id: e.pointerId }
   }
   function onPointerMove(e: React.PointerEvent): void {
@@ -162,7 +148,7 @@ export default function NewCase(props: {
       deckRef.current?.setPointerCapture(e.pointerId)
     }
     const forwardBlocked = dx < 0 && needed(card) !== null
-    const edge = (dx > 0 && index === 0) || (dx < 0 && index === cards.length - 1)
+    const edge = (dx > 0 && index === 0) || (dx < 0 && last)
     setDrag(forwardBlocked || edge ? dx * 0.22 : dx)
   }
   function onPointerUp(e: React.PointerEvent): void {
@@ -215,9 +201,10 @@ export default function NewCase(props: {
       let currentSlots = slots
       if (project) {
         const r = orderFromProject(parseDentalProject(project), order)
-        setOrder(r.order)
+        const o = { ...r.order, antagonist: true, preop: false, bite: false }
+        setOrder(o)
         setNote(r.note)
-        currentSlots = scanSlots(r.order, r.order.tooth ? props.toothName(r.order.tooth) : '')
+        currentSlots = scanSlots(o, o.tooth ? props.toothName(o.tooth) : '')
       }
       if (!files.length) {
         if (!project) setNote('No STL or PLY scans in that selection.')
@@ -225,11 +212,11 @@ export default function NewCase(props: {
       }
       if (!currentSlots.length) {
         setPending(files)
-        setNote(`${files.length} scan file${files.length > 1 ? 's' : ''} held. Pick the tooth — it decides which jaw is the prep scan.`)
-        setIndex(1)
+        setNote(`${files.length} scan file${files.length > 1 ? 's' : ''} held. Tap the tooth — it decides which jaw is the prep.`)
+        setIndex(0)
         return
       }
-      // One file → the slot it was picked for. Several → sorted by name.
+      // One file → the card it was picked on. Several → sorted by name.
       const target = pickFor.current ? currentSlots.find((s) => s.id === pickFor.current) : undefined
       const plan: Partial<Record<SlotId, string>> =
         files.length === 1 && target ? { [target.id]: files[0].name } : assignToSlots(files.map((f) => f.name), currentSlots, files.length === 1 ? scans : {})
@@ -241,23 +228,21 @@ export default function NewCase(props: {
       }
       const placed = Object.keys(next).length
       if (!placed) {
-        setNote(`Couldn't tell which scan ${files.length === 1 ? 'that is' : 'those are'} — open a scan card and choose the file there.`)
+        setNote(`Couldn't tell which scan ${files.length === 1 ? 'that is' : 'those are'} — choose it on its card.`)
         return
       }
       const merged = { ...scans, ...next }
       setScans(merged)
       const unplaced = files.length - placed
-      if (unplaced > 0) setNote(`${placed} scan${placed > 1 ? 's' : ''} placed; ${unplaced} file${unplaced > 1 ? 's' : ''} not needed for this case.`)
+      if (unplaced > 0) setNote(`${placed} scan${placed > 1 ? 's' : ''} placed; ${unplaced} file${unplaced > 1 ? 's' : ''} not needed.`)
       vibrate(10)
-      // Move on to the next scan still needed — unless this one needs a look.
-      const warn = Object.values(next).some((s) => s && s.check.warnings.length)
-      if (!warn) {
-        const allCards = cardsFor(currentSlots)
-        const firstMissing = allCards.findIndex((c) => c.kind === 'scan' && c.slot.required && !merged[c.slot.id])
-        const here = allCards.findIndex((c) => c.kind === 'scan' && c.slot.id === (pickFor.current ?? Object.keys(next)[0]))
-        const to = firstMissing >= 0 ? firstMissing : files.length > 1 || here < 0 ? allCards.length - 1 : here + 1
-        window.setTimeout(() => setIndex(to), 450)
-      }
+      // Show the next scan still needed — or the last card, where Design Crown is.
+      const warned = (Object.values(next) as LoadedScan[]).find((x) => x.check.warnings.length)
+      const all = cardsFor(currentSlots)
+      const to = warned
+        ? all.findIndex((c) => c.kind === 'scan' && c.slot.id === warned.slot)
+        : Math.max(0, all.findIndex((c) => c.kind === 'scan' && c.slot.required && !merged[c.slot.id]))
+      window.setTimeout(() => setIndex(to > 0 ? to : all.length - 1), warned ? 0 : 450)
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e))
     } finally {
@@ -266,23 +251,9 @@ export default function NewCase(props: {
     }
   }
 
-  const cardsFor = (s: ScanSlot[]): Card[] => [
-    { kind: 'start' },
-    { kind: 'tooth' },
-    { kind: 'restoration' },
-    { kind: 'scans' },
-    ...s.map((slot, n) => ({ kind: 'scan' as const, slot, n: n + 1, of: s.length })),
-    { kind: 'review' }
-  ]
-
-  async function onProject(f: File | undefined): Promise<void> {
-    if (!f) return
-    await onFiles([f])
-  }
-
   function finish(): void {
-    const stop = blockedAt()
-    if (stop >= 0 && stop < cards.length - 1) {
+    const stop = cards.findIndex((c) => needed(c) !== null)
+    if (stop >= 0) {
       setIndex(stop)
       setNudge((x) => x + 1)
       return
@@ -293,23 +264,20 @@ export default function NewCase(props: {
   /* ── render ───────────────────────────────────────────────────────── */
   const set = <K extends keyof CaseOrder>(k: K, v: CaseOrder[K]): void => setOrder((o) => ({ ...o, [k]: v }))
   const need = needed(card)
-  const prep = scans.prep
-  const ant = scans.antagonist
-  const bite = prep && ant ? occlusionWarning(prep.stats, ant.stats) : null
+  const bite = scans.prep && scans.antagonist ? occlusionWarning(scans.prep.stats, scans.antagonist.stats) : null
 
   function primary(): { label: string; run: () => void } {
     if (card.kind === 'scan' && !scans[card.slot.id]) return { label: `Choose ${card.slot.title}`, run: () => choose(card.slot.id) }
-    if (card.kind === 'review') return { label: 'Design Crown', run: finish }
-    if (card.kind === 'scan' && !card.slot.required && !scans[card.slot.id]) return { label: 'Skip', run: () => go(index + 1) }
+    if (last && card.kind === 'scan') return { label: 'Design Crown', run: finish }
     return { label: 'Continue', run: () => go(index + 1) }
   }
   const p = primary()
 
   return (
-    <div className="nc" role="dialog" aria-label="New case">
+    <div className="nc" role="dialog" aria-label="New crown">
       <header className="nc-top">
         <button className="st-link" onClick={props.onCancel}>Cancel</button>
-        <b>New Case</b>
+        <b>New Crown</b>
         <span className="nc-count">{index + 1}/{cards.length}</span>
       </header>
       <div className="nc-progress" aria-hidden>
@@ -332,112 +300,31 @@ export default function NewCase(props: {
         <div className={`nc-track ${drag ? 'dragging' : ''}`} style={{ transform: `translateX(calc(${-index * 100}% + ${drag}px))` }}>
           {cards.map((c, k) => (
             <section key={`${c.kind}-${c.kind === 'scan' ? c.slot.id : k}`} className="nc-card" aria-hidden={k !== index} inert={k !== index ? true : undefined}>
-              {c.kind === 'start' && (
-                <>
-                  <p className="st-eyebrow">Step 1 · Order</p>
-                  <h1>Who is this for?</h1>
-                  <div className="st-group">
-                    <label className="nc-field"><span>Patient</span><input value={order.patient} onChange={(e) => set('patient', e.target.value)} placeholder="Name or case number" autoComplete="off" /></label>
-                    <label className="nc-field"><span>Doctor</span><input value={order.doctor} onChange={(e) => set('doctor', e.target.value)} placeholder="Practice or dentist" autoComplete="off" /></label>
-                    <label className="nc-field"><span>Due</span><input type="date" value={order.due} onChange={(e) => set('due', e.target.value)} /></label>
-                  </div>
-                  <div className="st-group">
-                    <div className="st-group-head">Have the exocad order or the whole export?</div>
-                    <p className="st-foot">A <b>.dentalProject</b> fills in the tooth, restoration and material. A <b>.zip</b> of the scanner export fills in the scans too.</p>
-                    <div className="st-actions">
-                      <button className="st-btn tinted" onClick={() => projectRef.current?.click()}>Import Order</button>
-                      <button className="st-btn tinted" onClick={() => choose(null)}>Import All Files</button>
-                    </div>
-                  </div>
-                  <p className="nc-swipe-hint">Swipe left to continue</p>
-                </>
-              )}
-
               {c.kind === 'tooth' && (
                 <>
-                  <p className="st-eyebrow">Step 2 · Tooth</p>
                   <h1>{order.tooth ? `#${order.tooth} · ${toothName}` : 'Which tooth?'}</h1>
                   <ArchChart selected={order.tooth} onPick={(n) => { set('tooth', n); vibrate(6) }} />
-                  <p className="st-foot">Universal numbering · one crown per case. {order.tooth ? `The ${jawOf(order.tooth)} jaw will be the prep scan.` : ''}</p>
-                </>
-              )}
-
-              {c.kind === 'restoration' && (
-                <>
-                  <p className="st-eyebrow">Step 3 · Restoration</p>
-                  <h1>What are we making?</h1>
-                  <div className="st-group">
-                    {RESTORATIONS.map((r) => (
-                      <button key={r.id} className={`nc-option ${order.restoration === r.id ? 'on' : ''}`} disabled={!r.ready} onClick={() => set('restoration', r.id)}>
-                        <span>{r.label}</span>
-                        <em>{r.ready ? (order.restoration === r.id ? '✓' : '') : 'Not yet'}</em>
-                      </button>
+                  <div className="nc-chips" role="group" aria-label="Material">
+                    {(Object.keys(MATERIALS) as MaterialId[]).map((m) => (
+                      <button key={m} className={order.material === m ? 'on' : ''} onClick={() => set('material', m)}>{MATERIAL_SHORT[m]}</button>
                     ))}
                   </div>
-                  <div className="st-group">
-                    <div className="st-group-head">Material</div>
-                    <div className="st-segmented wrap">
-                      {(Object.keys(MATERIALS) as MaterialId[]).map((m) => (
-                        <button key={m} className={order.material === m ? 'on' : ''} onClick={() => set('material', m)}>{MATERIAL_SHORT[m]}</button>
-                      ))}
-                    </div>
-                    <p className="st-foot">{MATERIALS[order.material].label}: min {MATERIALS[order.material].minAxialMm} mm axial, {MATERIALS[order.material].minOcclusalMm} mm occlusal.</p>
+                  <div className="nc-inline">
+                    <label>Shade
+                      <select value={order.shade} onChange={(e) => set('shade', e.target.value)}>
+                        {SHADES.map((x) => <option key={x}>{x}</option>)}
+                      </select>
+                    </label>
+                    <input value={order.patient} onChange={(e) => set('patient', e.target.value)} placeholder="Patient / case (optional)" autoComplete="off" aria-label="Patient" />
                   </div>
-                  <div className="st-group">
-                    <div className="st-group-head">Shade</div>
-                    <div className="nc-chips">
-                      {SHADES.map((s) => (
-                        <button key={s} className={order.shade === s ? 'on' : ''} onClick={() => set('shade', s)}>{s}</button>
-                      ))}
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {c.kind === 'scans' && (
-                <>
-                  <p className="st-eyebrow">Step 4 · Scans</p>
-                  <h1>Which scans does this case have?</h1>
-                  <div className="st-group">
-                    <Toggle label="Opposing jaw scan" sub="Needed for contacts with the bite. Strongly recommended." on={order.antagonist} set={(v) => set('antagonist', v)} />
-                    <Toggle label="Pre-op scan" sub="The tooth before preparation." on={order.preop} set={(v) => set('preop', v)} />
-                    <Toggle label="Bite scan" sub="Only when the arches were exported separately." on={order.bite} set={(v) => set('bite', v)} />
-                  </div>
-                  <div className="st-group">
-                    <div className="st-group-head">You'll be asked for, in order</div>
-                    {slots.map((s, k) => (
-                      <div key={s.id} className="nc-plan">
-                        <span className="nc-num">{k + 1}</span>
-                        <span><b>{s.title}</b>{s.required ? '' : ' · optional'}</span>
-                        <em>{scans[s.id] ? '✓' : ''}</em>
-                      </div>
-                    ))}
-                  </div>
+                  <button className="st-link nc-import" onClick={() => choose(null)}>Have the whole scanner export? Import the .zip</button>
                 </>
               )}
 
               {c.kind === 'scan' && (
-                <ScanCard slot={c.slot} n={c.n} of={c.of} tooth={order.tooth} scan={scans[c.slot.id]} onChoose={() => choose(c.slot.id)} onRemove={() => setScans((s) => ({ ...s, [c.slot.id]: undefined }))} />
-              )}
-
-              {c.kind === 'review' && (
                 <>
-                  <p className="st-eyebrow">Ready</p>
-                  <h1>{order.patient || 'New case'}{order.tooth ? ` · #${order.tooth}` : ''}</h1>
-                  <div className="st-group">
-                    <Row k="Tooth" v={order.tooth ? `#${order.tooth} ${toothName}` : '—'} ok={order.tooth !== null} onClick={() => setIndex(1)} />
-                    <Row k="Restoration" v={`${RESTORATIONS.find((r) => r.id === order.restoration)!.label}, ${MATERIAL_SHORT[order.material]}, ${order.shade}`} ok onClick={() => setIndex(2)} />
-                    {order.doctor && <Row k="Doctor" v={order.doctor} ok onClick={() => setIndex(0)} />}
-                    {order.due && <Row k="Due" v={order.due} ok onClick={() => setIndex(0)} />}
-                  </div>
-                  <div className="st-group">
-                    <div className="st-group-head">Scans</div>
-                    {slots.map((s) => (
-                      <Row key={s.id} k={s.title} v={scans[s.id]?.name ?? (s.required ? 'Missing' : 'Skipped')} ok={!!scans[s.id] || !s.required} warn={!!scans[s.id]?.check.warnings.length} onClick={() => setIndex(cards.findIndex((x) => x.kind === 'scan' && x.slot.id === s.id))} />
-                    ))}
-                    {bite && <p className="nc-warn">{bite}</p>}
-                  </div>
-                  <p className="st-foot">Next: the scans open in the designer — tap the prepared tooth and the crown is designed and checked.</p>
+                  <ScanCard slot={c.slot} n={c.n} of={c.of} tooth={order.tooth} scan={scans[c.slot.id]} onChoose={() => choose(c.slot.id)} />
+                  {c.slot.id === 'antagonist' && bite && <p className="nc-warn">{bite}</p>}
                 </>
               )}
             </section>
@@ -456,18 +343,17 @@ export default function NewCase(props: {
 
       {/* No `accept` filter: iOS greys out files whose type it doesn't know (.stl, .dentalProject); names are checked after picking. */}
       <input ref={fileRef} type="file" multiple hidden onChange={(e) => { const f = Array.from(e.target.files ?? []); e.target.value = ''; void onFiles(f) }} />
-      <input ref={projectRef} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; void onProject(f) }} />
     </div>
   )
 }
 
-function ScanCard(props: { slot: ScanSlot; n: number; of: number; tooth: number | null; scan?: LoadedScan; onChoose: () => void; onRemove: () => void }): React.JSX.Element {
+function ScanCard(props: { slot: ScanSlot; n: number; of: number; tooth: number | null; scan?: LoadedScan; onChoose: () => void }): React.JSX.Element {
   const { slot, scan } = props
   return (
     <>
-      <p className="st-eyebrow">Scan {props.n} of {props.of}{slot.required ? '' : ' · optional'}</p>
+      <p className="st-eyebrow">Scan {props.n} of {props.of}</p>
       <h1>{slot.title}</h1>
-      <ArchChart selected={props.tooth} highlight={slot.id === 'bite' ? 'both' : slot.jaw} dashed={slot.id === 'preop'} compact />
+      <ArchChart selected={props.tooth} highlight={slot.jaw} compact />
       <p className="nc-ask">{slot.ask}</p>
       <p className="st-foot">{slot.hint}</p>
       {scan ? (
@@ -479,7 +365,6 @@ function ScanCard(props: { slot: ScanSlot; n: number; of: number; tooth: number 
           {scan.check.warnings.map((w) => <p key={w} className="nc-warn">{w}</p>)}
           <div className="st-actions">
             <button className="st-btn tinted" onClick={props.onChoose}>Replace</button>
-            {!slot.required && <button className="st-btn tinted" onClick={props.onRemove}>Remove</button>}
           </div>
         </div>
       ) : (
@@ -490,29 +375,6 @@ function ScanCard(props: { slot: ScanSlot; n: number; of: number; tooth: number 
         </button>
       )}
     </>
-  )
-}
-
-function Toggle(props: { label: string; sub: string; on: boolean; set: (v: boolean) => void }): React.JSX.Element {
-  return (
-    <div className="nc-toggle">
-      <span><b>{props.label}</b><small>{props.sub}</small></span>
-      <label className="st-switch">
-        <input type="checkbox" role="switch" checked={props.on} aria-label={props.label} onChange={(e) => props.set(e.target.checked)} />
-        <span />
-      </label>
-    </div>
-  )
-}
-
-function Row(props: { k: string; v: string; ok: boolean; warn?: boolean; onClick: () => void }): React.JSX.Element {
-  return (
-    <button className="nc-row" onClick={props.onClick}>
-      <span className={`nc-dot ${!props.ok ? 'missing' : props.warn ? 'warn' : 'ok'}`} />
-      <span className="nc-row-k">{props.k}</span>
-      <span className="nc-row-v">{props.v}</span>
-      <span className="nc-chev">›</span>
-    </button>
   )
 }
 
