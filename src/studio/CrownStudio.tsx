@@ -20,7 +20,7 @@ import type { MarginResult } from '../crown/margin'
 import { MATERIALS, type MaterialId } from '../crown/materials'
 import { assignRoles, toothFromNames, type FileRole } from '../crown/caseFiles'
 import { toothClassOf } from '../crown/anatomy'
-import { parseGeometry, exportSTL } from '../core/meshConvert'
+import { parseGeometry, parseScan, exportSTL } from '../core/meshConvert'
 import { parseEoff } from '../crown/eoff'
 import { CROWN_HELP, parseCrown, type CrownCommand, type NumericParam } from '../speak/crownParser'
 import { createDictation } from '../speak/voice'
@@ -45,8 +45,6 @@ import { zip } from '../core/zip'
 import { clearModels, deleteCase, listCases, loadCase, loadModel, newCaseId, saveCase, saveModel, updateCase, type CaseMeta } from './caseStore'
 import NewCase, { type NewCaseResult } from './NewCase'
 import ReviewDeck, { type AdjustTarget } from './ReviewDeck'
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
-import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import { CONTRACT, validateJob, type CrownJob, type CrownOutcome, type QcDecision } from '../module/contract'
 import { assembleOutcome } from '../module/designCase'
 import { embedHost, toHost } from '../module/embed'
@@ -529,7 +527,7 @@ export default function CrownStudio(): React.JSX.Element {
         setCaseId(id)
         state.current.caseId = id
         const now = new Date().toISOString()
-        const stem = list[0]?.name.replace(/\.(stl|ply)$/i, '').slice(0, 28) ?? 'case'
+        const stem = list[0]?.name.replace(/\.(stl|ply|obj)$/i, '').slice(0, 28) ?? 'case'
         const ok = await saveCase(
           { id, name: info?.name ?? `#${t} · ${stem}`, tooth: t, createdAt: now, updatedAt: now, order: info?.order },
           list.filter((f) => f.role === 'prep' || f.role === 'antagonist' || f.role === 'bite' || f.role === 'preop').map((f) => {
@@ -557,7 +555,7 @@ export default function CrownStudio(): React.JSX.Element {
   }
 
   async function onFiles(list: FileList | null): Promise<void> {
-    const scansPicked = Array.from(list ?? []).filter((f) => /\.(stl|ply)$/i.test(f.name))
+    const scansPicked = Array.from(list ?? []).filter((f) => /\.(stl|ply|obj)$/i.test(f.name))
     if (!scansPicked.length) {
       if (list?.length) setStatus('Pick STL or PLY scan files (or use New Case for a .zip export).')
       return
@@ -672,7 +670,7 @@ export default function CrownStudio(): React.JSX.Element {
         if (sc.mesh.indices) g.setIndex(new THREE.BufferAttribute(sc.mesh.indices, 1))
         return g
       }
-      return /\.ply$/i.test(sc.name) ? new PLYLoader().parse(sc.data) : new STLLoader().parse(sc.data)
+      return parseScan(sc.name, sc.data)
     }
     const list: ScanFile[] = [{ name: job.scans.prep.name, role: 'prep', geometry: geo(job.scans.prep) }]
     if (job.scans.antagonist) list.push({ name: job.scans.antagonist.name, role: 'antagonist', geometry: geo(job.scans.antagonist) })
@@ -729,7 +727,7 @@ export default function CrownStudio(): React.JSX.Element {
 
   async function importLibrary(list: FileList | null): Promise<void> {
     if (!list || !list.length) return
-    const picked = Array.from(list).filter((f) => /\.(stl|ply|eoff)$/i.test(f.name)) // the input is cleared right after this call
+    const picked = Array.from(list).filter((f) => /\.(stl|ply|obj|eoff)$/i.test(f.name)) // the input is cleared right after this call
     setBusy(`Reading ${picked.length} library file(s)…`)
     try {
       const files: Array<{ name: string; mesh: MeshData }> = []

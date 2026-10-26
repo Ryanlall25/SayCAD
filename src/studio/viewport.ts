@@ -238,7 +238,9 @@ export class StudioViewport {
     this.scanMesh = null
     if (!g) return
     if (!g.getAttribute('normal')) g.computeVertexNormals()
-    this.scanMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: NEUTRAL_COLOR, roughness: 0.68, metalness: 0.04, side: THREE.DoubleSide }))
+    // Colour scans (OBJ/PLY with vertex colour) show their real tooth and gum shades.
+    const coloured = !!g.getAttribute('color')
+    this.scanMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: coloured ? 0xffffff : NEUTRAL_COLOR, vertexColors: coloured, roughness: coloured ? 0.55 : 0.68, metalness: 0.04, side: THREE.DoubleSide }))
     this.groups.scan.add(this.scanMesh)
   }
 
@@ -249,7 +251,9 @@ export class StudioViewport {
     if (!g.getAttribute('normal')) g.computeVertexNormals()
     this.antMesh = new THREE.Mesh(
       g,
-      new THREE.MeshStandardMaterial({ color: 0xc8c8c8, metalness: 0.45, roughness: 0.35, side: THREE.DoubleSide, transparent: true, opacity: 0.45, depthWrite: false })
+      g.getAttribute('color')
+        ? new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.55, metalness: 0.04, side: THREE.DoubleSide, transparent: true, opacity: 0.55, depthWrite: false })
+        : new THREE.MeshStandardMaterial({ color: 0xc8c8c8, metalness: 0.45, roughness: 0.35, side: THREE.DoubleSide, transparent: true, opacity: 0.45, depthWrite: false })
     )
     this.groups.antagonist.add(this.antMesh)
   }

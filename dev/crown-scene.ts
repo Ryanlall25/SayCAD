@@ -2,23 +2,30 @@
 // in occlusion, from several directions (local only — cases stay in dev/cases).
 // /dev/crown-scene.html?case=laura&prep=JawUpper&opp=JawLower&crown=out/crown.stl&at=x,y,z&up=x,y,z&mesial=x,y,z[&r=12][&margin=x,y,z;…]
 import * as THREE from 'three'
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
+import { parseScan } from '../src/core/meshConvert'
 const q = new URLSearchParams(location.search)
 const load = async (p: string, crop = 0): Promise<THREE.BufferGeometry> => {
-  let g = new STLLoader().parse(await (await fetch(`/dev/cases/${q.get('case')}/${p}?t=${Date.now()}`)).arrayBuffer())
+  let g = parseScan(p, await (await fetch(`/dev/cases/${q.get('case')}/${p}?t=${Date.now()}`)).arrayBuffer())
   if (crop) {
     // Keep only triangles near the crown: far scan flaps block the views.
-    const pos = g.getAttribute('position')
+        if (g.index) g = g.toNonIndexed()
+    const pos2 = g.getAttribute('position')
+    const colAttr = g.getAttribute('color')
     const keep: number[] = []
-    for (let t = 0; t < pos.count; t += 3) {
-      const cx = (pos.getX(t) + pos.getX(t + 1) + pos.getX(t + 2)) / 3 - at.x
-      const cy = (pos.getY(t) + pos.getY(t + 1) + pos.getY(t + 2)) / 3 - at.y
-      const cz = (pos.getZ(t) + pos.getZ(t + 1) + pos.getZ(t + 2)) / 3 - at.z
+    const keepC: number[] = []
+    for (let t = 0; t < pos2.count; t += 3) {
+      const cx = (pos2.getX(t) + pos2.getX(t + 1) + pos2.getX(t + 2)) / 3 - at.x
+      const cy = (pos2.getY(t) + pos2.getY(t + 1) + pos2.getY(t + 2)) / 3 - at.y
+      const cz = (pos2.getZ(t) + pos2.getZ(t + 1) + pos2.getZ(t + 2)) / 3 - at.z
       if (cx * cx + cy * cy + cz * cz > crop * crop) continue
-      for (let k = 0; k < 3; k++) keep.push(pos.getX(t + k), pos.getY(t + k), pos.getZ(t + k))
+      for (let k = 0; k < 3; k++) {
+        keep.push(pos2.getX(t + k), pos2.getY(t + k), pos2.getZ(t + k))
+        if (colAttr) keepC.push(colAttr.getX(t + k), colAttr.getY(t + k), colAttr.getZ(t + k))
+      }
     }
     g = new THREE.BufferGeometry()
     g.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(keep), 3))
+    if (colAttr) g.setAttribute('color', new THREE.BufferAttribute(Float32Array.from(keepC), 3))
   }
   g.computeVertexNormals()
   return g
@@ -34,18 +41,34 @@ const CROP = Number(q.get('crop') ?? R * 1.8)
 const gum = new THREE.MeshPhysicalMaterial({ color: 0xb9b2a6, roughness: 0.7, side: THREE.DoubleSide })
 const opp = new THREE.MeshPhysicalMaterial({ color: 0x9fa6a8, roughness: 0.7, side: THREE.DoubleSide, transparent: true, opacity: Number(q.get('oppAlpha') ?? 1) })
 const zr = new THREE.MeshPhysicalMaterial({ color: 0xf6ecd6, roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.25, sheen: 0.3, side: THREE.DoubleSide })
+// A scan file (with extension; a bare name means .stl): its own colours when it has them.
+async function loadScanMesh(file: string, fallback: THREE.Material): Promise<THREE.Mesh> {
+  const name = /\.[a-z]+$/i.test(file) ? file : `${file}.stl`
+  const g = await load(name, CROP)
+  if (!g.getAttribute('color')) return new THREE.Mesh(g, fallback)
+  const m = fallback as THREE.MeshPhysicalMaterial
+  return new THREE.Mesh(g, new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.55, side: THREE.DoubleSide, transparent: m.transparent, opacity: m.opacity }))
+}
 const scene = new THREE.Scene()
 scene.background = new THREE.Color(0x101414)
 scene.add(new THREE.HemisphereLight(0xffffff, 0x404040, 1.1))
-const prepM = q.get('noprep') ? null : new THREE.Mesh(await load(`${q.get('prep')}.stl`, CROP), gum)
+const prepM = q.get('noprep') ? null : await loadScanMesh(q.get('prep')!, gum)
 if (prepM) scene.add(prepM)
-const oppM = q.get('opp') ? new THREE.Mesh(await load(`${q.get('opp')}.stl`, CROP), opp) : null
+const oppM = q.get('opp') ? await loadScanMesh(q.get('opp')!, opp) : null
 if (oppM) scene.add(oppM)
 if (q.get('crown')) scene.add(new THREE.Mesh(await load(q.get('crown')!), zr))
-for (const m of (q.get('margin') ?? '').split(';').filter(Boolean)) {
-  const b = new THREE.Mesh(new THREE.SphereGeometry(0.12), new THREE.MeshBasicMaterial({ color: 0x2f7dff }))
-  b.position.set(...(m.split(',').map(Number) as [number, number, number]))
-  scene.add(b)
+if (q.get('truth')) scene.add(new THREE.Mesh(await load(q.get('truth')!), new THREE.MeshPhysicalMaterial({ color: 0x5aa9ff, roughness: 0.4, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false })))
+// Margins as dots: `margin` (blue, ours) and `truthMargin` (green, the technician's),
+// inline "x,y,z;…" or a JSON file of [x,y,z] in the case folder.
+for (const [key, colour] of [['margin', 0x2f7dff], ['truthMargin', 0x2fd36b]] as const) {
+  const v = q.get(key) ?? ''
+  const pts: number[][] = v.endsWith('.json') ? await (await fetch(`/dev/cases/${q.get('case')}/${v}`)).json() : v.split(';').filter(Boolean).map((m) => m.split(',').map(Number))
+  for (const p of pts) {
+    const b = new THREE.Mesh(new THREE.SphereGeometry(0.11), new THREE.MeshBasicMaterial({ color: colour, depthTest: false }))
+    b.position.set(p[0], p[1], p[2])
+    b.renderOrder = 2
+    scene.add(b)
+  }
 }
 // Views: name → (eye direction, show opposing).
 const views: Array<[string, THREE.Vector3, boolean]> = q.get('views') === 'crown' ? [

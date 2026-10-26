@@ -44,6 +44,8 @@ export interface DesignRequest {
   nu?: number
   nv?: number
   template?: Template
+  /** Dev: the outer grid after each design stage. */
+  onStage?: (stage: string, g: CrownGrid) => void
 }
 
 export interface DesignResult {
@@ -296,7 +298,7 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
   lap('intaglio')
 
   const outer = designOuter(
-    { toothClass: toothClassOf(pc.toothNumber), marginRow, intaglio: intaglio.grid, intaglioIndex, mesial, distal, antagonist, nv, templateOverride: req.template },
+    { toothClass: toothClassOf(pc.toothNumber), marginRow, intaglio: intaglio.grid, intaglioIndex, mesial, distal, antagonist, nv, templateOverride: req.template, onStage: req.onStage },
     params
   )
   lap('outer')

@@ -19,6 +19,7 @@
     "import-library": "vite-node scripts/import-library.ts --",
     "e2e:newcase": "node dev/e2e-newcase.mjs",
     "crown": "vite-node scripts/crown.ts --",
+    "eval": "vite-node scripts/eval-cases.ts --",
     "build:module": "vite build --ssr src/module/index.ts --outDir dist-module --emptyOutDir",
     "e2e:embed": "node dev/e2e-embed.mjs"
   },

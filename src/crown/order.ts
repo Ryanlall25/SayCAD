@@ -132,7 +132,7 @@ const isBite = (n: string): boolean => /bite|occlusion|buccal|biss/i.test(n)
 const isPreop = (n: string): boolean => /pre[-_ ]?op|preop|situation|wax[-_ ]?up|initial/i.test(n)
 const isCrown = (n: string): boolean => /crown|restoration|coping|[-_ ]cad[-_ .]/i.test(n)
 
-export const SCAN_FILE = /\.(stl|ply)$/i
+export const SCAN_FILE = /\.(stl|ply|obj)$/i
 
 /** Which slot a file belongs in, judged by its name; null when unclear. */
 export function slotForName(name: string, slots: ScanSlot[]): SlotId | null {

@@ -137,6 +137,18 @@ export class SurfaceIndex {
     return behind ? -l : l
   }
 
+  /**
+   * Vertical clearance from p up to this surface, for a surface lying above
+   * (local +y): the first hit of a ray cast up from well below p, minus p's
+   * height — negative when p is inside or past it. Unlike signedDistance it
+   * needs no inside/outside test, so hollow printed models, bases and open
+   * scans all read right.
+   */
+  gapUp(p: Vec3, maxDistance = 6): number {
+    const h = this.raycast([p[0], p[1] - 40, p[2]], [0, 1, 0], 0, 40 + maxDistance)
+    return h ? h.point[1] - p[1] : maxDistance
+  }
+
   /** Face normal (from winding — only for shading/heuristics, never for sign). */
   faceNormal(faceIndex: number): Vec3 {
     const idx = this.geometry.index as THREE.BufferAttribute

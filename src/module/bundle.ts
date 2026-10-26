@@ -9,7 +9,7 @@ import { CONTRACT, type CrownJob, type CrownOrder, type CrownOutcome, type ScanI
  * scanner export. A bundle is a set of files (or one .zip of them):
  *
  *   job.json            optional; CrownJob with scan *file names* in `scans`
- *   *.stl / *.ply       the scans
+ *   *.stl / *.ply / *.obj  the scans
  *   *.dentalProject     optional exocad order (tooth, material)
  *
  * Without job.json the scans are sorted by name (upper/lower, maxillary/
@@ -26,7 +26,7 @@ export interface BundleJob extends Omit<CrownJob, 'scans'> {
   scans?: { prep?: string; antagonist?: string; bite?: string[]; preop?: string }
 }
 
-const SCAN = /\.(stl|ply)$/i
+const SCAN = /\.(stl|ply|obj)$/i
 const base = (n: string): string => n.split(/[\\/]/).pop()!
 
 /** Flattens zips; drops folders and junk (macOS resource forks). */

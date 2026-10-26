@@ -1,6 +1,5 @@
 import * as THREE from 'three'
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
-import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
+import { parseScan } from '../core/meshConvert'
 import { toothClassOf } from '../crown/anatomy'
 import { bestMargin, findPrep } from '../crown/findPrep'
 import { SurfaceIndex, type ToothFrame, type Vec3 } from '../crown/geom'
@@ -199,7 +198,7 @@ function toGeometry(s: ScanInput): THREE.BufferGeometry {
     if (s.mesh.indices) g.setIndex(new THREE.BufferAttribute(s.mesh.indices, 1))
     return g
   }
-  const g = /\.ply$/i.test(s.name) ? new PLYLoader().parse(s.data) : new STLLoader().parse(s.data)
+  const g = parseScan(s.name, s.data)
   if (!g.getAttribute('position')?.count) throw new Error(`${s.name} has no geometry.`)
   return g
 }

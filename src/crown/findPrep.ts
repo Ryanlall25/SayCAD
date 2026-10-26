@@ -38,7 +38,11 @@ const CELL = 0.5
 const CONTACT = 0.4 // band above the closest approach that counts as "in contact"
 const MAX_GAP = 1.0 // closest approach allowed for scans exported "in occlusion"
 const MIN_CLEAR = 0.6
+// Prep tops usually sit 0.6–4 mm under the opposing teeth; some labs' preps
+// (and printed models set slightly apart) need up to 6 mm. The narrow band is
+// tried first because a wide one also admits natural teeth out of contact.
 const MAX_CLEAR = 4.0
+const MAX_CLEAR_WIDE = 6.0
 const ERODE_MM = 2.0
 const MIN_BLOB_MM2 = 2.0
 
@@ -79,6 +83,13 @@ function coverage(prep: SurfaceIndex, ant: SurfaceIndex, samples: Vec3[], origin
  * on the arch and picks one outright when the match is clear.
  */
 export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth?: number): PrepGuess {
+  const narrow = findPrepWithin(prep, antagonist, tooth, MAX_CLEAR)
+  if (narrow.point || narrow.candidates?.length || !antagonist || !narrow.blobsMm2) return narrow
+  const wide = findPrepWithin(prep, antagonist, tooth, MAX_CLEAR_WIDE)
+  return wide.point || wide.candidates?.length ? wide : narrow
+}
+
+function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth: number | undefined, maxClear: number): PrepGuess {
   if (!antagonist) return { point: null, reason: 'No opposing scan — tap the prepared tooth.', blobsMm2: [] }
 
   // 1. Occlusal plane from the contacts.
@@ -136,9 +147,9 @@ export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null, to
       const hit = prep.raycast(start, down)
       if (!hit) continue
       top[k] = hit.point
-      const up = antagonist.raycast(add(hit.point, scale(n, 0.01)), n, 0, MAX_CLEAR + gap + 1)
+      const up = antagonist.raycast(add(hit.point, scale(n, 0.01)), n, 0, maxClear + gap + 1)
       const clear = up ? up.distance - gap : Infinity
-      if (clear >= MIN_CLEAR && clear <= MAX_CLEAR) ok[k] = 1
+      if (clear >= MIN_CLEAR && clear <= maxClear) ok[k] = 1
     }
   }
 

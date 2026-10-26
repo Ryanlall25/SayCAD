@@ -217,6 +217,42 @@ arch. Its neighbours are natural and the edentulous ridge is distal.
   smooth, joint solve of all constraints (thickness, contacts, occlusion)
   instead of sequential pushes.
 
+**Scored against finished lab cases.** `npm run eval -- dev/cases/<set>`
+runs every `caseNN/` folder twice: once fully automatic, and once on the
+technician's margin, which isolates the crown design. Each folder holds the
+jaw scans, the technician's crown and margin, and optionally a die. It
+reports our margin's error against the technician's, our crown's distance
+from the technician's crown, and the checks. Scans may be STL, PLY or OBJ;
+OBJ vertex colour is kept, and the studio shows real tooth and gum shades.
+
+First set: three exocad molar and premolar crowns, exported as Model
+Creator models (scan, printed base and a separate die):
+
+| case | on the technician's margin | fully automatic |
+|---|---|---|
+| 01 · #47 | crown 0.33 mm mean / 1.03 p90 from the technician's; no check fails | prep found; margin 1.05 mm mean; crown 0.37 mm mean |
+| 02 · #35 | crown 0.29 / 0.90 mm; no check fails | asks for a tap (prep not found) |
+| 03 · #46 | crown 0.23 / 0.68 mm; no check fails | prep found; margin 1.09 mm mean (one stretch drops onto the die base); crown 0.61 mm mean |
+
+What these cases fixed:
+- **Bite.** Printed models are hollow shells, which fooled the inside/outside
+  test, so cusps were lifted into the opposing teeth. The bite is now
+  measured as the vertical gap to the opposing arch's first surface from
+  below, and the relief runs until it is clear.
+- **Walls.** Right above the margin, the fitting-surface check and the
+  thickness step judge a wall vertex by a ray straight out from the axis.
+  The old ray toward the centre misread those points.
+- **Contacts.** Contacts are relieved down to the cervical third, still
+  capped by the material minimum.
+- **Prep search.** It widens the clearance band from 4 to 6 mm only when
+  nothing is found within 4.
+
+Caveats:
+- Model Creator dies are ditched along the technician's margin, so margin
+  finding on them is easier than on a raw intraoral scan. Raw scans are the
+  real test.
+- These are three cases only.
+
 `dev/e2e-real.mjs` replays a local case. `dev/crown-scene.html` renders a
 crown on the real arches in occlusion. Cases stay in the git-ignored
 `dev/cases/`.

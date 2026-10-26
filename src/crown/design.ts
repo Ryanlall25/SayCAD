@@ -244,7 +244,9 @@ function enforceContact(
   // only those that were within reach of the closest approach (each pass
   // moves the surface by at most |e|, so nothing far away can become closest).
   let candidates: Array<[number, number]> = []
-  for (let j = Math.round(grid.nv * 0.12); j < Math.round(grid.nv * 0.8); j++) {
+  // From just above the margin: a tight neighbour often bulges at the cervical
+  // third, and the critic measures contacts from row 2 up.
+  for (let j = 2; j < Math.round(grid.nv * 0.8); j++) {
     for (let i = 0; i < grid.nu; i++) if (angleDiff(thetaOf(grid, i), sideTheta) <= (75 * Math.PI) / 180) candidates.push([i, j])
   }
   for (let it = 0; it < 10; it++) {
@@ -270,7 +272,7 @@ function enforceContact(
       return { gap: min }
     }
     for (let j = 1; j < grid.nv; j++) {
-      const wt = smoothstep(0.04, 0.22, j / grid.nv)
+      const wt = smoothstep(0.015, 0.09, j / grid.nv)
       for (let i = 0; i < grid.nu; i++) {
         const p = getP(grid, i, j)
         const d = dist(p, at)
@@ -301,7 +303,7 @@ function enforceContact(
 
 /** Lowers anything closer than `clearance` to the antagonist; optionally first
  *  raises cusp tips into contact. */
-function enforceOcclusion(
+export function enforceOcclusion(
   grid: CrownGrid,
   ant: SurfaceIndex,
   clearance: number,
@@ -322,7 +324,7 @@ function enforceOcclusion(
     let raised = 0
     for (const tip of cuspTips) {
       const p = getP(grid, tip.i, tip.j)
-      const sd = ant.signedDistance(p, [0, 1, 0], 4)
+      const sd = ant.gapUp(p, 4)
       const lift = clamp(sd - clearance, 0, 1.2)
       if (lift < 0.05) continue
       raised++
@@ -339,14 +341,16 @@ function enforceOcclusion(
   }
   // Only vertices near the antagonist can ever need relief; find them once.
   let active: number[] | null = null
-  for (let it = 0; it < 6; it++) {
+  // Until clear: a deep overlap (a cusp placed into the antagonist) can take
+  // more than a few passes, as each re-measures from the moved surface.
+  for (let it = 0; it < 20; it++) {
     const deficit = new Float64Array(grid.nu * grid.nv)
     let any = false
     const next: number[] = []
     const visit = (k: number): void => {
       const i = k % grid.nu
       const j = Math.floor(k / grid.nu)
-      const sd = ant.signedDistance(getP(grid, i, j), [0, 1, 0], 4)
+      const sd = ant.gapUp(getP(grid, i, j), 4)
       if (sd < clearance + 0.8) next.push(k)
       const d = clearance - sd
       if (d > 0.002) {
@@ -372,7 +376,7 @@ function enforceOcclusion(
         setP(grid, i, j, [p[0], y, p[2]])
       }
     }
-    const pd = ant.signedDistance(grid.pole, [0, 1, 0], 4)
+    const pd = ant.gapUp(grid.pole, 4)
     if (pd < clearance) {
       const f = floorOf(-1, grid.pole)
       const y = grid.pole[1] - (clearance - pd)
@@ -409,6 +413,19 @@ export function enforceThickness(
       const sd = intaglio.signedDistance(p, normalize(sub(centre, p)), full + 3)
       if (sd < maxReq + 0.6) keep.push([i, j])
       if (req - sd <= 0.012) continue
+      if (j < grid.nv * 0.4 && !occlusal) {
+        // Axial wall, judged straight out from the axis: a vertex whose
+        // outward ray meets the fitting surface is inside the prep (folded
+        // through, or right at the margin where the closest point is the
+        // margin edge and re-seating can't clear). Move it out horizontally,
+        // so the wall can't fold under the margin; one that is outside but
+        // thin moves out by what it lacks.
+        const out = normalize([p[0], 0, p[2]])
+        const hit = intaglio.raycast(p, out, 0, full + 6)
+        const lack = hit ? hit.distance + req : req - (intaglio.closest(p, full + 3)?.distance ?? Infinity)
+        if (lack > 0.012) moves.push([i, j, [p[0] + out[0] * lack, p[1], p[2] + out[2] * lack]])
+        continue
+      }
       // Re-seat the vertex at the required distance along the intaglio's own
       // outward normal at the closest point. The intaglio is ours (built from
       // the grid with known winding), so its normal is trustworthy even where
@@ -427,7 +444,7 @@ export function enforceThickness(
 }
 
 /** Lowest y a vertex may be relieved to: material floor above the intaglio. */
-function occlusalFloor(intaglio: SurfaceIndex, minOcclusalMm: number): (p: Vec3) => number | null {
+export function occlusalFloor(intaglio: SurfaceIndex, minOcclusalMm: number): (p: Vec3) => number | null {
   return (p) => {
     const h = intaglio.raycast([p[0], p[1] + 20, p[2]], [0, -1, 0], 0, 40)
     if (!h) return null
