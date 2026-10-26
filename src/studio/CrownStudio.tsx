@@ -44,6 +44,7 @@ import {
 import { zip } from '../core/zip'
 import { clearModels, deleteCase, listCases, loadCase, loadModel, newCaseId, saveCase, saveModel, updateCase, type CaseMeta } from './caseStore'
 import NewCase, { type NewCaseResult } from './NewCase'
+import ReviewDeck, { type AdjustTarget } from './ReviewDeck'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import { CONTRACT, validateJob, type CrownJob, type CrownOutcome, type QcDecision } from '../module/contract'
@@ -203,11 +204,45 @@ export default function CrownStudio(): React.JSX.Element {
   const [override, setOverride] = useState('')
   const [detent, setDetent] = useState<Detent>('peek')
   const [run, setRun] = useState<RunStage[] | null>(null)
-  const [dark, setDark] = useState(() => typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches)
+  const [appearance, setAppearanceState] = useState<'dark' | 'light' | 'system'>(() => {
+    try {
+      const a = localStorage.getItem('saycad.appearance')
+      return a === 'light' || a === 'system' ? a : 'dark'
+    } catch {
+      return 'dark'
+    }
+  })
+  const systemDark = (): boolean => typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches
+  const [dark, setDark] = useState(() => appearance === 'dark' || (appearance === 'system' && systemDark()))
+  const setAppearance = (a: 'dark' | 'light' | 'system'): void => {
+    setAppearanceState(a)
+    setDark(a === 'dark' || (a === 'system' && systemDark()))
+    try {
+      localStorage.setItem('saycad.appearance', a)
+    } catch {
+      /* storage unavailable */
+    }
+  }
   const [caseId, setCaseId] = useState<string | null>(null)
   const [recent, setRecent] = useState<CaseMeta[]>([])
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [newCase, setNewCase] = useState(false)
+  const [asking, setAsking] = useState<string | null>(null) // what the coach banner asks for, when not the default
+  const [library, setLibraryState] = useState<'round' | 'rectangular'>(() => {
+    try {
+      return localStorage.getItem('saycad.library') === 'rectangular' ? 'rectangular' : 'round'
+    } catch {
+      return 'round'
+    }
+  })
+  const setLibrary = (l: 'round' | 'rectangular'): void => {
+    setLibraryState(l)
+    try {
+      localStorage.setItem('saycad.library', l)
+    } catch {
+      /* storage unavailable */
+    }
+  }
   // Simple mode shows the AI result and one Export button; Pro mode adds the stage rail.
   const [pro, setProState] = useState(() => {
     try {
@@ -269,13 +304,41 @@ export default function CrownStudio(): React.JSX.Element {
   useEffect(() => {
     if (typeof matchMedia === 'undefined') return
     const mq = matchMedia('(prefers-color-scheme: dark)')
-    const on = (): void => setDark(mq.matches)
+    const on = (): void => {
+      if (appearance === 'system') setDark(mq.matches)
+    }
     mq.addEventListener('change', on)
     return () => mq.removeEventListener('change', on)
-  }, [])
+  }, [appearance])
   useEffect(() => viewRef.current?.setAppearance(dark), [dark])
 
   useEffect(() => viewRef.current?.setFrameVisible(step === 'margin' || step === 'axis'), [step, design])
+
+  // Simple mode: the key measurements sit on the crown itself.
+  useEffect(() => {
+    const v = viewRef.current
+    if (!v) return
+    if (pro || step !== 'check' || !design) return v.setCallouts([])
+    const f = design.frame
+    const p = design.crown.positions
+    let mes = -Infinity, dis = Infinity, top = -Infinity
+    let pm: [number, number, number] = [0, 0, 0], pd = pm, pt = pm
+    for (let k = 0; k < p.length; k += 3) {
+      const q: [number, number, number] = [p[k] - f.origin[0], p[k + 1] - f.origin[1], p[k + 2] - f.origin[2]]
+      const m = q[0] * f.mesial[0] + q[1] * f.mesial[1] + q[2] * f.mesial[2]
+      const o = q[0] * f.occlusal[0] + q[1] * f.occlusal[1] + q[2] * f.occlusal[2]
+      const at: [number, number, number] = [p[k], p[k + 1], p[k + 2]]
+      if (m > mes) [mes, pm] = [m, at]
+      if (m < dis) [dis, pd] = [m, at]
+      if (o > top) [top, pt] = [o, at]
+    }
+    const s = design.summary
+    v.setCallouts([
+      { point: pm, text: `M ${fmt(s.mesialContactMm)}` },
+      { point: pd, text: `D ${fmt(s.distalContactMm)}` },
+      { point: pt, text: `occl ${fmt(s.occlusalMinMm)} mm` }
+    ])
+  }, [pro, step, design])
 
   // Embedded in the suite: accept jobs from the host origin only.
   useEffect(() => {
@@ -314,39 +377,47 @@ export default function CrownStudio(): React.JSX.Element {
     }
   }, [detent, loaded])
 
-  // Learned anatomy for the tooth's class, if the lab has trained one.
+  // Anatomy for this tooth: a model the lab trained or imported on this device,
+  // else the bundled library's own tooth for this position (Round or
+  // Rectangular), else a class model, else the textbook template. Designs wait
+  // for it (modelReady) so the first design never starts on the wrong shape.
+  const modelReady = useRef<Promise<void>>(Promise.resolve())
   useEffect(() => {
     let cancelled = false
+    let done: () => void = () => {}
+    modelReady.current = new Promise<void>((r) => (done = r))
     const cls = toothClassOf(tooth)
-    const use = (txt: string): void => {
+    const parse = (txt: string | null): { json: string; count: number; source: string } | null => {
+      if (!txt || !txt.trim().startsWith('{')) return null
       try {
         const m = JSON.parse(txt) as { count: number; source?: string }
-        setModel({ json: txt, count: m.count, source: m.source ?? `${m.count} cases` })
+        return { json: txt, count: m.count, source: m.source ?? `${m.count} cases` }
       } catch {
-        setModel(null)
+        return null
       }
     }
-    void loadModel(cls).then((stored) => {
+    const get = (path: string): Promise<string | null> =>
+      fetch(`${import.meta.env.BASE_URL}models/${path}`)
+        .then((r) => (r.ok ? r.text() : null))
+        .catch(() => null)
+    void (async () => {
+      const found = parse(await loadModel(cls)) ?? parse(await get(`lib-${library}-t${tooth}.json`)) ?? parse(await get(`ssm-${cls}.json`))
       if (cancelled) return
-      if (stored) return use(stored)
-      fetch(`${import.meta.env.BASE_URL}models/ssm-${cls}.json`)
-      .then((r) => (r.ok ? r.text() : null))
-      .then((txt) => {
-        if (cancelled) return
-        if (!txt || !txt.trim().startsWith('{')) return setModel(null)
-        try {
-          const m = JSON.parse(txt) as { count: number; source?: string }
-          setModel({ json: txt, count: m.count, source: m.source ?? `${m.count} cases` })
-        } catch {
-          setModel(null)
-        }
-      })
-      .catch(() => !cancelled && setModel(null))
-    })
+      setModel(found)
+      state.current.model = found
+      done()
+      // A design already on screen follows the new anatomy.
+      if (state.current.design && state.current.margin) void runDesign('final')
+    })()
     return () => {
       cancelled = true
+      done()
     }
-  }, [tooth, modelsVersion])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tooth, modelsVersion, library])
+
+  /** Resolves once this tooth's anatomy has loaded (or after 5 s, whichever is first). */
+  const waitModel = (): Promise<void> => Promise.race([modelReady.current, new Promise<void>((r) => setTimeout(r, 5000))])
 
   /* ── engine calls ──────────────────────────────────────────────────── */
 
@@ -532,13 +603,33 @@ export default function CrownStudio(): React.JSX.Element {
     }
     if (!guess.point) {
       setStatus(guess.reason ?? 'Tap the prepared tooth.')
+      // Real arches often have several teeth out of contact: offer the likely
+      // ones as numbered pins — one tap picks the prep.
+      const cands = ('candidates' in guess ? guess.candidates : undefined) ?? []
+      if (cands.length > 1) {
+        say('app', `Several teeth are out of the bite. Tap the number on #${state.current.tooth} — or tap the tooth itself.`)
+        setAsking(`Tap the number on #${state.current.tooth}`)
+        viewRef.current?.view('fit')
+        viewRef.current?.setPins(
+          cands.slice(0, 5).map((c, k) => ({
+            point: c.point,
+            label: String(k + 1),
+            aria: `Candidate prep ${k + 1}`,
+            onTap: () => {
+              viewRef.current?.setPins([])
+              if (jobRef.current) jobRef.current.prepFoundBy = 'host'
+              void tapPrep(c.point, guess.ups)
+            }
+          }))
+        )
+      }
       const j = jobRef.current
       if (EMBED_HOST && j) toHost(EMBED_HOST, { contract: CONTRACT, type: 'crown:outcome', outcome: { contract: CONTRACT, jobId: j.job.jobId, caseRef: j.job.order.caseRef, status: 'needs-input', needs: [{ kind: 'prep-location', message: `${guess.reason ?? ''} The technician can tap it in the studio.`.trim() }], engine: { contract: CONTRACT, version: '' } } })
       return
     }
     say('app', `Found the prep on #${state.current.tooth} from the bite.`)
     if (jobRef.current) jobRef.current.prepFoundBy = 'bite'
-    await tapPrep(guess.point)
+    await tapPrep(guess.point, guess.ups)
   }
 
   /** The current design as a saycad.crown/1 outcome (embedded mode). */
@@ -727,7 +818,10 @@ export default function CrownStudio(): React.JSX.Element {
    * failing, has Claude review the result, and stops on the checks — the
    * technician's decision point.
    */
-  async function tapPrep(point: [number, number, number]): Promise<void> {
+  async function tapPrep(point: [number, number, number], ups?: Array<[number, number, number]>): Promise<void> {
+    viewRef.current?.setPins([])
+    setAsking(null)
+    await waitModel()
     const withAi = ai.ai
     setRun([
       { key: 'margin', label: 'Margin line', status: 'active' },
@@ -743,7 +837,7 @@ export default function CrownStudio(): React.JSX.Element {
     setBusy('Finding the margin…')
     let m: MarginResult
     try {
-      m = await engineRef.current!.margin(point)
+      m = await engineRef.current!.margin(point, ups)
     } catch (e) {
       stage('margin', 'fail', e instanceof Error ? e.message : String(e))
       setStatus(e instanceof Error ? e.message : String(e))
@@ -1237,7 +1331,7 @@ export default function CrownStudio(): React.JSX.Element {
             )}
           </div>
         )}
-        {loaded && !margin && !busy && <div className="st-coach">Tap the prepared tooth</div>}
+        {loaded && !margin && !busy && <div className="st-coach">{asking ?? 'Tap the prepared tooth'}</div>}
         {(listening || interim) && <div className="st-coach live">{interim || 'Listening…'}</div>}
         {busy && (
           <div className="st-hud" role="status">
@@ -1297,6 +1391,14 @@ export default function CrownStudio(): React.JSX.Element {
             </ol>
             <div className="st-group">
               <div className="st-row-item">
+                <span className="st-row-main"><b>Appearance</b></span>
+                <div className="st-segmented small" role="group" aria-label="Appearance">
+                  {(['dark', 'light', 'system'] as const).map((a) => (
+                    <button key={a} className={appearance === a ? 'on' : ''} onClick={() => setAppearance(a)}>{a[0].toUpperCase() + a.slice(1)}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="st-row-item">
                 <span className="st-row-main"><b>Pro tools</b><span>Show the stage rail (Margin, Axis, Anatomy, Adapt…)</span></span>
                 <label className="st-switch">
                   <input type="checkbox" checked={pro} onChange={(e) => setPro(e.target.checked)} aria-label="Pro tools" />
@@ -1336,7 +1438,7 @@ export default function CrownStudio(): React.JSX.Element {
 
         {detent !== 'peek' && (
           <div className="st-content">
-            {run && (step === 'margin' || step === 'check') && (
+            {run && (step === 'margin' || (step === 'check' && pro)) && (
               <div className="st-group">
                 <div className="st-group-head">Design run</div>
                 {run.map((r) => (
@@ -1543,7 +1645,34 @@ export default function CrownStudio(): React.JSX.Element {
               </>
             )}
 
-            {step === 'check' && (
+            {step === 'check' && !pro && d && (
+              <ReviewDeck
+                design={d}
+                anatomy={{ library: useLearned && !!model, label: useLearned && model ? model.source : 'textbook' }}
+                library={library}
+                setLibrary={setLibrary}
+                ai={ai.ai}
+                embedded={!!EMBED_HOST}
+                onAdjust={(t: AdjustTarget) => {
+                  setPro(true)
+                  setStep(t)
+                  setDetent('half')
+                  haptic()
+                }}
+                onFixWithAi={async () => {
+                  setBusy('Claude is fixing…')
+                  await fixWithAi()
+                  setBusy(null)
+                }}
+                onApprove={() => {
+                  haptic(15)
+                  if (EMBED_HOST) sendQc('approved')
+                  else void exportCrown(false)
+                }}
+                onSendBack={EMBED_HOST ? () => sendQc('rejected') : undefined}
+              />
+            )}
+            {step === 'check' && (pro || !d) && (
               <>
                 <h2 className="st-h">Check</h2>
                 {!d && <p className="st-lead">No design yet.</p>}
@@ -1581,25 +1710,7 @@ export default function CrownStudio(): React.JSX.Element {
                       )}
                     </div>
                     {review && <div className="st-review"><div className="st-group-head">AI review</div>{review}</div>}
-                    {pro ? (
-                      <button className="st-btn primary block" onClick={next}>Continue to Export</button>
-                    ) : (
-                      <>
-                        {EMBED_HOST ? (
-                          <>
-                            <button className="st-btn primary block" disabled={!d.exportable && override.trim().length < 5} onClick={() => sendQc('approved')}>
-                              {d.exportable ? 'Approve & Send' : 'Fix the failing checks to approve'}
-                            </button>
-                            <button className="st-btn tinted block" onClick={() => sendQc('rejected')}>Send Back</button>
-                          </>
-                        ) : (
-                          <button className="st-btn primary block" disabled={!d.exportable} onClick={() => { haptic(15); void exportCrown(false) }}>
-                            {d.exportable ? 'Export Crown' : 'Fix the failing checks to export'}
-                          </button>
-                        )}
-                        <button className="st-btn tinted block" onClick={() => { setPro(true); setStep('design'); haptic() }}>Adjust Design</button>
-                      </>
-                    )}
+                    <button className="st-btn primary block" onClick={next}>Continue to Export</button>
                   </>
                 )}
               </>

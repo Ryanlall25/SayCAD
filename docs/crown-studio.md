@@ -141,12 +141,50 @@ The result screen shows the verdict and **Export Crown**. **Adjust
 Design** (or Help → Pro tools) opens the full stage rail: Scans, Margin,
 Axis, Anatomy, Adapt, Check, Export.
 
-**Tooth library:** the free library imported so far has centrals,
-laterals, canines and premolars, upper and lower. Those positions use the
-library tooth's real anatomy. **It has no molars.** Molar crowns still use
-the textbook template, and the design run says so ("textbook — no library
-tooth for this position"). Import molar library teeth (Pro tools → Anatomy
-→ library import, or `npm run import-library`) to change that.
+**Tooth library:** two complete free library families, Round and
+Rectangular, each with every position from central incisor to third molar
+in both jaws. They're imported per tooth position, so a #19 crown starts
+from the library's own lower first molar (`npm run import-library --
+<upper> --jaw upper <lower> --jaw lower --family round`). Round is the
+default, and the last review card switches between them. The model files
+stay out of git because they keep their publisher's licence.
+
+Library teeth carry their own cervical neck. The design rebuilds every
+meridian below its widest point as a smooth convex emergence from the
+margin, so blending onto the margin leaves no crease.
+
+**Review deck.** The result is a stack of cards: one per check that warns
+or fails, failing ones first.
+- Swipe right to accept a warning.
+- Swipe left, or tap Adjust, to open the stage that fixes it.
+- A failing check can't be accepted.
+
+When nothing is left, the last card shows the key numbers and **Approve &
+Export** (**Approve & Send** when embedded). The contacts and occlusal
+clearance are also pinned on the 3D crown.
+
+**When the prep isn't obvious (real arches).** Natural teeth are often out
+of contact too: front-teeth overjet, crossbites. So the candidates are
+ranked by where they sit on the arch compared with the tooth on the order:
+1. The ends of the dentition give left and right, and the front of the
+   arch gives the anterior direction.
+2. The angle from the midline is compared with that tooth's expected
+   position.
+3. A clear match is picked automatically. Otherwise the best candidates
+   show as numbered pins, and one tap picks the prep.
+
+The margin search then tries several occlusal directions (the bite plane,
+the direction between the arches, the scan's own estimate) from the stump's
+top, and keeps the loop that reads best.
+
+Measured on the first real case, Laura (3Shape, upper bridge abutments):
+- Ordering #12, the prep is found automatically.
+- Ordering #13, it asks with pins, and pin 1 is the right stump.
+- The crown designed on it **still fails QC**: the axial wall is −0.72 mm
+  and the contacts and occlusion overlap. The margin and tooth orientation
+  on real preps are not accurate yet, and this is the open problem that
+  real cases with technicians' margins will fix. `dev/e2e-real.mjs`
+  replays a local case.
 
 The interface has been checked in headless phone emulation
 (`dev/e2e.mjs` for Pro tools, `dev/e2e-newcase.mjs` for New Crown) only — **not yet on a physical

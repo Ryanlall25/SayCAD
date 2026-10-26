@@ -489,20 +489,55 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     g.pole = [g.pole[0], g.pole[1] + params.heightOffsetMm, g.pole[2]]
   }
 
-  // 2. Cervical morph onto the margin.
+  // 2. Emergence profile: from the margin up to the height of contour.
+  // Library teeth carry their own cervical neck (narrowing toward the CEJ);
+  // shifting it onto the margin leaves a ring-shaped crease. Instead each
+  // meridian is rebuilt below its widest point as a smooth convex curve
+  // leaving the margin and joining the template there with matching slope.
+  let mcx = 0
+  let mcz = 0
+  for (const m of env.marginRow) {
+    mcx += m[0] / nu
+    mcz += m[2] / nu
+  }
+  const jMax = Math.max(3, Math.floor(g.nv * 0.55))
   for (let i = 0; i < nu; i++) {
-    const b = getP(g, i, 0)
     const m = env.marginRow[i]
-    const d: Vec3 = [m[0] - b[0], m[1] - b[1], m[2] - b[2]]
-    for (let j = 0; j < g.nv; j++) {
-      const t = j / g.nv
-      const w = t >= 0.42 ? 0 : 0.5 * (1 + Math.cos((Math.PI * t) / 0.42))
+    let jc = 2
+    let rBest = -Infinity
+    for (let j = 2; j <= jMax; j++) {
       const p = getP(g, i, j)
-      setP(g, i, j, j === 0 ? m : [p[0] + d[0] * w, p[1] + d[1] * w, p[2] + d[2] * w])
+      const r = Math.hypot(p[0] - mcx, p[2] - mcz)
+      if (r > rBest) {
+        rBest = r
+        jc = j
+      }
+    }
+    const P1 = getP(g, i, jc)
+    const a = getP(g, i, jc - 1)
+    const b = getP(g, i, jc + 1)
+    // Tangents in "per unit s" (s = j / jc): the template's at the join,
+    // and a mostly-occlusal start at the margin (a straight-ish emergence).
+    const T1: Vec3 = [((b[0] - a[0]) / 2) * jc, ((b[1] - a[1]) / 2) * jc, ((b[2] - a[2]) / 2) * jc]
+    const chord: Vec3 = [P1[0] - m[0], P1[1] - m[1], P1[2] - m[2]]
+    const T0: Vec3 = [chord[0] * 0.9, Math.max(chord[1], 0.5) * 1.1, chord[2] * 0.9]
+    for (let j = 0; j < jc; j++) {
+      const t = j / jc
+      const t2 = t * t
+      const t3 = t2 * t
+      const h00 = 2 * t3 - 3 * t2 + 1
+      const h10 = t3 - 2 * t2 + t
+      const h01 = -2 * t3 + 3 * t2
+      const h11 = t3 - t2
+      setP(g, i, j, [
+        h00 * m[0] + h10 * T0[0] + h01 * P1[0] + h11 * T1[0],
+        h00 * m[1] + h10 * T0[1] + h01 * P1[1] + h11 * T1[1],
+        h00 * m[2] + h10 * T0[2] + h01 * P1[2] + h11 * T1[2]
+      ])
     }
   }
   smoothGrid(g, 3, 0.3, 1)
-  steps.push('cervical third morphed onto the margin line')
+  steps.push('emergence profile from the margin to the height of contour')
 
   // Bulges (buccal/lingual contour).
   if (params.buccalBulgeMm || params.lingualBulgeMm) {

@@ -23,11 +23,16 @@ const positional = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && args[
 const [cmd, ...inputs] = positional
 const out = flag('out') ?? 'crown-out'
 
+// Anatomy: class models (ssm-<class>.json) and the chosen library's per-tooth
+// models (lib-<family>-t<n>.json → key t<n>); --library round|rectangular.
+const library = flag('library') ?? 'round'
 const anatomy: Record<string, string> = {}
 if (existsSync('public/models')) {
   for (const f of readdirSync('public/models')) {
     const m = /^ssm-(\w+)\.json$/.exec(f)
     if (m) anatomy[m[1]] = readFileSync(join('public/models', f), 'utf8')
+    const t = /^lib-([a-z0-9-]+)-t(\d+)\.json$/.exec(f)
+    if (t && t[1] === library) anatomy[`t${t[2]}`] = readFileSync(join('public/models', f), 'utf8')
   }
 }
 

@@ -62,3 +62,21 @@ describe('findPrep: the prep is the tooth that misses the bite', () => {
     expect(r.report.exportable).toBe(true)
   })
 })
+
+describe('tooth number → place on the arch', () => {
+  it('maps Universal numbers to side and position from the midline', async () => {
+    const { toothSide } = await import('../findPrep')
+    expect(toothSide(8)).toEqual({ upper: true, side: 'right', pos: 1 })
+    expect(toothSide(1)).toEqual({ upper: true, side: 'right', pos: 8 })
+    expect(toothSide(13)).toEqual({ upper: true, side: 'left', pos: 5 })
+    expect(toothSide(19)).toEqual({ upper: false, side: 'left', pos: 6 })
+    expect(toothSide(30)).toEqual({ upper: false, side: 'right', pos: 6 })
+    expect(toothSide(25)).toEqual({ upper: false, side: 'right', pos: 1 })
+  })
+
+  it('still finds the synthetic #19 when the order gives the tooth', () => {
+    const c = syntheticMolarCase({ resolutionMm: 0.15 })
+    const g = findPrep(idx(c.prep), idx(c.antagonist), 19)
+    expect(planar(g.point!, c.tapPoint, c.axis)).toBeLessThan(2)
+  })
+})

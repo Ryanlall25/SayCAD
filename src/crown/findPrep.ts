@@ -1,4 +1,5 @@
 import { SurfaceIndex, add, cross, dot, normalize, pca3, scale, sub, type Vec3 } from './geom'
+import { detectMargin, plausibleLoop, type MarginResult } from './margin'
 
 /**
  * Finds the prepared tooth without a tap, the way a technician spots it:
@@ -29,6 +30,8 @@ export interface PrepGuess {
   blobsMm2: number[]
   /** Every out-of-contact blob, largest first: its middle on the scan and its area. */
   candidates?: Array<{ point: Vec3; areaMm2: number }>
+  /** Occlusal directions to try in the margin search: the bite plane's normal, then the direction between the arches. */
+  ups?: Vec3[]
 }
 
 const CELL = 0.5
@@ -71,7 +74,11 @@ function coverage(prep: SurfaceIndex, ant: SurfaceIndex, samples: Vec3[], origin
   return seen
 }
 
-export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null): PrepGuess {
+/**
+ * `tooth` (Universal, from the order) ranks the candidates by where they sit
+ * on the arch and picks one outright when the match is clear.
+ */
+export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth?: number): PrepGuess {
   if (!antagonist) return { point: null, reason: 'No opposing scan — tap the prepared tooth.', blobsMm2: [] }
 
   // 1. Occlusal plane from the contacts.
@@ -80,25 +87,30 @@ export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null): P
   const gap = Math.min(...near)
   const contacts = samples.filter((_, k) => near[k] <= gap + CONTACT)
   if (gap > MAX_GAP || contacts.length < 40) return { point: null, reason: 'The arches don’t touch, so they aren’t in the bite — tap the prepared tooth.', blobsMm2: [] }
-  // The occlusal direction: of the principal axes of the contacts and of
-  // both scans, the one along which the prep's top surface sees the
-  // antagonist best. (A contact plane alone is unreliable when contacts are
-  // few or lie along a line.)
+  // The occlusal direction: the normal of the plane the contacts span — or,
+  // when they lie along a line, the best-covering principal axis (below).
   const antSamples = samplePositions(antagonist, 5000)
   const antMid = pca3(antSamples).mean
+  // pca3 sorts axes by variance, smallest first: axes[0] is the plane normal.
   const plane = pca3(contacts)
-  const axes = [...plane.axes, ...pca3(samples).axes, ...pca3(antSamples).axes].map((a) => (dot(sub(antMid, plane.mean), a) < 0 ? scale(a, -1) : a))
-  let n = axes[0]
-  let bestScore = -1
-  for (const c of axes) {
-    const sc = coverage(prep, antagonist, samples, plane.mean, normalize(c), gap)
-    if (sc > bestScore) {
-      bestScore = sc
-      n = normalize(c)
+  const toward = (a: Vec3): Vec3 => normalize(dot(sub(antMid, plane.mean), a) < 0 ? scale(a, -1) : a)
+  const sd = plane.values.map((v) => Math.sqrt(Math.max(0, v)))
+  let n = toward(plane.axes[0])
+  if (!(sd[1] >= 3 && sd[0] < 0.5 * sd[1])) {
+    // Contacts along a line (one short segment of arch) don't fix a plane:
+    // take the candidate axis along which the prep's top sees the antagonist best.
+    let bestScore = -1
+    for (const c of [...plane.axes, ...pca3(samples).axes, ...pca3(antSamples).axes].map(toward)) {
+      const sc = coverage(prep, antagonist, samples, plane.mean, c, gap)
+      if (sc > bestScore) {
+        bestScore = sc
+        n = c
+      }
     }
   }
   const u = normalize(cross(Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], n))
   const v = cross(n, u)
+  const ups: Vec3[] = [n, normalize(sub(antMid, pca3(samples).mean))]
 
   // 2. Clearance grid over the prep scan's footprint.
   let umin = Infinity, umax = -Infinity, vmin = Infinity, vmax = -Infinity, hmax = -Infinity
@@ -194,9 +206,126 @@ export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null): P
     }
     return top[pick]!
   }
-  const candidates = blobs.filter((b) => area(b) >= MIN_BLOB_MM2).map((b) => ({ point: middle(b), areaMm2: area(b) }))
+  let candidates = blobs.filter((b) => area(b) >= MIN_BLOB_MM2).map((b) => ({ point: middle(b), areaMm2: area(b) }))
+  if (tooth && candidates.length) {
+    // Tooth-level surface (crowns, not palate or gingiva): within 7 mm of the bite.
+    const toothLevel: Vec3[] = []
+    let hTop = -Infinity
+    for (const p of top) if (p) hTop = Math.max(hTop, dot(p, n))
+    for (const p of top) if (p && dot(p, n) > hTop - 7) toothLevel.push(p)
+    const r = rankByTooth(candidates, toothLevel, n, tooth)
+    candidates = r.ranked.map(({ point, areaMm2 }) => ({ point, areaMm2 }))
+    if (r.confident) return { point: candidates[0].point, blobsMm2, candidates, ups }
+    if (r.ranked[0].offDeg <= 20) return { point: null, reason: `More than one tooth near #${tooth} is out of contact — tap the one to restore.`, blobsMm2, candidates, ups }
+  }
   const best = blobs[0]
-  if (!best || area(best) < MIN_BLOB_MM2) return { point: null, reason: 'No prepared tooth stands out from the bite — tap it.', blobsMm2, candidates }
-  if (blobs[1] && area(blobs[1]) > 0.6 * area(best)) return { point: null, reason: 'More than one tooth is out of contact — tap the one to restore.', blobsMm2, candidates }
-  return { point: candidates[0].point, blobsMm2, candidates }
+  if (!best || area(best) < MIN_BLOB_MM2) return { point: null, reason: 'No prepared tooth stands out from the bite — tap it.', blobsMm2, candidates, ups }
+  if (blobs[1] && area(blobs[1]) > 0.6 * area(best)) return { point: null, reason: 'More than one tooth is out of contact — tap the one to restore.', blobsMm2, candidates, ups }
+  return { point: candidates[0].point, blobsMm2, candidates, ups }
+}
+
+/**
+ * The highest scan point (along `up`) within `radiusMm` of a point: moves a
+ * tap or pin that landed on the side of a stump to its top, where the
+ * margin search starts best.
+ */
+export function stumpTop(index: SurfaceIndex, near: Vec3, up: Vec3, radiusMm = 4): Vec3 {
+  const pos = index.geometry.getAttribute('position')
+  const n = normalize(up)
+  let best = near
+  let bestH = dot(near, n)
+  const r2 = radiusMm * radiusMm
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i) - near[0]
+    const y = pos.getY(i) - near[1]
+    const z = pos.getZ(i) - near[2]
+    if (x * x + y * y + z * z > r2) continue
+    const p: Vec3 = [pos.getX(i), pos.getY(i), pos.getZ(i)]
+    const h = dot(p, n)
+    if (h > bestH) {
+      bestH = h
+      best = p
+    }
+  }
+  return best
+}
+
+/**
+ * Margin search from several occlusal directions — the bite plane's normal,
+ * the direction between the arches, and the scan's own estimate — keeping
+ * the loop that reads best: closed, plausible, most confident. One direction
+ * is rarely right for every tooth on a real arch.
+ */
+export function bestMargin(index: SurfaceIndex, tap: Vec3, ups: Vec3[]): MarginResult {
+  const tries: MarginResult[] = [detectMargin(index, tap)]
+  for (const up of ups) tries.push(detectMargin(index, stumpTop(index, tap, up), { up }))
+  const score = (m: MarginResult): number => {
+    if (m.points.length < 16) return -1
+    const conf = m.confidence.reduce((a, b) => a + b, 0) / m.confidence.length
+    return conf + (plausibleLoop(m) ? 0.2 : 0) - 0.5 * m.missingFraction
+  }
+  return tries.reduce((a, b) => (score(b) > score(a) ? b : a))
+}
+
+/**
+ * Where a point sits on the arch, read from the arch itself: the two ends of
+ * the dentition (farthest pair of tooth-level points) give left–right, the
+ * point farthest in front of their midpoint gives anterior. Returns the side
+ * (patient's 'left' | 'right') and the angle from the midline (0° incisors,
+ * ~90° last molars).
+ */
+export function archPosition(toothLevel: Vec3[], up: Vec3, upper: boolean, p: Vec3): { side: 'left' | 'right'; angleDeg: number } | null {
+  if (toothLevel.length < 50) return null
+  const n = normalize(up)
+  const flat = (q: Vec3): Vec3 => sub(q, scale(n, dot(q, n)))
+  const pts = toothLevel.map(flat)
+  // Farthest pair (approximate: farthest from the centroid, then farthest from that).
+  const c = pts.reduce((a, q) => add(a, scale(q, 1 / pts.length)), [0, 0, 0] as Vec3)
+  const far = (from: Vec3): Vec3 => pts.reduce((b, q) => (dist2(q, from) > dist2(b, from) ? q : b), pts[0])
+  const e1 = far(c)
+  const e2 = far(e1)
+  const mid = scale(add(e1, e2), 0.5)
+  const lr = normalize(sub(e2, e1))
+  // Anterior: the tooth-level point farthest from the line through the ends.
+  const apex = pts.reduce((b, q) => {
+    const off = (x: Vec3): number => Math.abs(dot(sub(x, mid), normalize(cross(n, lr))))
+    return off(q) > off(b) ? q : b
+  }, pts[0])
+  const ant = normalize(sub(apex, mid))
+  // Patient's left = superior × anterior; n points to the antagonist (down for an upper arch).
+  const superior = upper ? scale(n, -1) : n
+  const left = normalize(cross(superior, ant))
+  const d = sub(flat(p), mid)
+  const x = dot(d, left)
+  const y = dot(d, ant)
+  return { side: x >= 0 ? 'left' : 'right', angleDeg: (Math.atan2(Math.abs(x), y) * 180) / Math.PI }
+}
+
+const dist2 = (a: Vec3, b: Vec3): number => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2
+
+/** Expected angle from the midline for a position 1 (central) … 8 (third molar). */
+const POSITION_DEG = [8, 22, 35, 48, 58, 68, 78, 86]
+
+/** Universal number → side and position from the midline. */
+export function toothSide(universal: number): { upper: boolean; side: 'left' | 'right'; pos: number } {
+  if (universal <= 16) return universal <= 8 ? { upper: true, side: 'right', pos: 9 - universal } : { upper: true, side: 'left', pos: universal - 8 }
+  return universal <= 24 ? { upper: false, side: 'left', pos: 25 - universal } : { upper: false, side: 'right', pos: universal - 24 }
+}
+
+/**
+ * Orders prep candidates by how well their arch position matches the tooth
+ * on the order; `confident` when the best is on the right side, within 20°,
+ * and clearly ahead of the next.
+ */
+export function rankByTooth(candidates: Array<{ point: Vec3; areaMm2: number }>, toothLevel: Vec3[], up: Vec3, tooth: number): { ranked: Array<{ point: Vec3; areaMm2: number; offDeg: number }>; confident: boolean } {
+  const t = toothSide(tooth)
+  const want = POSITION_DEG[t.pos - 1]
+  const scored = candidates.map((c) => {
+    const at = archPosition(toothLevel, up, t.upper, c.point)
+    const offDeg = !at ? 999 : (at.side === t.side ? 0 : 100) + Math.abs(at.angleDeg - want)
+    return { ...c, offDeg }
+  })
+  scored.sort((a, b) => a.offDeg - b.offDeg)
+  const confident = scored.length > 0 && scored[0].offDeg <= 20 && (scored.length === 1 || scored[1].offDeg - scored[0].offDeg >= 15)
+  return { ranked: scored, confident }
 }

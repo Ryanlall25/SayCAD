@@ -27,22 +27,23 @@
   -webkit-font-smoothing: antialiased;
 }
 .studio.dark {
-  --accent: #30c9b0;
-  --accent-press: #27b39c;
-  --label: #f5f5f7;
-  --label-2: rgba(235, 235, 245, 0.62);
-  --label-3: rgba(235, 235, 245, 0.3);
-  --fill: rgba(120, 120, 128, 0.24);
-  --fill-2: rgba(120, 120, 128, 0.36);
-  --separator: rgba(84, 84, 88, 0.6);
-  --grouped: #1c1c1e;
-  --sheet: rgba(28, 28, 30, 0.84);
-  --chrome: rgba(30, 30, 32, 0.66);
+  /* Studio Dark: a teal-black stage so the porcelain crown is the brightest thing on screen. */
+  --accent: #6be0c3;
+  --accent-press: #55c9ad;
+  --label: #eef3f1;
+  --label-2: rgba(214, 228, 224, 0.66);
+  --label-3: rgba(214, 228, 224, 0.34);
+  --fill: rgba(140, 170, 162, 0.14);
+  --fill-2: rgba(140, 170, 162, 0.24);
+  --separator: rgba(60, 80, 75, 0.7);
+  --grouped: #141c1a;
+  --sheet: rgba(17, 24, 22, 0.9);
+  --chrome: rgba(11, 17, 16, 0.72);
   --green: #30d158;
   --amber: #ff9f0a;
   --red: #ff453a;
   --shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
-  background: #1c1c1e;
+  background: #0b1110;
   color-scheme: dark;
 }
 
@@ -381,3 +382,53 @@
 .nc-inline label { display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--label-2); }
 .nc-inline select, .nc-inline input { min-height: 40px; border: 0; border-radius: 10px; background: var(--grouped); padding: 0 10px; font: 16px var(--font); color: var(--label); min-width: 0; }
 .nc-import { font-size: 15px; text-align: center; padding: 6px 0; }
+
+/* ── Review deck: the AI result as cards; only what needs you comes first ── */
+.rv { display: flex; flex-direction: column; gap: 12px; padding-bottom: 8px; }
+.rv-head { display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: var(--label-2); }
+.rv-head b { font-weight: 700; }
+.rv-head b.warn { color: var(--amber); }
+.rv-head b.bad { color: var(--red); }
+.rv-head b.good { color: var(--green); }
+.rv-bar { display: flex; gap: 4px; }
+.rv-bar i { flex: 1; height: 4px; border-radius: 2px; background: var(--fill-2); }
+.rv-bar i.good { background: var(--green); }
+.rv-bar i.warn { background: var(--amber); }
+.rv-bar i.fail { background: var(--red); }
+.rv-stack { position: relative; display: flex; flex-direction: column; gap: 8px; }
+.rv-under { position: absolute; left: 14px; right: 14px; top: 10px; height: calc(100% - 40px); border-radius: 24px; background: var(--fill-2); }
+.rv-card { position: relative; background: var(--grouped); border: 1px solid var(--separator); border-radius: 24px; padding: 18px; display: flex; flex-direction: column; gap: 10px; touch-action: pan-y; user-select: none; -webkit-user-select: none; box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28); }
+.rv-card.fail { border-color: color-mix(in srgb, var(--red) 55%, var(--separator)); }
+.rv-card h2 { margin: 0; font: 700 24px/1.12 var(--font-display); letter-spacing: -0.01em; }
+.rv-card p { margin: 0; font-size: 15px; line-height: 1.45; color: var(--label-2); }
+.rv-card .rv-fix { color: var(--label); }
+.rv-tag { align-self: flex-start; font: 700 11px/1 var(--font); letter-spacing: 0.08em; text-transform: uppercase; border-radius: 999px; padding: 6px 10px; }
+.rv-tag.warn { color: var(--amber); background: color-mix(in srgb, var(--amber) 16%, transparent); }
+.rv-tag.fail { color: var(--red); background: color-mix(in srgb, var(--red) 16%, transparent); }
+.rv-tag.good { color: var(--green); background: color-mix(in srgb, var(--green) 16%, transparent); }
+.rv-measure, .rv-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.rv-measure span, .rv-stats span { display: flex; flex-direction: column; gap: 2px; background: var(--fill); border-radius: 14px; padding: 10px 12px; font-size: 12px; color: var(--label-2); min-width: 0; }
+.rv-measure b, .rv-stats b { font: 600 15px ui-monospace, 'SF Mono', Menlo, monospace; color: var(--label); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.rv-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.rv-btn { min-height: 50px; border-radius: 16px; font: 700 16px var(--font); }
+.rv-btn.ghost { border: 1px solid var(--separator); background: transparent; color: var(--label) !important; }
+.rv-btn.solid { border: 0; background: var(--accent); color: #07211b !important; }
+.studio:not(.dark) .rv-btn.solid { color: #fff !important; }
+.rv-btn.big { min-height: 56px; font-size: 18px; border-radius: 18px; }
+.rv-hint { margin: 0; text-align: center; font-size: 13px; color: var(--label-3); }
+.rv-stamp { position: absolute; top: 18px; right: 18px; font: 800 14px/1 var(--font); letter-spacing: 0.1em; text-transform: uppercase; padding: 6px 10px; border-radius: 8px; border: 2px solid; }
+.rv-stamp.accept { color: var(--green); border-color: var(--green); }
+.rv-stamp.adjust { left: 18px; right: auto; color: var(--amber); border-color: var(--amber); }
+.rv-anatomy { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; color: var(--label-2); }
+.rv-seg { display: flex; gap: 2px; padding: 2px; border-radius: 10px; background: var(--fill); }
+.rv-seg button { border: 0; background: transparent; border-radius: 8px; padding: 7px 12px; font: 600 13px var(--font); color: var(--label-2) !important; }
+.rv-seg button.on { background: var(--label); color: var(--grouped) !important; }
+
+/* Measurements pinned to the model, and pins on candidate preps */
+.st-callout { position: absolute; left: 0; top: 0; pointer-events: none; font: 600 12px/1 ui-monospace, 'SF Mono', Menlo, monospace; color: var(--label); background: color-mix(in srgb, var(--grouped) 88%, transparent); border: 1px solid var(--separator); border-radius: 8px; padding: 5px 7px; white-space: nowrap; z-index: 1; }
+.st-callout::after { content: ''; position: absolute; left: 50%; bottom: -9px; width: 1px; height: 8px; background: var(--accent); }
+.st-pin { position: absolute; left: -19px; top: -19px; width: 38px; height: 38px; z-index: 2; border-radius: 50%; border: 2px solid #07211b; background: var(--accent); color: #07211b !important; font: 800 16px var(--font); display: grid; place-items: center; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
+
+/* The case title gives way to the status pills instead of running under them. */
+.st-nav-title { min-width: 0; flex: 0 1 auto; overflow: hidden; }
+.st-nav-case, .st-nav-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -107,6 +107,7 @@ export class StudioViewport {
       this.raf = requestAnimationFrame(loop)
       this.rig.update()
       this.renderer.render(this.scene, this.camera)
+      this.placeOverlays()
     }
     loop()
   }
@@ -161,7 +162,7 @@ export class StudioViewport {
 
   /** Neutral studio backdrop that follows the system appearance. */
   setAppearance(dark: boolean): void {
-    this.scene.background = new THREE.Color(dark ? 0x1c1c1e : 0xd9dde3)
+    this.scene.background = new THREE.Color(dark ? 0x0b1110 : 0xd9dde3)
   }
 
   onTap(handler: (p: Pick | null) => void): void {
@@ -435,7 +436,86 @@ export class StudioViewport {
     return url.slice(url.indexOf(',') + 1)
   }
 
+  /* ── HTML overlays pinned to 3D points (measurements, candidate pins) ── */
+  private overlays: Array<{ el: HTMLElement; point: THREE.Vector3 }> = []
+
+  private clearOverlays(kind: 'callout' | 'pin'): void {
+    this.overlays = this.overlays.filter((o) => {
+      if (o.el.dataset.kind !== kind) return true
+      o.el.remove()
+      return false
+    })
+  }
+
+  /** Small measurement labels anchored to points on the model. */
+  setCallouts(items: Array<{ point: Vec3; text: string }>): void {
+    this.clearOverlays('callout')
+    for (const it of items) {
+      const el = document.createElement('div')
+      el.className = 'st-callout'
+      el.dataset.kind = 'callout'
+      el.textContent = it.text
+      this.mount.appendChild(el)
+      this.overlays.push({ el, point: new THREE.Vector3(...it.point) })
+    }
+  }
+
+  /** Numbered, tappable pins on the model (e.g. "which of these is the prep?"). */
+  setPins(items: Array<{ point: Vec3; label: string; aria: string; onTap: () => void }>): void {
+    this.clearOverlays('pin')
+    for (const it of items) {
+      const el = document.createElement('button')
+      el.className = 'st-pin'
+      el.dataset.kind = 'pin'
+      el.textContent = it.label
+      el.setAttribute('aria-label', it.aria)
+      el.addEventListener('click', (e) => {
+        e.stopPropagation()
+        it.onTap()
+      })
+      el.addEventListener('pointerdown', (e) => e.stopPropagation())
+      this.mount.appendChild(el)
+      this.overlays.push({ el, point: new THREE.Vector3(...it.point) })
+    }
+  }
+
+  private readonly _v = new THREE.Vector3()
+  private placeOverlays(): void {
+    if (!this.overlays.length) return
+    const w = this.mount.clientWidth
+    const h = this.mount.clientHeight
+    const placed: Array<[number, number]> = []
+    for (const o of this.overlays) {
+      const v = this._v.copy(o.point).project(this.camera)
+      const visible = v.z > -1 && v.z < 1 && v.x > -1.05 && v.x < 1.05 && v.y > -1.05 && v.y < 1.05
+      o.el.style.display = visible ? '' : 'none'
+      if (!visible) continue
+      let x = ((v.x + 1) / 2) * w
+      let y = ((1 - v.y) / 2) * h
+      if (o.el.dataset.kind === 'pin') {
+        // Pins must stay tappable: push one off any pin already placed within 46 px.
+        for (let pass = 0; pass < 3; pass++) {
+          for (const [px, py] of placed) {
+            const dx = x - px
+            const dy = y - py
+            const d = Math.hypot(dx, dy)
+            if (d < 46) {
+              const ux = d > 0.5 ? dx / d : 1
+              const uy = d > 0.5 ? dy / d : 0
+              x = px + ux * 46
+              y = py + uy * 46
+            }
+          }
+        }
+        placed.push([x, y])
+      }
+      o.el.style.transform = `translate(${x}px, ${y}px)${o.el.dataset.kind === 'callout' ? ' translate(-50%, calc(-100% - 10px))' : ''}`
+    }
+  }
+
   dispose(): void {
+    this.overlays.forEach((o) => o.el.remove())
+    this.overlays = []
     cancelAnimationFrame(this.raf)
     window.clearTimeout(this.reframeTimer)
     this.ro.disconnect()

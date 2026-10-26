@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import { toothClassOf } from '../crown/anatomy'
-import { findPrep } from '../crown/findPrep'
+import { bestMargin, findPrep } from '../crown/findPrep'
 import { SurfaceIndex, type ToothFrame, type Vec3 } from '../crown/geom'
 import { fdiToUniversal } from '../crown/library'
 import { marginFromTaps } from '../crown/margin'
@@ -70,18 +70,24 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
     tap = job.options.tap
     prepFoundBy = 'host'
   } else {
-    const g = findPrep(pc.prepIndex, pc.antagonist ? new SurfaceIndex(pc.antagonist.clone()) : null)
+    const g = findPrep(pc.prepIndex, pc.antagonist ? new SurfaceIndex(pc.antagonist.clone()) : null, tooth)
     if (!g.point) {
       return { ...base, status: 'needs-input', tooth, intake, needs: [{ kind: 'prep-location', message: g.reason ?? 'Show where the prep is.' }], timingsMs: { ...timings, find: lap(t0) } }
     }
     tap = g.point
     prepFoundBy = 'bite'
+    // The bite also gives the occlusal direction: a steadier margin search on real scans.
+    if (g.ups?.length) {
+      const best = bestMargin(pc.prepIndex, g.point, g.ups)
+      if (best.points.length >= 16) margin = best
+    }
   }
   timings.find = lap(t0)
 
   // Anatomy: the lab's library/learned model for this tooth class, if given.
   const cls = toothClassOf(tooth)
-  const modelJson = job.options?.anatomy?.[cls]
+  // The library's own tooth for this position wins over a blended class model.
+  const modelJson = job.options?.anatomy?.[`t${tooth}`] ?? job.options?.anatomy?.[cls]
   const model = modelJson ? parseShapeModel(modelJson) : null
   const template = model && model.cls === cls ? templateFromModel(model) : undefined
   const anatomy = template ? `library — ${(JSON.parse(modelJson!) as { source?: string }).source ?? cls}` : 'textbook — no library tooth for this position'

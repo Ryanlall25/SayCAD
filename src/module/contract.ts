@@ -62,7 +62,10 @@ export interface CrownJob {
     /** A margin to design to (world mm), e.g. corrected by a technician. */
     margin?: Vec3[]
     params?: Partial<DesignParams>
-    /** Anatomy models by tooth class (`ssm-<class>.json` contents), e.g. the lab's library. */
+    /**
+     * Anatomy models (ssm JSON), keyed by tooth class ("lowerMolar") or by one
+     * tooth position ("t19", Universal) — a position key wins for its tooth.
+     */
     anatomy?: Record<string, string>
     /** Put the insertion axis on +Z in the exported STL (CAM nesting). */
     alignInsertionToZ?: boolean

@@ -166,9 +166,13 @@ async function serveStatic(req, res) {
 const MODULE = resolve(here, '..', 'dist-module', 'index.js')
 const ANATOMY = {}
 const MODELS = resolve(here, '..', 'public', 'models')
+// Class models plus the per-tooth library (SAYCAD_LIBRARY=round|rectangular).
+const LIBRARY = process.env.SAYCAD_LIBRARY ?? 'round'
 if (existsSync(MODELS)) for (const f of readdirSync(MODELS)) {
   const m = /^ssm-(\w+)\.json$/.exec(f)
   if (m) ANATOMY[m[1]] = readFileSync(join(MODELS, f), 'utf8')
+  const t = /^lib-([a-z0-9-]+)-t(\d+)\.json$/.exec(f)
+  if (t && t[1] === LIBRARY) ANATOMY[`t${t[2]}`] = readFileSync(join(MODELS, f), 'utf8')
 }
 const jobs = new Map() // jobId → { at, files: [{name, data}] }
 
@@ -198,7 +202,7 @@ function runCrownJob(workerData) {
 
 async function crownApi(req, res, url) {
   const ready = existsSync(MODULE)
-  if (url.pathname === '/api/crown/v1') return send(res, 200, { contract: 'saycad.crown/1', ready, anatomy: Object.keys(ANATOMY) })
+  if (url.pathname === '/api/crown/v1') return send(res, 200, { contract: 'saycad.crown/1', ready, library: LIBRARY, anatomy: Object.keys(ANATOMY).length })
   if (!ready) return send(res, 503, { error: 'Crown module not built — run `npm run build:module`.' })
   if (ACCESS_CODE && req.headers['x-saycad-access'] !== ACCESS_CODE) return send(res, 401, { error: 'Access code required.' })
   const file = /^\/api\/crown\/v1\/jobs\/([\w.-]+)\/([\w.-]+)$/.exec(url.pathname)
