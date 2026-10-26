@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { parseGeometry } from '../core/meshConvert'
+import { isSih, plyBinary, readSih, sihScanFileName } from '../core/sih'
+import { fdiToUniversal } from '../crown/library'
 import { unzip } from '../core/unzip'
-import { MATERIALS, type MaterialId } from '../crown/materials'
+import { MATERIALS, materialFromText, type MaterialId } from '../crown/materials'
 import {
   assignToSlots,
   checkScan,
@@ -169,11 +171,18 @@ export default function NewCase(props: {
     fileRef.current?.click()
   }
 
-  async function expand(list: File[]): Promise<{ files: File[]; project: string | null }> {
+  async function expand(list: File[]): Promise<{ files: File[]; project: string | null; sih: { tooth?: number; material?: string } | null }> {
     const files: File[] = []
     let project: string | null = null
+    let sih: { tooth?: number; material?: string } | null = null
     for (const f of list) {
-      if (/\.zip$/i.test(f.name)) {
+      if (isSih(f.name)) {
+        // A whole case: its tooth and material, and each scan named by role and jaw.
+        const c = await readSih(await f.arrayBuffer())
+        const tooth = typeof c.case.tooth === 'number' ? (c.case.system === 'fdi' ? (fdiToUniversal(c.case.tooth) ?? undefined) : c.case.tooth) : undefined
+        sih ??= { tooth, material: materialFromText(c.case.material) ?? undefined }
+        for (const sc of c.scans) if (sc.role === 'prep' || sc.role === 'antagonist' || sc.role === 'bite' || sc.role === 'preop') files.push(new File([plyBinary(sc.geometry) as Uint8Array<ArrayBuffer>], sihScanFileName(sc)))
+      } else if (/\.zip$/i.test(f.name)) {
         const entries = await unzip(await f.arrayBuffer(), (n) => SCAN_FILE.test(n) || /\.dentalProject$/i.test(n))
         for (const e of entries) {
           const base = e.name.split('/').pop()!
@@ -183,7 +192,7 @@ export default function NewCase(props: {
       } else if (/\.dentalProject$/i.test(f.name)) project ??= await f.text()
       else if (SCAN_FILE.test(f.name)) files.push(f)
     }
-    return { files, project }
+    return { files, project, sih }
   }
 
   async function load(f: File, slot: ScanSlot): Promise<LoadedScan> {
@@ -197,9 +206,15 @@ export default function NewCase(props: {
     setBusy('Reading…')
     setNote(null)
     try {
-      const { files, project } = await expand(picked)
+      const { files, project, sih } = await expand(picked)
       let currentSlots = slots
-      if (project) {
+      if (sih?.tooth) {
+        const o = { ...order, tooth: sih.tooth, ...(sih.material && sih.material in MATERIALS ? { material: sih.material as MaterialId } : {}), antagonist: true, preop: false, bite: false }
+        setOrder(o)
+        setNote(`Case file: #${sih.tooth}${sih.material ? ` · ${MATERIALS[sih.material as MaterialId]?.label ?? sih.material}` : ''}.`)
+        currentSlots = scanSlots(o, props.toothName(o.tooth))
+      }
+      if (project && !sih?.tooth) {
         const r = orderFromProject(parseDentalProject(project), order)
         const o = { ...r.order, antagonist: true, preop: false, bite: false }
         setOrder(o)
@@ -317,7 +332,7 @@ export default function NewCase(props: {
                     </label>
                     <input value={order.patient} onChange={(e) => set('patient', e.target.value)} placeholder="Patient / case (optional)" autoComplete="off" aria-label="Patient" />
                   </div>
-                  <button className="st-link nc-import" onClick={() => choose(null)}>Have the whole scanner export? Import the .zip</button>
+                  <button className="st-link nc-import" onClick={() => choose(null)}>Have a .sih case or the whole scanner export? Import it</button>
                 </>
               )}
 
@@ -371,7 +386,7 @@ function ScanCard(props: { slot: ScanSlot; n: number; of: number; tooth: number 
         <button className="nc-drop" onClick={props.onChoose}>
           <span>＋</span>
           Tap to choose the file
-          <small>STL · PLY · or the whole export as .zip</small>
+          <small>STL · PLY · OBJ · a .sih case · or the whole export as .zip</small>
         </button>
       )}
     </>

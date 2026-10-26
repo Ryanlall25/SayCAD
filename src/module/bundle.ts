@@ -1,5 +1,7 @@
 import { NEW_ORDER, assignToSlots, orderFromProject, parseDentalProject, scanSlots, type SlotId } from '../crown/order'
 import { fdiToUniversal } from '../crown/library'
+import { materialFromText } from '../crown/materials'
+import { isSih, readSih, plyBinary, sihScanFileName } from '../core/sih'
 import { unzip } from '../core/unzip'
 import { zip } from '../core/zip'
 import { CONTRACT, type CrownJob, type CrownOrder, type CrownOutcome, type ScanInput } from './contract'
@@ -11,6 +13,7 @@ import { CONTRACT, type CrownJob, type CrownOrder, type CrownOutcome, type ScanI
  *   job.json            optional; CrownJob with scan *file names* in `scans`
  *   *.stl / *.ply / *.obj  the scans
  *   *.dentalProject     optional exocad order (tooth, material)
+ *   *.sih               a whole SmileHub case: scans by role, tooth, margin
  *
  * Without job.json the scans are sorted by name (upper/lower, maxillary/
  * mandibular, bite, pre-op) against the tooth, as the phone does.
@@ -29,11 +32,42 @@ export interface BundleJob extends Omit<CrownJob, 'scans'> {
 const SCAN = /\.(stl|ply|obj)$/i
 const base = (n: string): string => n.split(/[\\/]/).pop()!
 
-/** Flattens zips; drops folders and junk (macOS resource forks). */
+/**
+ * A .sih case as bundle files: its scans (binary PLY, named by role and jaw)
+ * plus a job.json carrying the tooth, material, scan roles and the margin.
+ */
+async function sihBundle(f: BundleFile): Promise<BundleFile[]> {
+  const c = await readSih(f.data)
+  const out: BundleFile[] = []
+  const nameOf = new Map<string, string>()
+  for (const s of c.scans) {
+    const name = sihScanFileName(s)
+    nameOf.set(s.role, nameOf.get(s.role) ?? name)
+    const d = plyBinary(s.geometry)
+    out.push({ name, data: d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength) as ArrayBuffer })
+  }
+  const job: Partial<BundleJob> = {
+    ...(c.case.id ? { jobId: c.case.id } : {}),
+    ...(typeof c.case.tooth === 'number' ? { order: { tooth: c.case.tooth, system: c.case.system ?? 'universal', ...(materialFromText(c.case.material) ? { material: materialFromText(c.case.material)! } : {}) } as CrownOrder } : {}),
+    scans: {
+      ...(nameOf.get('prep') ? { prep: nameOf.get('prep') } : {}),
+      ...(nameOf.get('antagonist') ? { antagonist: nameOf.get('antagonist') } : {}),
+      ...(nameOf.get('bite') ? { bite: [nameOf.get('bite')!] } : {}),
+      ...(nameOf.get('preop') ? { preop: nameOf.get('preop') } : {})
+    },
+    ...(c.design?.margin?.length ? { options: { margin: c.design.margin } } : {})
+  }
+  const jj = new TextEncoder().encode(JSON.stringify(job))
+  out.push({ name: 'job.json', data: jj.buffer as ArrayBuffer })
+  return out
+}
+
+/** Flattens zips and .sih cases; drops folders and junk (macOS resource forks). */
 export async function expandBundle(files: BundleFile[]): Promise<BundleFile[]> {
   const out: BundleFile[] = []
   for (const f of files) {
-    if (/\.zip$/i.test(f.name)) {
+    if (isSih(f.name)) out.push(...(await sihBundle(f)))
+    else if (/\.zip$/i.test(f.name)) {
       for (const e of await unzip(f.data, (n) => !/(^|\/)__MACOSX\//.test(n) && !/(^|\/)\._/.test(n))) out.push({ name: base(e.name), data: e.data.buffer })
     } else out.push({ name: base(f.name), data: f.data })
   }

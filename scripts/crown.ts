@@ -71,7 +71,7 @@ if (flag('material')) order.material = flag('material') as MaterialId
 
 if (cmd === 'design' && inputs.length) {
   const files = inputs.flatMap(readAll)
-  const name = flag('name') ?? basename(inputs[0]).replace(/\.zip$/i, '')
+  const name = flag('name') ?? basename(inputs[0]).replace(/\.(zip|sih)$/i, '')
   const r = await runCase(name, files, order)
   console.log(line(r))
   for (const w of r.outcome?.intake ?? []) console.log(`  ! ${w}`)

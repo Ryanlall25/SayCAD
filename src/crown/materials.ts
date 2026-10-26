@@ -72,3 +72,18 @@ export const MATERIALS: Record<MaterialId, MaterialPreset> = {
 export function materialById(id: string): MaterialPreset | undefined {
   return (MATERIALS as Record<string, MaterialPreset>)[id]
 }
+
+/**
+ * A material id from what a lab system writes ("Zirconia", "e.max CAD",
+ * "PMMA"…). Plain zirconia maps to high-strength; null when unknown.
+ */
+export function materialFromText(text: string | undefined): MaterialId | null {
+  if (!text) return null
+  if (materialById(text)) return text as MaterialId
+  const t = text.toLowerCase()
+  if (/zirc|zr|zro2/.test(t)) return /5y|ht\b|high[- ]?transl|translucen|multilayer/.test(t) ? 'zirconia-ht' : 'zirconia-hs'
+  if (/e\.?max|disilicate|lithium/.test(t)) return 'lithium-disilicate'
+  if (/pmma|temp|provisional/.test(t)) return 'pmma-temp'
+  if (/wax|cast|gold/.test(t)) return 'cast-wax'
+  return null
+}

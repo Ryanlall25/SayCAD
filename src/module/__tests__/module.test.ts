@@ -103,3 +103,28 @@ describe('case bundles', () => {
     expect(problems[0]).toContain('Which tooth')
   })
 })
+
+describe('.sih cases as bundles', () => {
+  it('turns a .sih into a job: tooth, material, scans by role, the margin', async () => {
+    const { writeSih } = await import('../../core/sih')
+    const c = syntheticMolarCase()
+    const bytes = await writeSih({
+      case: { id: 'syn19', tooth: 19, system: 'universal', material: 'Zirconia' },
+      scans: [
+        { role: 'antagonist', jaw: 'upper', geometry: c.antagonist },
+        { role: 'prep', jaw: 'lower', geometry: c.prep }
+      ],
+      design: { margin: c.margin.filter((_, k) => k % 12 === 0) }
+    })
+    const { job, problems } = await jobFromBundle([{ name: 'syn19.sih', data: bytes.buffer }])
+    expect(problems).toEqual([])
+    expect(job!.jobId).toBe('syn19')
+    expect(job!.order).toMatchObject({ tooth: 19, system: 'universal', material: 'zirconia-hs' })
+    expect(job!.scans.prep.name).toBe('prep-lowerjaw.ply')
+    expect(job!.scans.antagonist!.name).toBe('antagonist-upperjaw.ply')
+    expect(job!.options?.margin?.length).toBeGreaterThan(10)
+    const out = designCase(job!)
+    expect(out.status).toBe('designed')
+    expect(out.prepFoundBy).toBe('margin-given')
+  })
+})
