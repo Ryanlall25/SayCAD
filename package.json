@@ -11,13 +11,16 @@
     "build:artifact": "tsc --noEmit && SAYCAD_BASE=./ vite build --outDir dist-artifact",
     "preview": "vite preview",
     "server": "node server/index.mjs",
-    "start": "npm run build && node server/index.mjs",
+    "start": "npm run build && npm run build:module && node server/index.mjs",
     "test": "vitest run",
     "e2e": "npm run build && npm run build:artifact && node dev/e2e.mjs",
     "train": "vite-node scripts/train.ts --",
     "synthetic-cases": "vite-node scripts/synthetic-cases.ts --",
     "import-library": "vite-node scripts/import-library.ts --",
-    "e2e:newcase": "node dev/e2e-newcase.mjs"
+    "e2e:newcase": "node dev/e2e-newcase.mjs",
+    "crown": "vite-node scripts/crown.ts --",
+    "build:module": "vite build --ssr src/module/index.ts --outDir dist-module --emptyOutDir",
+    "e2e:embed": "node dev/e2e-embed.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

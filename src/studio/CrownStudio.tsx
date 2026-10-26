@@ -44,6 +44,12 @@ import {
 import { zip } from '../core/zip'
 import { clearModels, deleteCase, listCases, loadCase, loadModel, newCaseId, saveCase, saveModel, updateCase, type CaseMeta } from './caseStore'
 import NewCase, { type NewCaseResult } from './NewCase'
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
+import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
+import { CONTRACT, validateJob, type CrownJob, type CrownOutcome, type QcDecision } from '../module/contract'
+import { assembleOutcome } from '../module/designCase'
+import { embedHost, toHost } from '../module/embed'
+import { fdiToUniversal } from '../crown/library'
 import './studio.css'
 
 /**
@@ -71,6 +77,12 @@ interface RunStage {
   status: 'pending' | 'active' | 'done' | 'warn' | 'fail' | 'skipped'
   detail?: string
 }
+
+/** Parameters + margin, rounded — equal keys mean the technician changed nothing. */
+const designKey = (d: DesignData): string => JSON.stringify({ p: d.params, m: d.margin.points.map((q) => q.map((x) => Math.round(x * 100))) })
+
+/** Set when the studio runs inside a host app (the suite): `?embed=1&host=<origin>`. */
+const EMBED_HOST = typeof location !== 'undefined' ? embedHost() : null
 
 const TOOTH_NAMES: Record<string, string> = {
   upperMolar: 'upper molar',
@@ -204,6 +216,8 @@ export default function CrownStudio(): React.JSX.Element {
       return false
     }
   })
+  // Embedded: the job the host sent, how its prep was found, and the AI's own design (to tell edits apart).
+  const jobRef = useRef<{ job: CrownJob; prepFoundBy?: CrownOutcome['prepFoundBy']; auto?: string } | null>(null)
   const setPro = (on: boolean): void => {
     setProState(on)
     try {
@@ -262,6 +276,20 @@ export default function CrownStudio(): React.JSX.Element {
   useEffect(() => viewRef.current?.setAppearance(dark), [dark])
 
   useEffect(() => viewRef.current?.setFrameVisible(step === 'margin' || step === 'axis'), [step, design])
+
+  // Embedded in the suite: accept jobs from the host origin only.
+  useEffect(() => {
+    if (!EMBED_HOST) return
+    const onMessage = (e: MessageEvent): void => {
+      if (e.origin !== EMBED_HOST) return
+      const m = e.data as { contract?: string; type?: string; job?: CrownJob }
+      if (m?.contract === CONTRACT && m.type === 'crown:open' && m.job) void openJob(m.job)
+    }
+    window.addEventListener('message', onMessage)
+    toHost(EMBED_HOST, { contract: CONTRACT, type: 'crown:ready' })
+    return () => window.removeEventListener('message', onMessage)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Keep the model centred above the sheet as it changes height.
   const sheetRef = useRef<HTMLElement>(null)
@@ -504,10 +532,93 @@ export default function CrownStudio(): React.JSX.Element {
     }
     if (!guess.point) {
       setStatus(guess.reason ?? 'Tap the prepared tooth.')
+      const j = jobRef.current
+      if (EMBED_HOST && j) toHost(EMBED_HOST, { contract: CONTRACT, type: 'crown:outcome', outcome: { contract: CONTRACT, jobId: j.job.jobId, caseRef: j.job.order.caseRef, status: 'needs-input', needs: [{ kind: 'prep-location', message: `${guess.reason ?? ''} The technician can tap it in the studio.`.trim() }], engine: { contract: CONTRACT, version: '' } } })
       return
     }
     say('app', `Found the prep on #${state.current.tooth} from the bite.`)
+    if (jobRef.current) jobRef.current.prepFoundBy = 'bite'
     await tapPrep(guess.point)
+  }
+
+  /** The current design as a saycad.crown/1 outcome (embedded mode). */
+  function outcomeNow(design?: DesignData | null): CrownOutcome | null {
+    const s = state.current
+    // Just after a design the ref may predate the re-render: prefer the design handed in.
+    const d = design ?? s.design
+    const j = jobRef.current
+    if (!d || !j || !d.crown.indices) return null
+    return assembleOutcome({
+      job: j.job,
+      tooth: s.tooth,
+      results: d.results,
+      summary: d.summary,
+      volumeMm3: d.volumeMm3,
+      margin: d.margin,
+      params: d.params,
+      frame: d.frame,
+      positions: d.crown.positions,
+      indices: d.crown.indices,
+      prepFoundBy: j.prepFoundBy,
+      anatomy: s.useLearned && s.model ? `library — ${s.model.source}` : 'textbook — no library tooth for this position',
+      intake: []
+    })
+  }
+
+  /** A job from the host: load its scans and run the automated design. */
+  async function openJob(job: CrownJob): Promise<void> {
+    const problems = validateJob(job)
+    if (problems.length) {
+      toHost(EMBED_HOST!, { contract: CONTRACT, type: 'crown:outcome', outcome: { contract: CONTRACT, jobId: job?.jobId ?? '', status: 'failed', error: problems.join(' '), engine: { contract: CONTRACT, version: '' } } })
+      setStatus(problems.join(' '))
+      return
+    }
+    const t = job.order.system === 'fdi' ? fdiToUniversal(job.order.tooth)! : job.order.tooth
+    const geo = (sc: CrownJob['scans']['prep']): THREE.BufferGeometry => {
+      if ('mesh' in sc) {
+        const g = new THREE.BufferGeometry()
+        g.setAttribute('position', new THREE.BufferAttribute(sc.mesh.positions, 3))
+        if (sc.mesh.indices) g.setIndex(new THREE.BufferAttribute(sc.mesh.indices, 1))
+        return g
+      }
+      return /\.ply$/i.test(sc.name) ? new PLYLoader().parse(sc.data) : new STLLoader().parse(sc.data)
+    }
+    const list: ScanFile[] = [{ name: job.scans.prep.name, role: 'prep', geometry: geo(job.scans.prep) }]
+    if (job.scans.antagonist) list.push({ name: job.scans.antagonist.name, role: 'antagonist', geometry: geo(job.scans.antagonist) })
+    for (const b of job.scans.bite ?? []) list.push({ name: b.name, role: 'bite', geometry: geo(b) })
+    if (job.scans.preop) list.push({ name: job.scans.preop.name, role: 'preop', geometry: geo(job.scans.preop) })
+    jobRef.current = { job }
+    const material = job.order.material ?? 'zirconia-hs'
+    setTooth(t)
+    setParams((p) => ({ ...p, ...job.options?.params, material, cementGapMm: undefined }))
+    state.current.params = { ...state.current.params, ...job.options?.params, material, cementGapMm: undefined }
+    setFiles(list)
+    await commitScans(list, t, undefined, { name: `${job.order.caseRef ?? job.jobId} · #${t}` })
+    say('app', `Case from the suite: #${t}${job.order.caseRef ? ` (${job.order.caseRef})` : ''}.`)
+    if (job.options?.tap) {
+      jobRef.current.prepFoundBy = 'host'
+      await tapPrep(job.options.tap)
+    } else if (job.scans.antagonist) await autoFind()
+  }
+
+  /** The technician's decision → the host, with the crown as approved. */
+  function sendQc(decision: QcDecision['decision']): void {
+    const j = jobRef.current
+    if (!EMBED_HOST || !j) return
+    const outcome = decision === 'rejected' ? undefined : outcomeNow() ?? undefined
+    const d = state.current.design
+    const edited = decision !== 'rejected' && d ? designKey(d) !== j.auto : false
+    const qc: QcDecision = {
+      contract: CONTRACT,
+      jobId: j.job.jobId,
+      decision: decision === 'approved' && edited ? 'edited' : decision,
+      at: new Date().toISOString(),
+      reason: decision === 'rejected' ? 'Sent back by the technician.' : state.current.design && !state.current.design.exportable ? override || undefined : undefined,
+      edits: edited && d ? { params: d.params, margin: d.margin.points } : undefined
+    }
+    toHost(EMBED_HOST, { contract: CONTRACT, type: 'crown:qc', decision: qc, outcome }, outcome?.files ? [outcome.files.crownStl] : [])
+    haptic(15)
+    setStatus(qc.decision === 'rejected' ? 'Sent back to the suite.' : `Sent to the suite (${qc.decision}).`)
   }
 
   /** Scans and order from the New Case deck → the designer. */
@@ -677,6 +788,13 @@ export default function CrownStudio(): React.JSX.Element {
     setStep('check')
     viewRef.current?.view('buccal')
     setStatus(final.exportable ? 'Crown designed and checked — ready to export.' : 'Crown designed — some checks need you. See Check.')
+    const j = jobRef.current
+    if (EMBED_HOST && j) {
+      j.prepFoundBy ??= 'host' // tapped in the studio
+      const o = outcomeNow(final)
+      j.auto = designKey(final)
+      if (o) toHost(EMBED_HOST, { contract: CONTRACT, type: 'crown:outcome', outcome: o }, [o.files!.crownStl])
+    }
   }
 
   function rank(x?: CriticResultLite): number {
@@ -1088,7 +1206,14 @@ export default function CrownStudio(): React.JSX.Element {
   return (
     <div className={`studio ${dark ? 'dark' : ''}`}>
       <div className="st-stage" ref={mountRef}>
-        {!loaded && !busy && (
+        {!loaded && !busy && EMBED_HOST && (
+          <div className="st-welcome">
+            <p className="st-eyebrow">{LAB_NAME} · Crowns</p>
+            <h1>Waiting for the case…</h1>
+            <p>The suite sends the order and scans; the crown is designed as soon as they arrive.</p>
+          </div>
+        )}
+        {!loaded && !busy && !EMBED_HOST && (
           <div className="st-welcome">
             <p className="st-eyebrow">{LAB_NAME} · Crowns</p>
             <h1>AI crowns from two scans.</h1>
@@ -1460,9 +1585,18 @@ export default function CrownStudio(): React.JSX.Element {
                       <button className="st-btn primary block" onClick={next}>Continue to Export</button>
                     ) : (
                       <>
-                        <button className="st-btn primary block" disabled={!d.exportable} onClick={() => { haptic(15); void exportCrown(false) }}>
-                          {d.exportable ? 'Export Crown' : 'Fix the failing checks to export'}
-                        </button>
+                        {EMBED_HOST ? (
+                          <>
+                            <button className="st-btn primary block" disabled={!d.exportable && override.trim().length < 5} onClick={() => sendQc('approved')}>
+                              {d.exportable ? 'Approve & Send' : 'Fix the failing checks to approve'}
+                            </button>
+                            <button className="st-btn tinted block" onClick={() => sendQc('rejected')}>Send Back</button>
+                          </>
+                        ) : (
+                          <button className="st-btn primary block" disabled={!d.exportable} onClick={() => { haptic(15); void exportCrown(false) }}>
+                            {d.exportable ? 'Export Crown' : 'Fix the failing checks to export'}
+                          </button>
+                        )}
                         <button className="st-btn tinted block" onClick={() => { setPro(true); setStep('design'); haptic() }}>Adjust Design</button>
                       </>
                     )}

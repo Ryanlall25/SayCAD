@@ -25,6 +25,11 @@ design wizard (Scans → Margin → Axis → Anatomy → Adapt → Check → Exp
 laid out to Apple's iPhone guidelines: the model full-screen and a
 bottom sheet for each stage.
 
+The crown designer is a standalone module (`saycad.crown/1`) that the suite
+attaches through a connector: in-process JS, an HTTP job API, the studio
+embedded in an iframe, or a batch CLI. See
+[docs/crown-module.md](docs/crown-module.md).
+
 ```bash
 npm install
 ANTHROPIC_API_KEY=sk-ant-… SAYCAD_ACCESS_CODE=pick-one npm start   # http://localhost:8787 (open on the phone)

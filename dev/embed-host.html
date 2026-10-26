@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Suite host (reference)</title>
+<style>
+  body { margin: 0; font: 14px system-ui, sans-serif; display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+  header { padding: 8px 12px; background: #1d2b28; color: #fff; display: flex; gap: 12px; align-items: center; }
+  iframe { border: 0; width: 100%; height: 100%; }
+  #log { font: 12px ui-monospace, monospace; opacity: 0.85; }
+</style>
+</head>
+<body>
+<!--
+  Reference host for the crown module's embed connector (saycad.crown/1).
+  ?studio=<origin of the crown module>&prep=<url>&antagonist=<url>&tooth=19
+  The suite does the same: iframe the studio, wait for crown:ready, send
+  crown:open with the job, then receive crown:outcome and crown:qc.
+-->
+<header><b>Suite</b><span id="log">loading…</span></header>
+<iframe id="studio" allow="clipboard-write"></iframe>
+<script type="module">
+  const CONTRACT = 'saycad.crown/1'
+  const q = new URLSearchParams(location.search)
+  const studioOrigin = new URL(q.get('studio')).origin
+  const frame = document.getElementById('studio')
+  const log = (t) => { document.getElementById('log').textContent = t; (window.__log ??= []).push(t) }
+  window.__messages = []
+  frame.src = `${studioOrigin}/?embed=1&host=${encodeURIComponent(location.origin)}`
+  addEventListener('message', async (e) => {
+    if (e.origin !== studioOrigin || e.source !== frame.contentWindow) return
+    const m = e.data
+    if (m?.contract !== CONTRACT) return
+    window.__messages.push(m)
+    if (m.type === 'crown:ready') {
+      log('studio ready — sending the case')
+      const get = async (u) => (await fetch(u)).arrayBuffer()
+      const job = {
+        contract: CONTRACT,
+        jobId: q.get('jobId') ?? 'suite-job-1',
+        order: { tooth: Number(q.get('tooth') ?? 19), material: 'zirconia-hs', shade: 'A2', caseRef: 'SH-2042' },
+        scans: { prep: { name: 'lowerjaw.stl', data: await get(q.get('prep')) }, antagonist: { name: 'upperjaw.stl', data: await get(q.get('antagonist')) } }
+      }
+      frame.contentWindow.postMessage({ contract: CONTRACT, type: 'crown:open', job }, studioOrigin, [job.scans.prep.data, job.scans.antagonist.data])
+    } else if (m.type === 'crown:outcome') {
+      const o = m.outcome
+      log(`outcome: ${o.status}${o.verdict ? ' · ' + o.verdict : ''}${o.needs ? ' · ' + o.needs.map((n) => n.message).join(' ') : ''}`)
+    } else if (m.type === 'crown:qc') {
+      log(`QC: ${m.decision.decision}${m.outcome ? ` · ${m.outcome.files.crownStlName} (${m.outcome.files.crownStl.byteLength} bytes)` : ''}`)
+    }
+  })
+</script>
+</body>
+</html>

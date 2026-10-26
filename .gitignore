@@ -9,3 +9,4 @@ dist-artifact/
 public/models/*.json
 dev/eoff/
 dev/cases/
+dist-module/
