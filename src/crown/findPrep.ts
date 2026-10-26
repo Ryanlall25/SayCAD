@@ -27,6 +27,8 @@ export interface PrepGuess {
   reason?: string
   /** Eroded blob areas found, mm², largest first (diagnostics). */
   blobsMm2: number[]
+  /** Every out-of-contact blob, largest first: its middle on the scan and its area. */
+  candidates?: Array<{ point: Vec3; areaMm2: number }>
 }
 
 const CELL = 0.5
@@ -85,10 +87,10 @@ export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null): P
   const antSamples = samplePositions(antagonist, 5000)
   const antMid = pca3(antSamples).mean
   const plane = pca3(contacts)
-  const candidates = [...plane.axes, ...pca3(samples).axes, ...pca3(antSamples).axes].map((a) => (dot(sub(antMid, plane.mean), a) < 0 ? scale(a, -1) : a))
-  let n = candidates[0]
+  const axes = [...plane.axes, ...pca3(samples).axes, ...pca3(antSamples).axes].map((a) => (dot(sub(antMid, plane.mean), a) < 0 ? scale(a, -1) : a))
+  let n = axes[0]
   let bestScore = -1
-  for (const c of candidates) {
+  for (const c of axes) {
     const sc = coverage(prep, antagonist, samples, plane.mean, normalize(c), gap)
     if (sc > bestScore) {
       bestScore = sc
@@ -172,26 +174,29 @@ export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null): P
   const area = (b: { cells: number[] }): number => b.cells.length * CELL * CELL
   blobs.sort((a, b) => b.cells.length - a.cells.length)
   const blobsMm2 = blobs.map(area)
-  const best = blobs[0]
-  if (!best || area(best) < MIN_BLOB_MM2) return { point: null, reason: 'No prepared tooth stands out from the bite — tap it.', blobsMm2 }
-  if (blobs[1] && area(blobs[1]) > 0.6 * area(best)) return { point: null, reason: 'More than one tooth is out of contact — tap the one to restore.', blobsMm2 }
-
-  // The blob's middle, on the scan.
-  let ci = 0, cj = 0
-  for (const c of best.cells) {
-    ci += Math.floor(c / nv)
-    cj += c % nv
-  }
-  ci /= best.cells.length
-  cj /= best.cells.length
-  let pick = best.cells[0]
-  let bd = Infinity
-  for (const c of best.cells) {
-    const d = (Math.floor(c / nv) - ci) ** 2 + ((c % nv) - cj) ** 2
-    if (d < bd) {
-      bd = d
-      pick = c
+  // Each blob's middle, on the scan.
+  const middle = (b: { cells: number[] }): Vec3 => {
+    let ci = 0, cj = 0
+    for (const c of b.cells) {
+      ci += Math.floor(c / nv)
+      cj += c % nv
     }
+    ci /= b.cells.length
+    cj /= b.cells.length
+    let pick = b.cells[0]
+    let bd = Infinity
+    for (const c of b.cells) {
+      const d = (Math.floor(c / nv) - ci) ** 2 + ((c % nv) - cj) ** 2
+      if (d < bd) {
+        bd = d
+        pick = c
+      }
+    }
+    return top[pick]!
   }
-  return { point: top[pick], blobsMm2 }
+  const candidates = blobs.filter((b) => area(b) >= MIN_BLOB_MM2).map((b) => ({ point: middle(b), areaMm2: area(b) }))
+  const best = blobs[0]
+  if (!best || area(best) < MIN_BLOB_MM2) return { point: null, reason: 'No prepared tooth stands out from the bite — tap it.', blobsMm2, candidates }
+  if (blobs[1] && area(blobs[1]) > 0.6 * area(best)) return { point: null, reason: 'More than one tooth is out of contact — tap the one to restore.', blobsMm2, candidates }
+  return { point: candidates[0].point, blobsMm2, candidates }
 }
