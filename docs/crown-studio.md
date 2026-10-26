@@ -135,7 +135,7 @@ Each upload is checked:
 
 Proven on synthetic cases: lower, mirrored upper, and an arbitrary
 scanner frame, with a margin error under 0.1 mm against the true margin.
-Not yet tried on real scans.
+Real scans: see below.
 
 The result screen shows the verdict and **Export Crown**. **Adjust
 Design** (or Help → Pro tools) opens the full stage rail: Scans, Margin,
@@ -177,14 +177,49 @@ The margin search then tries several occlusal directions (the bite plane,
 the direction between the arches, the scan's own estimate) from the stump's
 top, and keeps the loop that reads best.
 
-Measured on the first real case, Laura (3Shape, upper bridge abutments):
-- Ordering #12, the prep is found automatically.
-- Ordering #13, it asks with pins, and pin 1 is the right stump.
-- The crown designed on it **still fails QC**: the axial wall is −0.72 mm
-  and the contacts and occlusion overlap. The margin and tooth orientation
-  on real preps are not accurate yet, and this is the open problem that
-  real cases with technicians' margins will fix. `dev/e2e-real.mjs`
-  replays a local case.
+What real scans needed, beyond the synthetic cases:
+- **Gum-line margins.** Scans taken without retraction have no visible
+  finish line: the gum hugs the prep, and its crest is a convex corner
+  about 1 mm outside the prep. When no clear finish line is found, the
+  margin is traced at the crease where the axial wall meets the gum. That
+  loop is always flagged, and its review card says it was traced at the
+  gum line.
+- **Path of insertion.** The axis is the least-undercut direction within
+  25° of the margin's axis, searched coarse to fine (about 0.7 s), as
+  exocad does by default. A technician's tilt is applied on top of it.
+- **Neighbours.** The scan is one surface, so the stump's own bulging wall
+  and the papilla between the teeth used to count as "neighbour". They are
+  excluded now: the stump by flood fill from its top above the margin, the
+  papilla by a height floor. A side whose nearest tooth is beyond reach,
+  or whose surface never rises to tooth height (gum over an edentulous
+  ridge), has no contact. A bridge abutment's pontic side is one example.
+- Contact relief stops at the material minimum. A neighbour closer to the
+  prep than that is reported, not hidden by thinning the wall.
+
+Measured on the first real case, Laura (3Shape upper arch, opposing lower
+in occlusion). The scan has one prepared tooth, a premolar 51° round the
+arch. Its neighbours are natural and the edentulous ridge is distal.
+- Ordering #12, the prep is found automatically. The gum-line margin traces
+  the stump's outline, and the axis tilts 16° to cut the undercut from
+  1.17 to 0.69 mm.
+- **The prep itself is under-reduced.** The stump comes within 0.43 mm
+  of the opposing tooth and 0.47 mm of the mesial neighbour, measured
+  directly between the scans. Zirconia needs 0.7 mm occlusal and 0.5 mm
+  axial.
+- The checks read accordingly: thickness passes, occlusion is −0.34 mm
+  (high), the mesial contact is −0.16 mm (tight), and the distal side
+  correctly has no contact. In the app: 5 cards to review, 4 of 9 checks
+  pass (was 10 of 12 to review), designed in 10 s.
+- **The crown shape is not lab-quality on this prep.** The anatomy is
+  recognisably the library premolar, but the walls show folds where the
+  thickness push meets the contact relief. The vertex-by-vertex constraint
+  steps fight each other on a prep this tight. The next step is one
+  smooth, joint solve of all constraints (thickness, contacts, occlusion)
+  instead of sequential pushes.
+
+`dev/e2e-real.mjs` replays a local case. `dev/crown-scene.html` renders a
+crown on the real arches in occlusion. Cases stay in the git-ignored
+`dev/cases/`.
 
 The interface has been checked in headless phone emulation
 (`dev/e2e.mjs` for Pro tools, `dev/e2e-newcase.mjs` for New Crown) only — **not yet on a physical

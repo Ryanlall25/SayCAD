@@ -55,6 +55,8 @@ export interface MarginResult {
   top: Vec3
   /** Fraction of samples with no credible candidate (filled by interpolation). */
   missingFraction: number
+  /** Traced at the wall–gum crease (no visible finish line): a guess to confirm. */
+  gumLine?: boolean
 }
 
 interface Candidate {
@@ -108,7 +110,7 @@ export function centreAxis(scan: SurfaceIndex, seed: Vec3, up: Vec3, depth = 1.2
 }
 
 /** Reads one radial profile and returns ranked finish-line candidates. */
-export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0.45): Array<{ r: number; h: number; score: number }> {
+export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0.45, creases = false): Array<{ r: number; h: number; score: number }> {
   const step = 0.04
   const sampled = resample(raw, step)
   const line = smoothLine(sampled, 1.5)
@@ -129,6 +131,23 @@ export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0
     while (d < -Math.PI) d += 2 * Math.PI
     tau[i] = d
   }
+  // Mean wall angle over the arc-length window [from, to] mm around i.
+  const meanAlpha = (i: number, from: number, to: number): number => {
+    let sum = 0
+    let k = 0
+    for (let j = Math.max(0, i + Math.floor(from / step) - 2); j < n && j <= i + Math.ceil(to / step) + 2; j++) {
+      const d = s[j] - s[i]
+      if (d < from || d > to) continue
+      sum += alpha[j]
+      k++
+    }
+    return k ? sum / k : 0
+  }
+  // Steepest descent within 0.4 mm below a corner.
+  const steepAfter = (i: number): boolean => {
+    for (let j = i + 1; j < n && s[j] - s[i] <= 0.4; j++) if (alpha[j] < -60 * DEG && alpha[j] > -150 * DEG) return true
+    return false
+  }
   // The axial wall: first ≥ 0.8 mm run descending steeper than 55°.
   let wallStart = -1
   let runStart = -1
@@ -142,7 +161,7 @@ export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0
     } else runStart = -1
   }
   if (wallStart < 0) return []
-  const out: Array<{ r: number; h: number; score: number; order: number }> = []
+  const out: Array<{ r: number; h: number; score: number; at: number; edge: boolean }> = []
   const back = Math.round(1.2 / step)
   for (let i = Math.max(wallStart + 2, L + 1); i < n - L - 1; i++) {
     if (!(tau[i] < -minTurn && tau[i] <= tau[i - 1] && tau[i] <= tau[i + 1])) continue
@@ -164,10 +183,28 @@ export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0
     }
     const at = wsum > 0 ? Math.round(isum / wsum) : i
     const p = sampled[clamp(at, 0, n - 1)]
-    out.push({ r: p.r, h: p.h, score: -tau[i] + 0.6 * clamp(chamfer, 0, 2), order: out.length })
+    // A finish line drops away steeply below its edge (root, or the die); a
+    // corner that rolls over into a gentle slope is a gingival crest.
+    const edge = steepAfter(at)
+    out.push({ r: p.r, h: p.h, score: edge || !creases ? -tau[i] + 0.6 * clamp(chamfer, 0, 2) : 0.4 * -tau[i], at, edge })
   }
+  // Scans taken without retraction: the gum hugs the prep and the finish
+  // line is the crease where the axial wall meets it — a concave turn from
+  // the steep wall onto the gentler gum, with no true edge just below.
+  for (let i = Math.max(wallStart + 2, L + 1); creases && i < n - L - 1; i++) {
+    if (!(tau[i] > minTurn && tau[i] >= tau[i - 1] && tau[i] >= tau[i + 1])) continue
+    if (topH - line[i].h > 10) continue
+    if (meanAlpha(i, -0.8, -0.15) > -55 * DEG || meanAlpha(i, 0.15, 0.8) < -50 * DEG) continue
+    // A true edge just below makes this a chamfer/shoulder floor; one just
+    // above makes it the root meeting the gum below the margin.
+    if (out.some((c) => c.edge && Math.abs(s[c.at] - s[i]) < (c.at > i ? 1.2 : 2))) continue
+    const q = sampled[i]
+    out.push({ r: q.r, h: q.h, score: tau[i] + 0.3, at: i, edge: false })
+  }
+  // Earlier along the profile (nearer the prep top) wins ties.
   return out
-    .map((c) => ({ r: c.r, h: c.h, score: c.score - 0.15 * c.order }))
+    .sort((a, b) => a.at - b.at)
+    .map((c, order) => ({ r: c.r, h: c.h, score: c.score - 0.15 * order }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 4)
 }
@@ -239,7 +276,8 @@ function detectOnce(
   up: Vec3,
   K: number,
   radius: number,
-  minTurn = 0.45
+  minTurn = 0.45,
+  creases = false
 ): { result: MarginResult; ok: boolean } {
   // Prep top on the axis.
   const topHit = scan.raycast(add(centre, scale(up, 15)), scale(up, -1), 0, 30)
@@ -253,7 +291,7 @@ function detectOnce(
     const th = (k / K) * Math.PI * 2
     thetas.push(th)
     const prof = mainProfile(slicer.slice(th), topH)
-    const list = prof ? profileCandidates(prof, topH, minTurn) : []
+    const list = prof ? profileCandidates(prof, topH, minTurn, creases) : []
     cands.push(list.map((c) => ({ ...c, point: profileToWorld(frame, th, { r: c.r, h: c.h }) })))
   }
   const typicalR = median(cands.flatMap((c) => c.slice(0, 1).map((x) => x.r))) || 4
@@ -273,12 +311,26 @@ function detectOnce(
   const snapped = smooth.map((p) => scan.closest(p, 1)?.point ?? p)
   // In the low-threshold (feather-edge) pass every sample is a guess carried
   // by continuity, so confidence is capped below the "trust it" line.
-  const conf = scores.map((s) => clamp(s / 1.6, 0, minTurn < 0.45 ? 0.3 : 1))
+  // A crease is the visible end of the prep, not necessarily the finish
+  // line (it may sit under the gum): capped below the trust line as well.
+  const conf = scores.map((s) => clamp(s / 1.6, 0, minTurn < 0.45 || creases ? 0.34 : 1))
   return { ok: true, result: { points: snapped, thetas, axis: frame, confidence: conf, top, missingFraction: missingCount / K } }
 }
 
 /** Full margin detection from a single tap on the prep. */
 export function detectMargin(scan: SurfaceIndex, tap: Vec3, opts: MarginOptions = {}): MarginResult {
+  const first = detectWith(scan, tap, opts, false)
+  const mean = (c: number[]): number => (c.length ? c.reduce((a, b) => a + b, 0) / c.length : 0)
+  if (first.points.length && mean(first.confidence) >= 0.35) return first
+  // Weak or no finish line: the scan may have been taken without retraction,
+  // with the gum hugging the prep. Read the wall–gum crease instead, if that
+  // makes a margin-shaped loop (flagged for review either way).
+  const crease = detectWith(scan, tap, opts, true)
+  const useCrease = crease.points.length && plausibleLoop(crease) && !(first.points.length && plausibleLoop(first) && mean(first.confidence) >= mean(crease.confidence))
+  return useCrease ? { ...crease, gumLine: true } : first
+}
+
+function detectWith(scan: SurfaceIndex, tap: Vec3, opts: MarginOptions, creases: boolean): MarginResult {
   const K = opts.samples ?? 180
   const radius = opts.radius ?? 8
   let up = opts.up ? normalize(opts.up) : estimateUp(scan, tap)
@@ -287,9 +339,9 @@ export function detectMargin(scan: SurfaceIndex, tap: Vec3, opts: MarginOptions 
   // barely turns (≈ 5–10°). If the sharp-corner pass can't close a loop,
   // retry accepting shallow corners and let continuity carry it.
   let minTurn = 0.45
-  let { result, ok } = detectOnce(scan, centre, up, K, radius, minTurn)
+  let { result, ok } = detectOnce(scan, centre, up, K, radius, minTurn, creases)
   if (!ok) {
-    const retry = detectOnce(scan, centre, up, K, radius, 0.06)
+    const retry = detectOnce(scan, centre, up, K, radius, 0.06, creases)
     // A shallow-corner loop is only kept if it looks like a margin: a smooth
     // ring around the stump, not a path wandering onto gingiva or neighbours.
     if (retry.ok && plausibleLoop(retry.result)) {
@@ -309,7 +361,7 @@ export function detectMargin(scan: SurfaceIndex, tap: Vec3, opts: MarginOptions 
     if (!opts.up) up = normalize(add(scale(up, 0.5), scale(n, 0.5)))
     const m = fit.mean
     centre = add(m, scale(up, dot(sub(result.top, m), up) * 0.45))
-    const again = detectOnce(scan, centre, up, K, radius, minTurn)
+    const again = detectOnce(scan, centre, up, K, radius, minTurn, creases)
     if (!again.ok) break
     result = again.result
   }

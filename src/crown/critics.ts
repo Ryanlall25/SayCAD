@@ -34,6 +34,8 @@ export interface CriticInputs {
   targets: { contactMesialMm: number; contactDistalMm: number; occlusalClearanceMm: number }
   marginConfidenceLowFraction: number
   marginMissingFraction: number
+  /** The margin was traced at the gum line, not a visible finish line. */
+  marginGumLine?: boolean
   buccalConfidence: number
   maxUndercutMm: number
   blockoutVolumeMm3: number
@@ -201,14 +203,18 @@ export function runCritics(c: CriticInputs): CriticReport {
   })
 
   // Inputs the person should eyeball.
-  const marginOk = c.marginMissingFraction < 0.05 && c.marginConfidenceLowFraction < 0.15
+  const marginOk = !c.marginGumLine && c.marginMissingFraction < 0.05 && c.marginConfidenceLowFraction < 0.15
   results.push({
     id: 'margin',
     label: 'Margin line',
     verdict: marginOk ? 'pass' : 'warn',
     measured: `${(100 * (1 - c.marginConfidenceLowFraction)).toFixed(0)}% high-confidence`,
     required: 'clear finish line',
-    message: marginOk ? 'Finish line found all the way round.' : 'Parts of the margin are uncertain — they are highlighted.',
+    message: c.marginGumLine
+      ? 'No finish line is visible (scan taken without retraction?) — the margin was traced where the prep meets the gum. Confirm it follows the finish line.'
+      : marginOk
+        ? 'Finish line found all the way round.'
+        : 'Parts of the margin are uncertain — they are highlighted.',
     fix: marginOk ? undefined : 'Tap the highlighted section on the scan to move the margin there.'
   })
   results.push({
