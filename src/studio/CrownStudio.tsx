@@ -20,7 +20,7 @@ import type { MarginResult } from '../crown/margin'
 import { MATERIALS, type MaterialId } from '../crown/materials'
 import { assignRoles, toothFromNames, type FileRole } from '../crown/caseFiles'
 import { toothClassOf } from '../crown/anatomy'
-import { parseGeometry, exportSTL } from '../core/meshConvert'
+import { parseGeometry, parseScan, exportSTL } from '../core/meshConvert'
 import { parseEoff } from '../crown/eoff'
 import { CROWN_HELP, parseCrown, type CrownCommand, type NumericParam } from '../speak/crownParser'
 import { createDictation } from '../speak/voice'
@@ -43,6 +43,12 @@ import {
 } from '../ai/client'
 import { zip } from '../core/zip'
 import { clearModels, deleteCase, listCases, loadCase, loadModel, newCaseId, saveCase, saveModel, updateCase, type CaseMeta } from './caseStore'
+import NewCase, { type NewCaseResult } from './NewCase'
+import ReviewDeck, { type AdjustTarget } from './ReviewDeck'
+import { CONTRACT, validateJob, type CrownJob, type CrownOutcome, type QcDecision } from '../module/contract'
+import { assembleOutcome } from '../module/designCase'
+import { embedHost, toHost } from '../module/embed'
+import { fdiToUniversal } from '../crown/library'
 import './studio.css'
 
 /**
@@ -70,6 +76,12 @@ interface RunStage {
   status: 'pending' | 'active' | 'done' | 'warn' | 'fail' | 'skipped'
   detail?: string
 }
+
+/** Parameters + margin, rounded — equal keys mean the technician changed nothing. */
+const designKey = (d: DesignData): string => JSON.stringify({ p: d.params, m: d.margin.points.map((q) => q.map((x) => Math.round(x * 100))) })
+
+/** Set when the studio runs inside a host app (the suite): `?embed=1&host=<origin>`. */
+const EMBED_HOST = typeof location !== 'undefined' ? embedHost() : null
 
 const TOOTH_NAMES: Record<string, string> = {
   upperMolar: 'upper molar',
@@ -190,10 +202,63 @@ export default function CrownStudio(): React.JSX.Element {
   const [override, setOverride] = useState('')
   const [detent, setDetent] = useState<Detent>('peek')
   const [run, setRun] = useState<RunStage[] | null>(null)
-  const [dark, setDark] = useState(() => typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches)
+  const [appearance, setAppearanceState] = useState<'dark' | 'light' | 'system'>(() => {
+    try {
+      const a = localStorage.getItem('saycad.appearance')
+      return a === 'light' || a === 'system' ? a : 'dark'
+    } catch {
+      return 'dark'
+    }
+  })
+  const systemDark = (): boolean => typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches
+  const [dark, setDark] = useState(() => appearance === 'dark' || (appearance === 'system' && systemDark()))
+  const setAppearance = (a: 'dark' | 'light' | 'system'): void => {
+    setAppearanceState(a)
+    setDark(a === 'dark' || (a === 'system' && systemDark()))
+    try {
+      localStorage.setItem('saycad.appearance', a)
+    } catch {
+      /* storage unavailable */
+    }
+  }
   const [caseId, setCaseId] = useState<string | null>(null)
   const [recent, setRecent] = useState<CaseMeta[]>([])
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [newCase, setNewCase] = useState(false)
+  const [asking, setAsking] = useState<string | null>(null) // what the coach banner asks for, when not the default
+  const [library, setLibraryState] = useState<'round' | 'rectangular'>(() => {
+    try {
+      return localStorage.getItem('saycad.library') === 'rectangular' ? 'rectangular' : 'round'
+    } catch {
+      return 'round'
+    }
+  })
+  const setLibrary = (l: 'round' | 'rectangular'): void => {
+    setLibraryState(l)
+    try {
+      localStorage.setItem('saycad.library', l)
+    } catch {
+      /* storage unavailable */
+    }
+  }
+  // Simple mode shows the AI result and one Export button; Pro mode adds the stage rail.
+  const [pro, setProState] = useState(() => {
+    try {
+      return localStorage.getItem('saycad.pro') === '1'
+    } catch {
+      return false
+    }
+  })
+  // Embedded: the job the host sent, how its prep was found, and the AI's own design (to tell edits apart).
+  const jobRef = useRef<{ job: CrownJob; prepFoundBy?: CrownOutcome['prepFoundBy']; auto?: string } | null>(null)
+  const setPro = (on: boolean): void => {
+    setProState(on)
+    try {
+      localStorage.setItem('saycad.pro', on ? '1' : '0')
+    } catch {
+      /* storage unavailable */
+    }
+  }
 
   // Mutable mirrors for async code paths.
   const state = useRef({ params, flip, margin, design, tooth, step, loaded, useLearned, model, sculptAt, caseId })
@@ -237,13 +302,55 @@ export default function CrownStudio(): React.JSX.Element {
   useEffect(() => {
     if (typeof matchMedia === 'undefined') return
     const mq = matchMedia('(prefers-color-scheme: dark)')
-    const on = (): void => setDark(mq.matches)
+    const on = (): void => {
+      if (appearance === 'system') setDark(mq.matches)
+    }
     mq.addEventListener('change', on)
     return () => mq.removeEventListener('change', on)
-  }, [])
+  }, [appearance])
   useEffect(() => viewRef.current?.setAppearance(dark), [dark])
 
   useEffect(() => viewRef.current?.setFrameVisible(step === 'margin' || step === 'axis'), [step, design])
+
+  // Simple mode: the key measurements sit on the crown itself.
+  useEffect(() => {
+    const v = viewRef.current
+    if (!v) return
+    if (pro || step !== 'check' || !design) return v.setCallouts([])
+    const f = design.frame
+    const p = design.crown.positions
+    let mes = -Infinity, dis = Infinity, top = -Infinity
+    let pm: [number, number, number] = [0, 0, 0], pd = pm, pt = pm
+    for (let k = 0; k < p.length; k += 3) {
+      const q: [number, number, number] = [p[k] - f.origin[0], p[k + 1] - f.origin[1], p[k + 2] - f.origin[2]]
+      const m = q[0] * f.mesial[0] + q[1] * f.mesial[1] + q[2] * f.mesial[2]
+      const o = q[0] * f.occlusal[0] + q[1] * f.occlusal[1] + q[2] * f.occlusal[2]
+      const at: [number, number, number] = [p[k], p[k + 1], p[k + 2]]
+      if (m > mes) [mes, pm] = [m, at]
+      if (m < dis) [dis, pd] = [m, at]
+      if (o > top) [top, pt] = [o, at]
+    }
+    const s = design.summary
+    v.setCallouts([
+      { point: pm, text: `M ${fmt(s.mesialContactMm)}` },
+      { point: pd, text: `D ${fmt(s.distalContactMm)}` },
+      { point: pt, text: `occl ${fmt(s.occlusalMinMm)} mm` }
+    ])
+  }, [pro, step, design])
+
+  // Embedded in the suite: accept jobs from the host origin only.
+  useEffect(() => {
+    if (!EMBED_HOST) return
+    const onMessage = (e: MessageEvent): void => {
+      if (e.origin !== EMBED_HOST) return
+      const m = e.data as { contract?: string; type?: string; job?: CrownJob }
+      if (m?.contract === CONTRACT && m.type === 'crown:open' && m.job) void openJob(m.job)
+    }
+    window.addEventListener('message', onMessage)
+    toHost(EMBED_HOST, { contract: CONTRACT, type: 'crown:ready' })
+    return () => window.removeEventListener('message', onMessage)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Keep the model centred above the sheet as it changes height.
   const sheetRef = useRef<HTMLElement>(null)
@@ -268,39 +375,47 @@ export default function CrownStudio(): React.JSX.Element {
     }
   }, [detent, loaded])
 
-  // Learned anatomy for the tooth's class, if the lab has trained one.
+  // Anatomy for this tooth: a model the lab trained or imported on this device,
+  // else the bundled library's own tooth for this position (Round or
+  // Rectangular), else a class model, else the textbook template. Designs wait
+  // for it (modelReady) so the first design never starts on the wrong shape.
+  const modelReady = useRef<Promise<void>>(Promise.resolve())
   useEffect(() => {
     let cancelled = false
+    let done: () => void = () => {}
+    modelReady.current = new Promise<void>((r) => (done = r))
     const cls = toothClassOf(tooth)
-    const use = (txt: string): void => {
+    const parse = (txt: string | null): { json: string; count: number; source: string } | null => {
+      if (!txt || !txt.trim().startsWith('{')) return null
       try {
         const m = JSON.parse(txt) as { count: number; source?: string }
-        setModel({ json: txt, count: m.count, source: m.source ?? `${m.count} cases` })
+        return { json: txt, count: m.count, source: m.source ?? `${m.count} cases` }
       } catch {
-        setModel(null)
+        return null
       }
     }
-    void loadModel(cls).then((stored) => {
+    const get = (path: string): Promise<string | null> =>
+      fetch(`${import.meta.env.BASE_URL}models/${path}`)
+        .then((r) => (r.ok ? r.text() : null))
+        .catch(() => null)
+    void (async () => {
+      const found = parse(await loadModel(cls)) ?? parse(await get(`lib-${library}-t${tooth}.json`)) ?? parse(await get(`ssm-${cls}.json`))
       if (cancelled) return
-      if (stored) return use(stored)
-      fetch(`${import.meta.env.BASE_URL}models/ssm-${cls}.json`)
-      .then((r) => (r.ok ? r.text() : null))
-      .then((txt) => {
-        if (cancelled) return
-        if (!txt || !txt.trim().startsWith('{')) return setModel(null)
-        try {
-          const m = JSON.parse(txt) as { count: number; source?: string }
-          setModel({ json: txt, count: m.count, source: m.source ?? `${m.count} cases` })
-        } catch {
-          setModel(null)
-        }
-      })
-      .catch(() => !cancelled && setModel(null))
-    })
+      setModel(found)
+      state.current.model = found
+      done()
+      // A design already on screen follows the new anatomy.
+      if (state.current.design && state.current.margin) void runDesign('final')
+    })()
     return () => {
       cancelled = true
+      done()
     }
-  }, [tooth, modelsVersion])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tooth, modelsVersion, library])
+
+  /** Resolves once this tooth's anatomy has loaded (or after 5 s, whichever is first). */
+  const waitModel = (): Promise<void> => Promise.race([modelReady.current, new Promise<void>((r) => setTimeout(r, 5000))])
 
   /* ── engine calls ──────────────────────────────────────────────────── */
 
@@ -366,7 +481,7 @@ export default function CrownStudio(): React.JSX.Element {
     return runDesign('final', snap)
   }
 
-  async function commitScans(list: ScanFile[], t: number, restore?: CaseMeta): Promise<void> {
+  async function commitScans(list: ScanFile[], t: number, restore?: CaseMeta, info?: { name: string; order?: CaseMeta['order'] }): Promise<void> {
     const prep = list.find((f) => f.role === 'prep')
     const ant = list.find((f) => f.role === 'antagonist')
     const v = viewRef.current
@@ -412,10 +527,10 @@ export default function CrownStudio(): React.JSX.Element {
         setCaseId(id)
         state.current.caseId = id
         const now = new Date().toISOString()
-        const stem = list[0]?.name.replace(/\.(stl|ply)$/i, '').slice(0, 28) ?? 'case'
+        const stem = list[0]?.name.replace(/\.(stl|ply|obj)$/i, '').slice(0, 28) ?? 'case'
         const ok = await saveCase(
-          { id, name: `#${t} · ${stem}`, tooth: t, createdAt: now, updatedAt: now },
-          list.filter((f) => f.role === 'prep' || f.role === 'antagonist').map((f) => {
+          { id, name: info?.name ?? `#${t} · ${stem}`, tooth: t, createdAt: now, updatedAt: now, order: info?.order },
+          list.filter((f) => f.role === 'prep' || f.role === 'antagonist' || f.role === 'bite' || f.role === 'preop').map((f) => {
             const m = meshData(f.geometry)
             return { name: f.name, role: f.role, positions: m.positions.slice().buffer, indices: m.indices ? m.indices.slice().buffer : null }
           })
@@ -440,13 +555,17 @@ export default function CrownStudio(): React.JSX.Element {
   }
 
   async function onFiles(list: FileList | null): Promise<void> {
-    if (!list || !list.length) return
+    const scansPicked = Array.from(list ?? []).filter((f) => /\.(stl|ply|obj)$/i.test(f.name))
+    if (!scansPicked.length) {
+      if (list?.length) setStatus('Pick STL or PLY scan files (or use New Case for a .zip export).')
+      return
+    }
     setBusy('Reading files…')
     const parsed: ScanFile[] = []
-    const names = Array.from(list).map((f) => f.name)
+    const names = scansPicked.map((f) => f.name)
     const t = toothFromNames(names) ?? tooth
     const roles = assignRoles(names, { toothNumber: t })
-    for (const f of Array.from(list)) {
+    for (const f of scansPicked) {
       try {
         const g = await parseGeometry(f)
         parsed.push({ name: f.name, role: roles[f.name] === 'ignore' ? 'prep' : roles[f.name], geometry: g })
@@ -469,9 +588,146 @@ export default function CrownStudio(): React.JSX.Element {
     setStatus(`${parsed.length} file(s) read — check the roles, then “Use these scans”.`)
   }
 
+  /** Finds the prep from the bite and designs straight away; falls back to asking for a tap. */
+  async function autoFind(): Promise<void> {
+    setBusy('Finding the prepared tooth…')
+    let guess
+    try {
+      guess = await engineRef.current!.findPrep()
+    } catch (e) {
+      guess = { point: null, reason: e instanceof Error ? e.message : String(e) }
+    } finally {
+      setBusy(null)
+    }
+    if (!guess.point) {
+      setStatus(guess.reason ?? 'Tap the prepared tooth.')
+      // Real arches often have several teeth out of contact: offer the likely
+      // ones as numbered pins — one tap picks the prep.
+      const cands = ('candidates' in guess ? guess.candidates : undefined) ?? []
+      if (cands.length > 1) {
+        say('app', `Several teeth are out of the bite. Tap the number on #${state.current.tooth} — or tap the tooth itself.`)
+        setAsking(`Tap the number on #${state.current.tooth}`)
+        viewRef.current?.view('fit')
+        viewRef.current?.setPins(
+          cands.slice(0, 5).map((c, k) => ({
+            point: c.point,
+            label: String(k + 1),
+            aria: `Candidate prep ${k + 1}`,
+            onTap: () => {
+              viewRef.current?.setPins([])
+              if (jobRef.current) jobRef.current.prepFoundBy = 'host'
+              void tapPrep(c.point, guess.ups)
+            }
+          }))
+        )
+      }
+      const j = jobRef.current
+      if (EMBED_HOST && j) toHost(EMBED_HOST, { contract: CONTRACT, type: 'crown:outcome', outcome: { contract: CONTRACT, jobId: j.job.jobId, caseRef: j.job.order.caseRef, status: 'needs-input', needs: [{ kind: 'prep-location', message: `${guess.reason ?? ''} The technician can tap it in the studio.`.trim() }], engine: { contract: CONTRACT, version: '' } } })
+      return
+    }
+    say('app', `Found the prep on #${state.current.tooth} from the bite.`)
+    if (jobRef.current) jobRef.current.prepFoundBy = 'bite'
+    await tapPrep(guess.point, guess.ups)
+  }
+
+  /** The current design as a saycad.crown/1 outcome (embedded mode). */
+  function outcomeNow(design?: DesignData | null): CrownOutcome | null {
+    const s = state.current
+    // Just after a design the ref may predate the re-render: prefer the design handed in.
+    const d = design ?? s.design
+    const j = jobRef.current
+    if (!d || !j || !d.crown.indices) return null
+    return assembleOutcome({
+      job: j.job,
+      tooth: s.tooth,
+      results: d.results,
+      summary: d.summary,
+      volumeMm3: d.volumeMm3,
+      margin: d.margin,
+      params: d.params,
+      frame: d.frame,
+      positions: d.crown.positions,
+      indices: d.crown.indices,
+      prepFoundBy: j.prepFoundBy,
+      anatomy: s.useLearned && s.model ? `library — ${s.model.source}` : 'textbook — no library tooth for this position',
+      intake: []
+    })
+  }
+
+  /** A job from the host: load its scans and run the automated design. */
+  async function openJob(job: CrownJob): Promise<void> {
+    const problems = validateJob(job)
+    if (problems.length) {
+      toHost(EMBED_HOST!, { contract: CONTRACT, type: 'crown:outcome', outcome: { contract: CONTRACT, jobId: job?.jobId ?? '', status: 'failed', error: problems.join(' '), engine: { contract: CONTRACT, version: '' } } })
+      setStatus(problems.join(' '))
+      return
+    }
+    const t = job.order.system === 'fdi' ? fdiToUniversal(job.order.tooth)! : job.order.tooth
+    const geo = (sc: CrownJob['scans']['prep']): THREE.BufferGeometry => {
+      if ('mesh' in sc) {
+        const g = new THREE.BufferGeometry()
+        g.setAttribute('position', new THREE.BufferAttribute(sc.mesh.positions, 3))
+        if (sc.mesh.indices) g.setIndex(new THREE.BufferAttribute(sc.mesh.indices, 1))
+        return g
+      }
+      return parseScan(sc.name, sc.data)
+    }
+    const list: ScanFile[] = [{ name: job.scans.prep.name, role: 'prep', geometry: geo(job.scans.prep) }]
+    if (job.scans.antagonist) list.push({ name: job.scans.antagonist.name, role: 'antagonist', geometry: geo(job.scans.antagonist) })
+    for (const b of job.scans.bite ?? []) list.push({ name: b.name, role: 'bite', geometry: geo(b) })
+    if (job.scans.preop) list.push({ name: job.scans.preop.name, role: 'preop', geometry: geo(job.scans.preop) })
+    jobRef.current = { job }
+    const material = job.order.material ?? 'zirconia-hs'
+    setTooth(t)
+    setParams((p) => ({ ...p, ...job.options?.params, material, cementGapMm: undefined }))
+    state.current.params = { ...state.current.params, ...job.options?.params, material, cementGapMm: undefined }
+    setFiles(list)
+    await commitScans(list, t, undefined, { name: `${job.order.caseRef ?? job.jobId} · #${t}` })
+    say('app', `Case from the suite: #${t}${job.order.caseRef ? ` (${job.order.caseRef})` : ''}.`)
+    if (job.options?.tap) {
+      jobRef.current.prepFoundBy = 'host'
+      await tapPrep(job.options.tap)
+    } else if (job.scans.antagonist) await autoFind()
+  }
+
+  /** The technician's decision → the host, with the crown as approved. */
+  function sendQc(decision: QcDecision['decision']): void {
+    const j = jobRef.current
+    if (!EMBED_HOST || !j) return
+    const outcome = decision === 'rejected' ? undefined : outcomeNow() ?? undefined
+    const d = state.current.design
+    const edited = decision !== 'rejected' && d ? designKey(d) !== j.auto : false
+    const qc: QcDecision = {
+      contract: CONTRACT,
+      jobId: j.job.jobId,
+      decision: decision === 'approved' && edited ? 'edited' : decision,
+      at: new Date().toISOString(),
+      reason: decision === 'rejected' ? 'Sent back by the technician.' : state.current.design && !state.current.design.exportable ? override || undefined : undefined,
+      edits: edited && d ? { params: d.params, margin: d.margin.points } : undefined
+    }
+    toHost(EMBED_HOST, { contract: CONTRACT, type: 'crown:qc', decision: qc, outcome }, outcome?.files ? [outcome.files.crownStl] : [])
+    haptic(15)
+    setStatus(qc.decision === 'rejected' ? 'Sent back to the suite.' : `Sent to the suite (${qc.decision}).`)
+  }
+
+  /** Scans and order from the New Case deck → the designer. */
+  async function startCase(r: NewCaseResult): Promise<void> {
+    setNewCase(false)
+    const t = r.order.tooth!
+    const list: ScanFile[] = r.scans.map((sc) => ({ name: sc.name, role: sc.slot, geometry: sc.geometry }))
+    setTooth(t)
+    setParams((p) => ({ ...p, material: r.order.material, cementGapMm: undefined }))
+    state.current.params = { ...state.current.params, material: r.order.material, cementGapMm: undefined }
+    setFiles(list)
+    const who = r.order.patient.trim()
+    await commitScans(list, t, undefined, { name: `${who ? `${who.slice(0, 28)} · ` : ''}#${t}`, order: r.order })
+    say('app', `Case started: #${t}, ${MATERIALS[r.order.material].label}, shade ${r.order.shade}${r.order.doctor ? `, for ${r.order.doctor}` : ''}.`)
+    if (list.some((f) => f.role === 'antagonist')) await autoFind()
+  }
+
   async function importLibrary(list: FileList | null): Promise<void> {
     if (!list || !list.length) return
-    const picked = Array.from(list) // the input is cleared right after this call
+    const picked = Array.from(list).filter((f) => /\.(stl|ply|obj|eoff)$/i.test(f.name)) // the input is cleared right after this call
     setBusy(`Reading ${picked.length} library file(s)…`)
     try {
       const files: Array<{ name: string; mesh: MeshData }> = []
@@ -560,7 +816,10 @@ export default function CrownStudio(): React.JSX.Element {
    * failing, has Claude review the result, and stops on the checks — the
    * technician's decision point.
    */
-  async function tapPrep(point: [number, number, number]): Promise<void> {
+  async function tapPrep(point: [number, number, number], ups?: Array<[number, number, number]>): Promise<void> {
+    viewRef.current?.setPins([])
+    setAsking(null)
+    await waitModel()
     const withAi = ai.ai
     setRun([
       { key: 'margin', label: 'Margin line', status: 'active' },
@@ -576,7 +835,7 @@ export default function CrownStudio(): React.JSX.Element {
     setBusy('Finding the margin…')
     let m: MarginResult
     try {
-      m = await engineRef.current!.margin(point)
+      m = await engineRef.current!.margin(point, ups)
     } catch (e) {
       stage('margin', 'fail', e instanceof Error ? e.message : String(e))
       setStatus(e instanceof Error ? e.message : String(e))
@@ -598,7 +857,7 @@ export default function CrownStudio(): React.JSX.Element {
     const r = (id: string): CriticResultLite | undefined => d.results.find((x) => x.id === id)
     const v = (x?: CriticResultLite): RunStage['status'] => (!x ? 'done' : x.verdict === 'pass' ? 'done' : x.verdict === 'warn' ? 'warn' : 'fail')
     stage('axis', v(r('undercut')), r('undercut')?.measured.split(',')[0] ?? 'set')
-    stage('anatomy', 'done', state.current.useLearned && state.current.model ? state.current.model.source : 'textbook template')
+    stage('anatomy', state.current.useLearned && state.current.model ? 'done' : 'warn', state.current.useLearned && state.current.model ? state.current.model.source : 'textbook — no library tooth for this position')
     const contactWorst = [r('contact-mesial'), r('contact-distal'), r('occlusion')].sort((a, b) => rank(b) - rank(a))[0]
     stage('adapt', v(contactWorst), `M ${fmt(d.summary.mesialContactMm)} · D ${fmt(d.summary.distalContactMm)} · occl ${fmt(d.summary.occlusalMinMm)} mm`)
     const thickWorst = [r('thickness-axial'), r('thickness-occlusal')].sort((a, b) => rank(b) - rank(a))[0]
@@ -621,6 +880,13 @@ export default function CrownStudio(): React.JSX.Element {
     setStep('check')
     viewRef.current?.view('buccal')
     setStatus(final.exportable ? 'Crown designed and checked — ready to export.' : 'Crown designed — some checks need you. See Check.')
+    const j = jobRef.current
+    if (EMBED_HOST && j) {
+      j.prepFoundBy ??= 'host' // tapped in the studio
+      const o = outcomeNow(final)
+      j.auto = designKey(final)
+      if (o) toHost(EMBED_HOST, { contract: CONTRACT, type: 'crown:outcome', outcome: o }, [o.files!.crownStl])
+    }
   }
 
   function rank(x?: CriticResultLite): number {
@@ -1032,13 +1298,20 @@ export default function CrownStudio(): React.JSX.Element {
   return (
     <div className={`studio ${dark ? 'dark' : ''}`}>
       <div className="st-stage" ref={mountRef}>
-        {!loaded && !busy && (
+        {!loaded && !busy && EMBED_HOST && (
           <div className="st-welcome">
             <p className="st-eyebrow">{LAB_NAME} · Crowns</p>
-            <h1>Design a crown in one tap.</h1>
-            <p>Load the prep and opposing scans, tap the prepared tooth, and the crown is margined, shaped, fitted to the bite and checked.</p>
+            <h1>Waiting for the case…</h1>
+            <p>The suite sends the order and scans; the crown is designed as soon as they arrive.</p>
+          </div>
+        )}
+        {!loaded && !busy && !EMBED_HOST && (
+          <div className="st-welcome">
+            <p className="st-eyebrow">{LAB_NAME} · Crowns</p>
+            <h1>AI crowns from two scans.</h1>
+            <p>Pick the tooth, add the prep and opposing scans. The prep is found from the bite, and the crown is margined, shaped from the tooth library, fitted and checked.</p>
             <div className="st-welcome-actions">
-              <button className="st-btn primary large" onClick={() => fileRef.current?.click()}>Load Scans</button>
+              <button className="st-btn primary large" onClick={() => setNewCase(true)}>New Crown</button>
               <button className="st-btn tinted large" onClick={() => void loadDemo(true)}>Try the Demo Case</button>
             </div>
             {recent.length > 0 && (
@@ -1056,7 +1329,7 @@ export default function CrownStudio(): React.JSX.Element {
             )}
           </div>
         )}
-        {loaded && !margin && !busy && <div className="st-coach">Tap the prepared tooth</div>}
+        {loaded && !margin && !busy && <div className="st-coach">{asking ?? 'Tap the prepared tooth'}</div>}
         {(listening || interim) && <div className="st-coach live">{interim || 'Listening…'}</div>}
         {busy && (
           <div className="st-hud" role="status">
@@ -1094,7 +1367,7 @@ export default function CrownStudio(): React.JSX.Element {
         <button className="st-round" onClick={() => setHelpOpen((o) => !o)} aria-label="Help">?</button>
       </header>
 
-      {loaded && (
+      {loaded && pro && (
         <nav className="st-rail" aria-label="Design stages">
           {STEPS.map(([k, label]) => (
             <button key={k} className={`st-rail-item ${stageState(k)}`} onClick={() => { setStep(k); if (detent === 'peek') setDetent('half'); haptic() }} aria-current={k === step ? 'step' : undefined}>
@@ -1110,11 +1383,27 @@ export default function CrownStudio(): React.JSX.Element {
           <div className="st-modal-card" onClick={(e) => e.stopPropagation()}>
             <h2>How it works</h2>
             <ol className="st-howto">
-              <li>Load the prep-arch and opposing scans (STL/PLY), or the demo.</li>
-              <li>Tap the prepared tooth. Margin, axis, anatomy, contacts, occlusion and thickness are done in one pass, then checked.</li>
-              <li>Revisit any stage to override it — or just say what you want.</li>
-              <li>Export the STL for milling.</li>
+              <li>New Crown: pick the tooth, then add the prep-arch and opposing scans (STL/PLY, or the scanner's .zip).</li>
+              <li>The prep is found from the bite (or tap it), and margin, axis, library anatomy, contacts, occlusion and thickness are done in one pass, then checked.</li>
+              <li>Export — or Adjust Design to open every stage, or just say what you want.</li>
             </ol>
+            <div className="st-group">
+              <div className="st-row-item">
+                <span className="st-row-main"><b>Appearance</b></span>
+                <div className="st-segmented small" role="group" aria-label="Appearance">
+                  {(['dark', 'light', 'system'] as const).map((a) => (
+                    <button key={a} className={appearance === a ? 'on' : ''} onClick={() => setAppearance(a)}>{a[0].toUpperCase() + a.slice(1)}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="st-row-item">
+                <span className="st-row-main"><b>Pro tools</b><span>Show the stage rail (Margin, Axis, Anatomy, Adapt…)</span></span>
+                <label className="st-switch">
+                  <input type="checkbox" checked={pro} onChange={(e) => setPro(e.target.checked)} aria-label="Pro tools" />
+                  <span />
+                </label>
+              </div>
+            </div>
             <h2>Things you can say</h2>
             <dl className="st-say">
               {CROWN_HELP.map(([say2, what]) => (
@@ -1147,7 +1436,7 @@ export default function CrownStudio(): React.JSX.Element {
 
         {detent !== 'peek' && (
           <div className="st-content">
-            {run && (step === 'margin' || step === 'check') && (
+            {run && (step === 'margin' || (step === 'check' && pro)) && (
               <div className="st-group">
                 <div className="st-group-head">Design run</div>
                 {run.map((r) => (
@@ -1193,12 +1482,13 @@ export default function CrownStudio(): React.JSX.Element {
                     </div>
                   ))}
                   <div className="st-actions">
+                    <button className="st-btn tinted" onClick={() => setNewCase(true)}>New Case</button>
                     <button className="st-btn tinted" onClick={() => fileRef.current?.click()}>Add Scans</button>
                     <button className="st-btn tinted" onClick={() => void loadDemo()}>Demo Case</button>
                     <button className="st-btn tinted" onClick={() => rxRef.current?.click()} disabled={!ai.ai || !ai.images}>Read Rx Photo</button>
                   </div>
                   {rxNote && <p className="st-note">{rxNote}</p>}
-                  {files.length > 0 && <button className="st-btn primary block" onClick={() => void commitScans(files, tooth)}>Use These Scans</button>}
+                  {files.length > 0 && <button className="st-btn primary block" onClick={async () => { await commitScans(files, tooth); if (files.some((f) => f.role === 'antagonist')) await autoFind() }}>Use These Scans</button>}
                 </div>
                 {recent.length > 0 && (
                   <div className="st-group">
@@ -1353,7 +1643,34 @@ export default function CrownStudio(): React.JSX.Element {
               </>
             )}
 
-            {step === 'check' && (
+            {step === 'check' && !pro && d && (
+              <ReviewDeck
+                design={d}
+                anatomy={{ library: useLearned && !!model, label: useLearned && model ? model.source : 'textbook' }}
+                library={library}
+                setLibrary={setLibrary}
+                ai={ai.ai}
+                embedded={!!EMBED_HOST}
+                onAdjust={(t: AdjustTarget) => {
+                  setPro(true)
+                  setStep(t)
+                  setDetent('half')
+                  haptic()
+                }}
+                onFixWithAi={async () => {
+                  setBusy('Claude is fixing…')
+                  await fixWithAi()
+                  setBusy(null)
+                }}
+                onApprove={() => {
+                  haptic(15)
+                  if (EMBED_HOST) sendQc('approved')
+                  else void exportCrown(false)
+                }}
+                onSendBack={EMBED_HOST ? () => sendQc('rejected') : undefined}
+              />
+            )}
+            {step === 'check' && (pro || !d) && (
               <>
                 <h2 className="st-h">Check</h2>
                 {!d && <p className="st-lead">No design yet.</p>}
@@ -1440,8 +1757,10 @@ export default function CrownStudio(): React.JSX.Element {
         )}
       </section>
 
-      <input ref={fileRef} type="file" accept=".stl,.ply" multiple hidden onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }} />
-      <input ref={libRef} type="file" accept=".stl,.ply,.eoff" multiple hidden onChange={(e) => { void importLibrary(e.target.files); e.target.value = '' }} />
+      {newCase && <NewCase toothName={(n) => TOOTH_NAMES[toothClassOf(n)] ?? ''} onCancel={() => setNewCase(false)} onDone={(r) => void startCase(r)} />}
+      {/* No `accept` filter on scan pickers: iOS greys out .stl/.eoff files; parsing reports unreadable ones. */}
+      <input ref={fileRef} type="file" multiple hidden onChange={(e) => { void onFiles(e.target.files); e.target.value = '' }} />
+      <input ref={libRef} type="file" multiple hidden onChange={(e) => { void importLibrary(e.target.files); e.target.value = '' }} />
       <input ref={rxRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void onRxPhoto(e.target.files?.[0]); e.target.value = '' }} />
     </div>
   )

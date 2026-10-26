@@ -39,7 +39,8 @@ export interface DesignData {
 export type EngineRequest =
   | { type: 'load'; toothNumber: number; prep: MeshData; antagonist: MeshData | null }
   | { type: 'setTooth'; toothNumber: number }
-  | { type: 'margin'; tap: Vec3 }
+  | { type: 'margin'; tap: Vec3; ups?: Vec3[] }
+  | { type: 'findPrep' }
   | { type: 'editMargin'; points: Vec3[]; tapped: Vec3 }
   | { type: 'importLibrary'; files: Array<{ name: string; mesh: MeshData }>; numbering: 'auto' | 'universal' | 'fdi'; source: string; jaw?: 'upper' | 'lower' }
   | { type: 'design'; margin: MarginResult; params: Partial<DesignParams>; flipBuccal: boolean; quality: 'preview' | 'final'; model: string | null }

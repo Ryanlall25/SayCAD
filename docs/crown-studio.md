@@ -106,8 +106,160 @@ margin, axis, anatomy, contacts and occlusion, thickness, quality checks,
 then (with AI on) an automatic AI fix if anything fails and an AI review.
 The "Ask, or say a change" field takes voice or text at any stage.
 
-The interface has been checked in headless phone emulation (`dev/e2e.mjs`)
-only — **not yet on a physical phone by a technician.**
+**New Crown** asks for the minimum, in three swipeable cards:
+1. **Tooth:** tap it on the arch chart. Material, shade and an optional
+   patient name sit on the same card.
+2. **Prep-arch scan.**
+3. **Opposing-arch scan.**
+
+Each scan card names the exact file needed ("Upload the LOWER jaw scan —
+the arch with the prep on #19"). Swiping forward is held until it has
+that file ("Needed now: LOWER JAW SCAN"). A scanner `.zip` or an exocad
+`.dentalProject` can fill everything at once; files are placed by name.
+
+Each upload is checked:
+- size and units (it catches exports in metres);
+- arch, quadrant or single die;
+- triangle count;
+- a file name that names the other jaw, or looks like a crown;
+- whether the arches are in the bite.
+
+**No tap needed.** After Design Crown, the prep is found from the bite
+(`src/crown/findPrep.ts`):
+- Natural teeth touch the opposing arch; a prepped stump sits 0.6–4 mm
+  short of it.
+- A clearance map over the arch, eroded by 2 mm, leaves the stump as the
+  one large blob.
+- If the arches aren't in the bite, or two teeth are out of contact, the
+  app says so and asks for a tap.
+
+Proven on synthetic cases: lower, mirrored upper, and an arbitrary
+scanner frame, with a margin error under 0.1 mm against the true margin.
+Real scans: see below.
+
+The result screen shows the verdict and **Export Crown**. **Adjust
+Design** (or Help → Pro tools) opens the full stage rail: Scans, Margin,
+Axis, Anatomy, Adapt, Check, Export.
+
+**Tooth library:** two complete free library families, Round and
+Rectangular, each with every position from central incisor to third molar
+in both jaws. They're imported per tooth position, so a #19 crown starts
+from the library's own lower first molar (`npm run import-library --
+<upper> --jaw upper <lower> --jaw lower --family round`). Round is the
+default, and the last review card switches between them. The model files
+stay out of git because they keep their publisher's licence.
+
+Library teeth carry their own cervical neck. The design rebuilds every
+meridian below its widest point as a smooth convex emergence from the
+margin, so blending onto the margin leaves no crease.
+
+**Review deck.** The result is a stack of cards: one per check that warns
+or fails, failing ones first.
+- Swipe right to accept a warning.
+- Swipe left, or tap Adjust, to open the stage that fixes it.
+- A failing check can't be accepted.
+
+When nothing is left, the last card shows the key numbers and **Approve &
+Export** (**Approve & Send** when embedded). The contacts and occlusal
+clearance are also pinned on the 3D crown.
+
+**When the prep isn't obvious (real arches).** Natural teeth are often out
+of contact too: front-teeth overjet, crossbites. So the candidates are
+ranked by where they sit on the arch compared with the tooth on the order:
+1. The ends of the dentition give left and right, and the front of the
+   arch gives the anterior direction.
+2. The angle from the midline is compared with that tooth's expected
+   position.
+3. A clear match is picked automatically. Otherwise the best candidates
+   show as numbered pins, and one tap picks the prep.
+
+The margin search then tries several occlusal directions (the bite plane,
+the direction between the arches, the scan's own estimate) from the stump's
+top, and keeps the loop that reads best.
+
+What real scans needed, beyond the synthetic cases:
+- **Gum-line margins.** Scans taken without retraction have no visible
+  finish line: the gum hugs the prep, and its crest is a convex corner
+  about 1 mm outside the prep. When no clear finish line is found, the
+  margin is traced at the crease where the axial wall meets the gum. That
+  loop is always flagged, and its review card says it was traced at the
+  gum line.
+- **Path of insertion.** The axis is the least-undercut direction within
+  25° of the margin's axis, searched coarse to fine (about 0.7 s), as
+  exocad does by default. A technician's tilt is applied on top of it.
+- **Neighbours.** The scan is one surface, so the stump's own bulging wall
+  and the papilla between the teeth used to count as "neighbour". They are
+  excluded now: the stump by flood fill from its top above the margin, the
+  papilla by a height floor. A side whose nearest tooth is beyond reach,
+  or whose surface never rises to tooth height (gum over an edentulous
+  ridge), has no contact. A bridge abutment's pontic side is one example.
+- Contact relief stops at the material minimum. A neighbour closer to the
+  prep than that is reported, not hidden by thinning the wall.
+
+Measured on the first real case, Laura (3Shape upper arch, opposing lower
+in occlusion). The scan has one prepared tooth, a premolar 51° round the
+arch. Its neighbours are natural and the edentulous ridge is distal.
+- Ordering #12, the prep is found automatically. The gum-line margin traces
+  the stump's outline, and the axis tilts 16° to cut the undercut from
+  1.17 to 0.69 mm.
+- **The prep itself is under-reduced.** The stump comes within 0.43 mm
+  of the opposing tooth and 0.47 mm of the mesial neighbour, measured
+  directly between the scans. Zirconia needs 0.7 mm occlusal and 0.5 mm
+  axial.
+- The checks read accordingly: thickness passes, occlusion is −0.34 mm
+  (high), the mesial contact is −0.16 mm (tight), and the distal side
+  correctly has no contact. In the app: 5 cards to review, 4 of 9 checks
+  pass (was 10 of 12 to review), designed in 10 s.
+- **The crown shape is not lab-quality on this prep.** The anatomy is
+  recognisably the library premolar, but the walls show folds where the
+  thickness push meets the contact relief. The vertex-by-vertex constraint
+  steps fight each other on a prep this tight. The next step is one
+  smooth, joint solve of all constraints (thickness, contacts, occlusion)
+  instead of sequential pushes.
+
+**Scored against finished lab cases.** `npm run eval -- dev/cases/<set>`
+runs every `caseNN/` folder twice: once fully automatic, and once on the
+technician's margin, which isolates the crown design. Each folder holds the
+jaw scans, the technician's crown and margin, and optionally a die. It
+reports our margin's error against the technician's, our crown's distance
+from the technician's crown, and the checks. Scans may be STL, PLY or OBJ;
+OBJ vertex colour is kept, and the studio shows real tooth and gum shades.
+
+First set: three exocad molar and premolar crowns, exported as Model
+Creator models (scan, printed base and a separate die):
+
+| case | on the technician's margin | fully automatic |
+|---|---|---|
+| 01 · #47 | crown 0.33 mm mean / 1.03 p90 from the technician's; no check fails | prep found; margin 1.05 mm mean; crown 0.37 mm mean |
+| 02 · #35 | crown 0.29 / 0.90 mm; no check fails | asks for a tap (prep not found) |
+| 03 · #46 | crown 0.23 / 0.68 mm; no check fails | prep found; margin 1.09 mm mean (one stretch drops onto the die base); crown 0.61 mm mean |
+
+What these cases fixed:
+- **Bite.** Printed models are hollow shells, which fooled the inside/outside
+  test, so cusps were lifted into the opposing teeth. The bite is now
+  measured as the vertical gap to the opposing arch's first surface from
+  below, and the relief runs until it is clear.
+- **Walls.** Right above the margin, the fitting-surface check and the
+  thickness step judge a wall vertex by a ray straight out from the axis.
+  The old ray toward the centre misread those points.
+- **Contacts.** Contacts are relieved down to the cervical third, still
+  capped by the material minimum.
+- **Prep search.** It widens the clearance band from 4 to 6 mm only when
+  nothing is found within 4.
+
+Caveats:
+- Model Creator dies are ditched along the technician's margin, so margin
+  finding on them is easier than on a raw intraoral scan. Raw scans are the
+  real test.
+- These are three cases only.
+
+`dev/e2e-real.mjs` replays a local case. `dev/crown-scene.html` renders a
+crown on the real arches in occlusion. Cases stay in the git-ignored
+`dev/cases/`.
+
+The interface has been checked in headless phone emulation
+(`dev/e2e.mjs` for Pro tools, `dev/e2e-newcase.mjs` for New Crown) only — **not yet on a physical
+phone by a technician.**
 
 ---
 

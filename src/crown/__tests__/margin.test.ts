@@ -42,9 +42,10 @@ describe('finish-line variants', () => {
     const scan = new SurfaceIndex(c.prep)
     const m = detectMargin(scan, c.tapPoint)
     if (m.points.length) {
-      // If a loop is returned it must be right and flagged for review.
-      expect(marginError(m.points, c.margin).mean).toBeLessThan(0.2)
+      // A returned loop is flagged for review everywhere, and is either right
+      // or labelled as traced at the gum line (where this scan's prep ends).
       expect(Math.max(...m.confidence)).toBeLessThan(0.35)
+      if (!m.gumLine) expect(marginError(m.points, c.margin).mean).toBeLessThan(0.2)
     }
     // The manual route: a handful of taps on the true margin, in any order.
     const taps = [0, 40, 75, 110, 150, 185, 220, 260, 300, 330].map((k) => c.margin[(k * 7) % 360])

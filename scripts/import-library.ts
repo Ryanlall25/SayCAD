@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js'
 import { analyseLibrary, libraryModels, libraryToothNumber, type LibraryTooth } from '../src/crown/library'
+import { trainShapeModel } from '../src/crown/ssm'
 import { parseEoff } from '../src/crown/eoff'
 
 const args = process.argv.slice(2).filter((a) => a !== '--')
@@ -52,9 +53,29 @@ for (const { dir, jaw } of folders) {
 }
 const imported = analyseLibrary(teeth)
 for (const t of imported) console.log(`${t.name} → #${t.toothNumber} ${t.cls}: ${t.shape ? 'ok' : `SKIPPED (${t.error})`}`)
-const models = libraryModels(imported, opt('name', 'tooth library'))
 const out = opt('out', 'public/models')
 mkdirSync(out, { recursive: true })
+// --family <slug>: one model per tooth position (lib-<slug>-t<n>.json), so each
+// crown starts from the library's own tooth for that position, mirrored to the
+// other side of the arch. Without it: one blended model per tooth class.
+if (args.includes('--family')) {
+  const family = opt('family', 'library').toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  const label = opt('name', family)
+  const mirror = (n: number): number => (n <= 16 ? 17 - n : 49 - n)
+  let written = 0
+  for (const t of imported) {
+    if (!t.shape) continue
+    const m = trainShapeModel(t.cls, [t.shape], { source: `${label} #${t.toothNumber}` })
+    const json = JSON.stringify(m, (_, v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v))
+    for (const n of [t.toothNumber, mirror(t.toothNumber)]) {
+      writeFileSync(join(out, `lib-${family}-t${n}.json`), json)
+      written++
+    }
+  }
+  console.log(`wrote ${written} per-tooth models to ${out}/lib-${family}-t*.json`)
+  process.exit(0)
+}
+const models = libraryModels(imported, opt('name', 'tooth library'))
 for (const [cls, m] of Object.entries(models)) {
   if (!m) continue
   writeFileSync(join(out, `ssm-${cls}.json`), JSON.stringify(m))

@@ -34,6 +34,8 @@ export interface CriticInputs {
   targets: { contactMesialMm: number; contactDistalMm: number; occlusalClearanceMm: number }
   marginConfidenceLowFraction: number
   marginMissingFraction: number
+  /** The margin was traced at the gum line, not a visible finish line. */
+  marginGumLine?: boolean
   buccalConfidence: number
   maxUndercutMm: number
   blockoutVolumeMm3: number
@@ -85,7 +87,13 @@ export function runCritics(c: CriticInputs): CriticReport {
   forEachVertex(g, (i, j, p) => {
     if (j === 0) return
     const sd = c.intaglioIndex.signedDistance(p, normalize(sub(centre, p)), 6)
-    if (sd < -0.01) negative++
+    // Axial wall: inside the prep when a ray straight out from the axis still
+    // meets the fitting surface (the ray toward the centre misreads points
+    // just above the margin). Occlusal table: the centre ray.
+    if (j < g.nv * 0.4) {
+      const r = Math.hypot(p[0], p[2])
+      if (r > 1e-6 && c.intaglioIndex.raycast(p, [p[0] / r, 0, p[2] / r], 0.01, 6)) negative++
+    } else if (sd < -0.01) negative++
     if (s[j * g.nu + i] < 1.0) return
     thickness[j * g.nu + i] = sd
     const n = gridNormal(g, i, j)
@@ -169,7 +177,7 @@ export function runCritics(c: CriticInputs): CriticReport {
     let m = Infinity
     forEachVertex(g, (_i, j, p) => {
       if (j < g.nv * 0.3) return
-      const sd = c.antagonist!.signedDistance(p, [0, 1, 0], 2)
+      const sd = c.antagonist!.gapUp(p, 2)
       m = Math.min(m, sd)
       if (sd < c.targets.occlusalClearanceMm + 0.1) occPoints++
     })
@@ -201,14 +209,18 @@ export function runCritics(c: CriticInputs): CriticReport {
   })
 
   // Inputs the person should eyeball.
-  const marginOk = c.marginMissingFraction < 0.05 && c.marginConfidenceLowFraction < 0.15
+  const marginOk = !c.marginGumLine && c.marginMissingFraction < 0.05 && c.marginConfidenceLowFraction < 0.15
   results.push({
     id: 'margin',
     label: 'Margin line',
     verdict: marginOk ? 'pass' : 'warn',
     measured: `${(100 * (1 - c.marginConfidenceLowFraction)).toFixed(0)}% high-confidence`,
     required: 'clear finish line',
-    message: marginOk ? 'Finish line found all the way round.' : 'Parts of the margin are uncertain — they are highlighted.',
+    message: c.marginGumLine
+      ? 'No finish line is visible (scan taken without retraction?) — the margin was traced where the prep meets the gum. Confirm it follows the finish line.'
+      : marginOk
+        ? 'Finish line found all the way round.'
+        : 'Parts of the margin are uncertain — they are highlighted.',
     fix: marginOk ? undefined : 'Tap the highlighted section on the scan to move the margin there.'
   })
   results.push({

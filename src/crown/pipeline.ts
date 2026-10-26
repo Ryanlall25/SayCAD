@@ -6,6 +6,7 @@ import { estimateFrame } from './frame'
 import { add, geometryFrom, geometryToLocal, normalize, scale, SurfaceIndex, toLocal, type ToothFrame, type Vec3 } from './geom'
 import { angleDiff, type CrownGrid } from './grid'
 import { buildIntaglio, type IntaglioResult } from './intaglio'
+import { insertionAxis } from './insertion'
 import { detectMargin, type MarginResult } from './margin'
 import { MATERIALS } from './materials'
 import { weld } from './slice'
@@ -43,6 +44,8 @@ export interface DesignRequest {
   nu?: number
   nv?: number
   template?: Template
+  /** Dev: the outer grid after each design stage. */
+  onStage?: (stage: string, g: CrownGrid) => void
 }
 
 export interface DesignResult {
@@ -99,32 +102,91 @@ export function marginRowAt(marginLocal: Vec3[], nu: number): Vec3[] {
   return row
 }
 
+/**
+ * The prepared stump itself (local): every vertex connected to the prep top
+ * without dropping to the margin. A scan is one surface, so a bulging
+ * (undercut) wall would otherwise pass for a neighbour tooth.
+ */
+export function stumpVertices(prepLocal: THREE.BufferGeometry, marginRow: Vec3[]): Uint8Array {
+  const nu = marginRow.length
+  const pos = prepLocal.getAttribute('position') as THREE.BufferAttribute
+  const idx = prepLocal.index as THREE.BufferAttribute
+  const mark = new Uint8Array(pos.count)
+  const marginR = Math.max(...marginRow.map((p) => Math.hypot(p[0], p[2])))
+  // Above the local margin height, and not far outside the margin footprint.
+  const inside = (v: number): boolean => {
+    const x = pos.getX(v), y = pos.getY(v), z = pos.getZ(v)
+    const r = Math.hypot(x, z)
+    if (r > marginR + 3) return false
+    const th = (Math.atan2(x, z) + 2 * Math.PI) % (2 * Math.PI)
+    return y > marginRow[Math.round((th / (2 * Math.PI)) * nu) % nu][1] + 0.15
+  }
+  const adj: number[][] = []
+  for (let t = 0; t < idx.count; t += 3) {
+    const tri = [idx.getX(t), idx.getX(t + 1), idx.getX(t + 2)]
+    if (!tri.every(inside)) continue
+    for (let k = 0; k < 3; k++) {
+      ;(adj[tri[k]] ??= []).push(tri[(k + 1) % 3], tri[(k + 2) % 3])
+    }
+  }
+  // Seed: the highest qualifying vertex near the axis.
+  let seed = -1
+  for (let v = 0; v < pos.count; v++) {
+    if (!adj[v] || Math.hypot(pos.getX(v), pos.getZ(v)) > 1.5) continue
+    if (seed < 0 || pos.getY(v) > pos.getY(seed)) seed = v
+  }
+  if (seed < 0) return mark
+  const stack = [seed]
+  mark[seed] = 1
+  while (stack.length) {
+    for (const w of adj[stack.pop()!]) {
+      if (mark[w]) continue
+      mark[w] = 1
+      stack.push(w)
+    }
+  }
+  return mark
+}
+
 /** Splits the prep-arch scan into mesial / distal neighbour surfaces (local). */
 export function neighbourSurfaces(prepLocal: THREE.BufferGeometry, marginRow: Vec3[]): { mesial: SurfaceIndex | null; distal: SurfaceIndex | null } {
   const nu = marginRow.length
   const marginR = marginRow.map((p) => Math.hypot(p[0], p[2]))
-  const minY = Math.min(...marginRow.map((p) => p[1]))
+  // Gingiva (papilla) between the teeth is not a contact surface: keep only
+  // what stands clear of the margin on that side.
+  const sideFloor = (side: number): number => Math.max(...marginRow.filter((_, i) => angleDiff((2 * Math.PI * i) / nu, side) < (45 * Math.PI) / 180).map((p) => p[1])) + 0.8
+  const floorM = sideFloor(Math.PI / 2)
+  const floorD = sideFloor((3 * Math.PI) / 2)
   const pos = prepLocal.getAttribute('position') as THREE.BufferAttribute
   const idx = prepLocal.index as THREE.BufferAttribute
+  const stump = stumpVertices(prepLocal, marginRow)
   const mes: number[] = []
   const dis: number[] = []
   for (let t = 0; t < idx.count; t += 3) {
     const a = idx.getX(t), b = idx.getX(t + 1), c = idx.getX(t + 2)
+    if (stump[a] || stump[b] || stump[c]) continue
     const cx = (pos.getX(a) + pos.getX(b) + pos.getX(c)) / 3
     const cy = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3
     const cz = (pos.getZ(a) + pos.getZ(b) + pos.getZ(c)) / 3
-    if (cy < minY + 0.5 || cy > 16) continue
+    if (cy > 16) continue
     const r = Math.hypot(cx, cz)
     if (r > 16) continue
     const th = (Math.atan2(cx, cz) + 2 * Math.PI) % (2 * Math.PI)
     const mr = marginR[Math.round((th / (2 * Math.PI)) * nu) % nu]
     if (r < mr + 0.35) continue
     const target = angleDiff(th, Math.PI / 2) < (70 * Math.PI) / 180 ? mes : angleDiff(th, (3 * Math.PI) / 2) < (70 * Math.PI) / 180 ? dis : null
-    if (!target) continue
+    if (!target || cy < (target === mes ? floorM : floorD)) continue
     for (const v of [a, b, c]) target.push(pos.getX(v), pos.getY(v), pos.getZ(v))
   }
+  // A neighbour tooth rises to about the prep's height; gum over an
+  // edentulous ridge doesn't.
+  let topY = -Infinity
+  for (let v = 0; v < pos.count; v++) if (stump[v]) topY = Math.max(topY, pos.getY(v))
   const make = (arr: number[]): SurfaceIndex | null => {
     if (arr.length < 9 * 20) return null
+    let maxY = -Infinity
+    for (let k = 1; k < arr.length; k += 3) maxY = Math.max(maxY, arr[k])
+    if (Number.isFinite(topY) && maxY < topY - 1.5) return null
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(arr), 3))
     return new SurfaceIndex(g)
@@ -154,6 +216,7 @@ interface CaseEnv {
 }
 
 const envCache = new WeakMap<PreparedCase, CaseEnv>()
+const axisCache = new WeakMap<PreparedCase, { key: string; axis: Vec3 }>()
 
 /** Cheap content key for a margin loop (exact for identical loops). */
 function marginKey(m: MarginResult): string {
@@ -194,7 +257,15 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
   const envKey = `${marginKey(margin)}|${pc.toothNumber}|${req.flipBuccal ? 1 : 0}|${nu}|${nv}|${tiltM}|${tiltB}`
   let env = envCache.get(pc)
   if (!env || env.key !== envKey) {
-    let fe = estimateFrame(margin.points, margin.axis.up, pc.toothNumber, pc.prepWelded, { flipBuccal: req.flipBuccal })
+    // Path of insertion: the least-undercut direction near the margin's axis
+    // (searched once per margin), which the technician can then lean.
+    const aKey = marginKey(margin)
+    let ins = axisCache.get(pc)
+    if (!ins || ins.key !== aKey) {
+      ins = { key: aKey, axis: insertionAxis(pc.prepWelded, margin.points, margin.axis.up).axis }
+      axisCache.set(pc, ins)
+    }
+    let fe = estimateFrame(margin.points, ins.axis, pc.toothNumber, pc.prepWelded, { flipBuccal: req.flipBuccal })
     if (tiltM || tiltB) {
       // Technician override of the path of insertion: lean the axis toward
       // mesial/buccal by the given angles, then rebuild the frame around it.
@@ -227,7 +298,7 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
   lap('intaglio')
 
   const outer = designOuter(
-    { toothClass: toothClassOf(pc.toothNumber), marginRow, intaglio: intaglio.grid, intaglioIndex, mesial, distal, antagonist, nv, templateOverride: req.template },
+    { toothClass: toothClassOf(pc.toothNumber), marginRow, intaglio: intaglio.grid, intaglioIndex, mesial, distal, antagonist, nv, templateOverride: req.template, onStage: req.onStage },
     params
   )
   lap('outer')
@@ -242,14 +313,15 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
     outer: outer.grid,
     intaglioIndex,
     intaglioPoleY: intaglio.grid.pole[1],
-    mesial,
-    distal,
+    mesial: outer.neighbours.mesial,
+    distal: outer.neighbours.distal,
     antagonist,
     watertight,
     material: { ...mat, label: MATERIALS[params.material]?.label ?? params.material },
     targets: { contactMesialMm: params.contactMesialMm, contactDistalMm: params.contactDistalMm, occlusalClearanceMm: params.occlusalClearanceMm },
     marginConfidenceLowFraction: lowConf,
     marginMissingFraction: margin.missingFraction,
+    marginGumLine: margin.gumLine,
     buccalConfidence: fe.buccalConfidence,
     maxUndercutMm: intaglio.maxUndercutMm,
     blockoutVolumeMm3: intaglio.blockoutVolumeMm3,

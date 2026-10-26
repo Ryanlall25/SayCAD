@@ -1,3 +1,4 @@
+import type { PrepGuess } from './findPrep'
 import type { DesignParams } from './design'
 import type { Vec3 } from './geom'
 import type { MarginResult } from './margin'
@@ -77,8 +78,14 @@ export class CrownEngine {
     return this.call({ type: 'setTooth', toothNumber })
   }
 
-  margin(tap: Vec3): Promise<MarginResult> {
-    return this.call({ type: 'margin', tap })
+  /** Margin around a point on the prep; `ups` (occlusal directions from the bite) steady real scans. */
+  margin(tap: Vec3, ups?: Vec3[]): Promise<MarginResult> {
+    return this.call({ type: 'margin', tap, ups })
+  }
+
+  /** The prep, found from where the bite is missing; null point when unclear (see reason). */
+  findPrep(): Promise<PrepGuess> {
+    return this.call({ type: 'findPrep' })
   }
 
   editMargin(points: Vec3[], tapped: Vec3): Promise<Vec3[]> {

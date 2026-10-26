@@ -132,6 +132,8 @@ export interface DesignEnv {
   nv: number
   /** Optional learned anatomy (from ssm.ts) replacing the textbook template. */
   templateOverride?: Template
+  /** Dev: called with the grid after each stage. */
+  onStage?: (stage: string, g: CrownGrid) => void
 }
 
 export interface DesignMeasures {
@@ -150,6 +152,8 @@ export interface OuterResult {
   grid: CrownGrid
   cuspTips: Array<{ name: string; i: number; j: number }>
   measures: DesignMeasures
+  /** Neighbours the design made contact with (null: none, or across an edentulous span). */
+  neighbours: { mesial: SurfaceIndex | null; distal: SurfaceIndex | null }
 }
 
 function median(xs: number[]): number {
@@ -228,16 +232,21 @@ function enforceContact(
   n: SurfaceIndex,
   sign: 1 | -1,
   target: number,
-  log: string[]
+  log: string[],
+  /** Fitting surface and material minimums: a relief never thins the wall below them. */
+  wall?: { intaglio: SurfaceIndex; minAxialMm: number; minOcclusalMm: number }
 ): { gap: number | null } {
   const sideTheta = sign > 0 ? Math.PI / 2 : (3 * Math.PI) / 2
+  let limited = false
   const sigma = 2.0
   let lastE = 0
   // Candidate set: every vertex facing the neighbour on the first pass, then
   // only those that were within reach of the closest approach (each pass
   // moves the surface by at most |e|, so nothing far away can become closest).
   let candidates: Array<[number, number]> = []
-  for (let j = Math.round(grid.nv * 0.12); j < Math.round(grid.nv * 0.8); j++) {
+  // From just above the margin: a tight neighbour often bulges at the cervical
+  // third, and the critic measures contacts from row 2 up.
+  for (let j = 2; j < Math.round(grid.nv * 0.8); j++) {
     for (let i = 0; i < grid.nu; i++) if (angleDiff(thetaOf(grid, i), sideTheta) <= (75 * Math.PI) / 180) candidates.push([i, j])
   }
   for (let it = 0; it < 10; it++) {
@@ -263,22 +272,38 @@ function enforceContact(
       return { gap: min }
     }
     for (let j = 1; j < grid.nv; j++) {
-      const wt = smoothstep(0.04, 0.22, j / grid.nv)
+      const wt = smoothstep(0.015, 0.09, j / grid.nv)
       for (let i = 0; i < grid.nu; i++) {
         const p = getP(grid, i, j)
         const d = dist(p, at)
         const w = Math.exp(-(d * d) / (2 * sigma * sigma)) * wt
         if (w < 1e-4) continue
-        setP(grid, i, j, [p[0] + sign * e * w, p[1], p[2]])
+        let q: Vec3 = [p[0] + sign * e * w, p[1], p[2]]
+        if (wall && e < 0) {
+          // Relieving toward the prep: stop at the material minimum (the
+          // same occlusal/axial split the thickness step uses). A neighbour
+          // closer to the prep than that can't get a clean contact; the
+          // critic reports what is left.
+          const min = gridNormal(grid, i, j)[1] > 0.55 || j > grid.nv * 0.6 ? wall.minOcclusalMm : wall.minAxialMm
+          const dq = wall.intaglio.closest(q, min + 1)?.distance ?? Infinity
+          if (dq < min) {
+            const dp = wall.intaglio.closest(p, min + 1)?.distance ?? Infinity
+            const f = dp > dq && dp > min ? (dp - min) / (dp - dq) : 0
+            q = [p[0] + (q[0] - p[0]) * f, p[1], p[2]]
+            limited = true
+          }
+        }
+        setP(grid, i, j, q)
       }
     }
   }
+  if (limited) log.push(`${sign > 0 ? 'mesial' : 'distal'} contact relief stopped at the material minimum — the neighbour sits too close to the prep`)
   return { gap: Math.abs(lastE) < 0.02 ? null : lastE + target }
 }
 
 /** Lowers anything closer than `clearance` to the antagonist; optionally first
  *  raises cusp tips into contact. */
-function enforceOcclusion(
+export function enforceOcclusion(
   grid: CrownGrid,
   ant: SurfaceIndex,
   clearance: number,
@@ -299,7 +324,7 @@ function enforceOcclusion(
     let raised = 0
     for (const tip of cuspTips) {
       const p = getP(grid, tip.i, tip.j)
-      const sd = ant.signedDistance(p, [0, 1, 0], 4)
+      const sd = ant.gapUp(p, 4)
       const lift = clamp(sd - clearance, 0, 1.2)
       if (lift < 0.05) continue
       raised++
@@ -316,14 +341,16 @@ function enforceOcclusion(
   }
   // Only vertices near the antagonist can ever need relief; find them once.
   let active: number[] | null = null
-  for (let it = 0; it < 6; it++) {
+  // Until clear: a deep overlap (a cusp placed into the antagonist) can take
+  // more than a few passes, as each re-measures from the moved surface.
+  for (let it = 0; it < 20; it++) {
     const deficit = new Float64Array(grid.nu * grid.nv)
     let any = false
     const next: number[] = []
     const visit = (k: number): void => {
       const i = k % grid.nu
       const j = Math.floor(k / grid.nu)
-      const sd = ant.signedDistance(getP(grid, i, j), [0, 1, 0], 4)
+      const sd = ant.gapUp(getP(grid, i, j), 4)
       if (sd < clearance + 0.8) next.push(k)
       const d = clearance - sd
       if (d > 0.002) {
@@ -349,7 +376,7 @@ function enforceOcclusion(
         setP(grid, i, j, [p[0], y, p[2]])
       }
     }
-    const pd = ant.signedDistance(grid.pole, [0, 1, 0], 4)
+    const pd = ant.gapUp(grid.pole, 4)
     if (pd < clearance) {
       const f = floorOf(-1, grid.pole)
       const y = grid.pole[1] - (clearance - pd)
@@ -386,6 +413,19 @@ export function enforceThickness(
       const sd = intaglio.signedDistance(p, normalize(sub(centre, p)), full + 3)
       if (sd < maxReq + 0.6) keep.push([i, j])
       if (req - sd <= 0.012) continue
+      if (j < grid.nv * 0.4 && !occlusal) {
+        // Axial wall, judged straight out from the axis: a vertex whose
+        // outward ray meets the fitting surface is inside the prep (folded
+        // through, or right at the margin where the closest point is the
+        // margin edge and re-seating can't clear). Move it out horizontally,
+        // so the wall can't fold under the margin; one that is outside but
+        // thin moves out by what it lacks.
+        const out = normalize([p[0], 0, p[2]])
+        const hit = intaglio.raycast(p, out, 0, full + 6)
+        const lack = hit ? hit.distance + req : req - (intaglio.closest(p, full + 3)?.distance ?? Infinity)
+        if (lack > 0.012) moves.push([i, j, [p[0] + out[0] * lack, p[1], p[2] + out[2] * lack]])
+        continue
+      }
       // Re-seat the vertex at the required distance along the intaglio's own
       // outward normal at the closest point. The intaglio is ours (built from
       // the grid with known winding), so its normal is trustworthy even where
@@ -404,7 +444,7 @@ export function enforceThickness(
 }
 
 /** Lowest y a vertex may be relieved to: material floor above the intaglio. */
-function occlusalFloor(intaglio: SurfaceIndex, minOcclusalMm: number): (p: Vec3) => number | null {
+export function occlusalFloor(intaglio: SurfaceIndex, minOcclusalMm: number): (p: Vec3) => number | null {
   return (p) => {
     const h = intaglio.raycast([p[0], p[1] + 20, p[2]], [0, -1, 0], 0, 40)
     if (!h) return null
@@ -432,8 +472,23 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   const marginBL = Math.max(...env.marginRow.map((p) => p[2])) - Math.min(...env.marginRow.map((p) => p[2]))
   const yLo = 2
   const yHi = Math.max(4, Ht * 0.95)
-  const xm = measureSpace(env.mesial, 1, yLo, yHi)
-  const xd = measureSpace(env.distal, -1, yLo, yHi)
+  let xm = measureSpace(env.mesial, 1, yLo, yHi)
+  let xd = measureSpace(env.distal, -1, yLo, yHi)
+  // A neighbour farther than a tooth's half-width plus a wide embrasure is
+  // across an edentulous span (a bridge abutment's pontic side): no contact.
+  const reach = Math.max(Wt, marginMD) / 2 + 3.5
+  let mesial = env.mesial
+  let distal = env.distal
+  if (xm !== null && xm > reach) {
+    steps.push(`nearest mesial tooth ${xm.toFixed(1)} mm away — edentulous span, no contact`)
+    xm = null
+    mesial = null
+  }
+  if (xd !== null && xd > reach) {
+    steps.push(`nearest distal tooth ${xd.toFixed(1)} mm away — edentulous span, no contact`)
+    xd = null
+    distal = null
+  }
   let W: number
   let xc: number
   const ratio = Wt / Math.max(1, Math.max(...env.marginRow.map((p) => Math.abs(p[0]))) * 2)
@@ -443,7 +498,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     steps.push(`mesiodistal space ${W.toFixed(2)} mm between neighbours`)
   } else if (xm !== null || xd !== null) {
     const known = (xm ?? xd) as number
-    W = clamp(Math.max(marginMD * ratio, known + marginMD / 2), marginMD + 0.6, Wt * 1.4)
+    W = clamp(Math.max(marginMD * ratio, known + marginMD / 2), marginMD + 0.6, Math.max(Wt * 1.4, marginMD + 0.6))
     xc = xm !== null ? known - W / 2 : W / 2 - known
     steps.push(`one neighbour only — width ${W.toFixed(2)} mm from margin proportions`)
   } else {
@@ -478,6 +533,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   }
   for (let j = 0; j < g.nv; j++) for (let i = 0; i < nu; i++) setP(g, i, j, place(getP(tpl.grid, i, j), sy))
   g.pole = place(tpl.grid.pole, sy)
+  env.onStage?.('placed', g)
   if (params.heightOffsetMm) {
     for (let j = 0; j < g.nv; j++) {
       const w = smoothstep(0.3, 0.7, j / g.nv) * params.heightOffsetMm
@@ -489,20 +545,56 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     g.pole = [g.pole[0], g.pole[1] + params.heightOffsetMm, g.pole[2]]
   }
 
-  // 2. Cervical morph onto the margin.
+  // 2. Emergence profile: from the margin up to the height of contour.
+  // Library teeth carry their own cervical neck (narrowing toward the CEJ);
+  // shifting it onto the margin leaves a ring-shaped crease. Instead each
+  // meridian is rebuilt below its widest point as a smooth convex curve
+  // leaving the margin and joining the template there with matching slope.
+  let mcx = 0
+  let mcz = 0
+  for (const m of env.marginRow) {
+    mcx += m[0] / nu
+    mcz += m[2] / nu
+  }
+  const jMax = Math.max(3, Math.floor(g.nv * 0.55))
   for (let i = 0; i < nu; i++) {
-    const b = getP(g, i, 0)
     const m = env.marginRow[i]
-    const d: Vec3 = [m[0] - b[0], m[1] - b[1], m[2] - b[2]]
-    for (let j = 0; j < g.nv; j++) {
-      const t = j / g.nv
-      const w = t >= 0.42 ? 0 : 0.5 * (1 + Math.cos((Math.PI * t) / 0.42))
+    let jc = 2
+    let rBest = -Infinity
+    for (let j = 2; j <= jMax; j++) {
       const p = getP(g, i, j)
-      setP(g, i, j, j === 0 ? m : [p[0] + d[0] * w, p[1] + d[1] * w, p[2] + d[2] * w])
+      const r = Math.hypot(p[0] - mcx, p[2] - mcz)
+      if (r > rBest) {
+        rBest = r
+        jc = j
+      }
+    }
+    const P1 = getP(g, i, jc)
+    const a = getP(g, i, jc - 1)
+    const b = getP(g, i, jc + 1)
+    // Tangents in "per unit s" (s = j / jc): the template's at the join,
+    // and a mostly-occlusal start at the margin (a straight-ish emergence).
+    const T1: Vec3 = [((b[0] - a[0]) / 2) * jc, ((b[1] - a[1]) / 2) * jc, ((b[2] - a[2]) / 2) * jc]
+    const chord: Vec3 = [P1[0] - m[0], P1[1] - m[1], P1[2] - m[2]]
+    const T0: Vec3 = [chord[0] * 0.9, Math.max(chord[1], 0.5) * 1.1, chord[2] * 0.9]
+    for (let j = 0; j < jc; j++) {
+      const t = j / jc
+      const t2 = t * t
+      const t3 = t2 * t
+      const h00 = 2 * t3 - 3 * t2 + 1
+      const h10 = t3 - 2 * t2 + t
+      const h01 = -2 * t3 + 3 * t2
+      const h11 = t3 - t2
+      setP(g, i, j, [
+        h00 * m[0] + h10 * T0[0] + h01 * P1[0] + h11 * T1[0],
+        h00 * m[1] + h10 * T0[1] + h01 * P1[1] + h11 * T1[1],
+        h00 * m[2] + h10 * T0[2] + h01 * P1[2] + h11 * T1[2]
+      ])
     }
   }
   smoothGrid(g, 3, 0.3, 1)
-  steps.push('cervical third morphed onto the margin line')
+  steps.push('emergence profile from the margin to the height of contour')
+  env.onStage?.('emergence', g)
 
   // Bulges (buccal/lingual contour).
   if (params.buccalBulgeMm || params.lingualBulgeMm) {
@@ -529,36 +621,42 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
 
   // 4. Contacts.
   const openContacts: DesignMeasures['openContacts'] = []
-  if (env.mesial) {
-    const r = enforceContact(g, env.mesial, 1, params.contactMesialMm, steps)
+  const wall = { intaglio: env.intaglioIndex, minAxialMm: mat.minAxialMm, minOcclusalMm: mat.minOcclusalMm }
+  if (mesial) {
+    const r = enforceContact(g, mesial, 1, params.contactMesialMm, steps, wall)
     if (r.gap !== null && r.gap > 0.05) openContacts.push({ side: 'mesial', gapMm: r.gap })
   }
-  if (env.distal) {
-    const r = enforceContact(g, env.distal, -1, params.contactDistalMm, steps)
+  if (distal) {
+    const r = enforceContact(g, distal, -1, params.contactDistalMm, steps, wall)
     if (r.gap !== null && r.gap > 0.05) openContacts.push({ side: 'distal', gapMm: r.gap })
   }
   steps.push('proximal contacts set')
+  env.onStage?.('contacts', g)
 
   // 5. Occlusion.
   if (env.antagonist) {
     enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, params.occlusalContacts, steps, occlusalFloor(env.intaglioIndex, mat.minOcclusalMm))
     steps.push(`occlusion relieved to ${params.occlusalClearanceMm.toFixed(2)} mm`)
   }
+  env.onStage?.('occlusion', g)
 
   // 6. Thickness (wins), then a light fairing pass and a final check of each.
   const centre: Vec3 = [0, env.intaglio.pole[1] * 0.45, 0]
   enforceThickness(g, env.intaglioIndex, centre, mat)
   smoothGrid(g, 2, 0.25, 2)
-  if (env.mesial) enforceContact(g, env.mesial, 1, params.contactMesialMm, [])
-  if (env.distal) enforceContact(g, env.distal, -1, params.contactDistalMm, [])
+  env.onStage?.('thickness1', g)
+  if (mesial) enforceContact(g, mesial, 1, params.contactMesialMm, [], wall)
+  if (distal) enforceContact(g, distal, -1, params.contactDistalMm, [], wall)
   if (env.antagonist) enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, false, [], occlusalFloor(env.intaglioIndex, mat.minOcclusalMm))
-  enforceThickness(g, env.intaglioIndex, centre, mat, 6)
+  enforceThickness(g, env.intaglioIndex, centre, mat, 14)
   steps.push(`minimum thickness enforced (${mat.minAxialMm} axial / ${mat.minOcclusalMm} occlusal mm)`)
+  env.onStage?.('final', g)
 
   const b = gridBounds(g)
   return {
     grid: g,
     cuspTips: tpl.cuspTips,
+    neighbours: { mesial, distal },
     measures: {
       spaceMesialMm: xm,
       spaceDistalMm: xd,
