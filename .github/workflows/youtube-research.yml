@@ -1,0 +1,54 @@
+# Pulls transcripts and UI frames of the crown design videos in
+# research/youtube/videos.txt and commits them to this branch. The cloud
+# dev container can't reach YouTube; GitHub's runners can.
+name: youtube-research
+on:
+  push:
+    branches: [research/youtube]
+    paths: [research/youtube/videos.txt, .github/workflows/youtube-research.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          pip install -q -U yt-dlp youtube-transcript-api
+      - name: Transcripts, metadata and frames
+        run: |
+          cd research/youtube
+          mkdir -p out
+          while read -r id; do
+            [ -z "$id" ] && continue
+            url="https://www.youtube.com/watch?v=$id"
+            mkdir -p "out/$id"
+            yt-dlp --skip-download --write-info-json --write-auto-subs --write-subs \
+              --sub-langs "en.*,es.*,en" --sub-format vtt -o "out/$id/%(id)s.%(ext)s" "$url" \
+              > "out/$id/log.txt" 2>&1 || echo "yt-dlp subs failed" >> "out/$id/log.txt"
+            if ! ls out/$id/*.vtt >/dev/null 2>&1; then
+              python -c "import sys,json; from youtube_transcript_api import YouTubeTranscriptApi as Y; t=Y().fetch(sys.argv[1], languages=['en','es']); print('\n'.join(f'{s.start:.0f}\t{s.text}' for s in t))" "$id" \
+                > "out/$id/transcript.tsv" 2>> "out/$id/log.txt" || rm -f "out/$id/transcript.tsv"
+            fi
+            if yt-dlp -f "bv*[height<=480][ext=mp4]/bv*[height<=480]/b[height<=480]" -o "out/$id/video.%(ext)s" "$url" >> "out/$id/log.txt" 2>&1; then
+              v=$(ls out/$id/video.* | head -1)
+              ffmpeg -loglevel error -i "$v" -vf "fps=1/20,scale=480:-1" -q:v 6 "out/$id/f_%03d.jpg" || true
+              rm -f out/$id/video.*
+            fi
+            # info.json is large; keep the useful fields
+            if [ -f "out/$id/$id.info.json" ]; then
+              python -c "import json,sys; d=json.load(open(sys.argv[1])); json.dump({k:d.get(k) for k in ['id','title','channel','upload_date','duration','view_count','like_count','description','chapters','tags']}, open(sys.argv[2],'w'), indent=1)" "out/$id/$id.info.json" "out/$id/meta.json"
+              rm -f "out/$id/$id.info.json"
+            fi
+            echo "$id: $(ls out/$id | wc -l) files"
+          done < videos.txt
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add research/youtube/out
+          git commit -m "YouTube research: transcripts and frames" || echo "nothing to commit"
+          git push
