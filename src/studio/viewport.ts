@@ -21,7 +21,9 @@ export interface Pick {
   vertex?: number
 }
 
-const CROWN_COLOR = 0xf0ead9
+// Darker than a real crown on purpose: the headlight rig lifts it to a
+// natural ivory, and full white would clip and hide the anatomy.
+const CROWN_COLOR = 0xc9bea9
 
 /** Thickness → colour: red below minimum, amber within 0.3 mm of it, teal above. */
 function thicknessColor(t: number, min: number, out: THREE.Color): THREE.Color {
