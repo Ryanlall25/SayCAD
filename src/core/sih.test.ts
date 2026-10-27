@@ -65,3 +65,27 @@ describe('material names from lab systems', () => {
     expect(materialFromText('Titanium')).toBeNull()
   })
 })
+
+describe('lab case folders', () => {
+  it('reads jaws, die and case.json into a case; leaves other folders alone', async () => {
+    const { sihFromLabFiles } = await import('./labCase')
+    const ab = (u: Uint8Array): ArrayBuffer => u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength) as ArrayBuffer
+    const json = (x: unknown): ArrayBuffer => ab(new TextEncoder().encode(JSON.stringify(x)))
+    const lower = tri(true)
+    const upper = tri(false)
+    upper.translate(0, 0, 5)
+    const files = [
+      { name: 'case07/lower_jaw.ply', data: ab(plyBinary(lower)) },
+      { name: 'case07/upper_jaw.ply', data: ab(plyBinary(upper)) },
+      { name: 'case07/case.json', data: json({ restorations: [{ fdi: 36, type: 'AnatomicCrown' }], material: 'Zirconia', margin_points: [[0, 0, 0], [1, 0, 0], [0, 1, 0]] }) },
+      { name: 'case07/case07.constructionInfo', data: json({}) }
+    ]
+    const c = sihFromLabFiles(files, { id: 'case07' })!
+    expect(c.case).toMatchObject({ id: 'case07', tooth: 19, material: 'Zirconia' })
+    expect(c.scans.map((s) => [s.role, s.jaw, s.source])).toEqual([['prep', 'lower', 'lower_jaw.ply'], ['antagonist', 'upper', 'upper_jaw.ply']])
+    expect(c.scans[0].geometry.getAttribute('color')).toBeDefined()
+    expect(c.design?.margin).toHaveLength(3)
+    expect(c.extra?.map((e) => e.name)).toEqual(['case07.constructionInfo'])
+    expect(sihFromLabFiles([{ name: 'Smith-mandibular.stl', data: ab(plyBinary(lower)) }])).toBeNull()
+  })
+})

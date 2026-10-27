@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { parseGeometry } from '../core/meshConvert'
+import { looksLikeLabCase, sihFromLabFiles } from '../core/labCase'
 import { isSih, plyBinary, readSih, sihScanFileName } from '../core/sih'
 import { fdiToUniversal } from '../crown/library'
 import { unzip } from '../core/unzip'
@@ -183,8 +184,16 @@ export default function NewCase(props: {
         sih ??= { tooth, material: materialFromText(c.case.material) ?? undefined }
         for (const sc of c.scans) if (sc.role === 'prep' || sc.role === 'antagonist' || sc.role === 'bite' || sc.role === 'preop') files.push(new File([plyBinary(sc.geometry) as Uint8Array<ArrayBuffer>], sihScanFileName(sc)))
       } else if (/\.zip$/i.test(f.name)) {
-        const entries = await unzip(await f.arrayBuffer(), (n) => SCAN_FILE.test(n) || /\.dentalProject$/i.test(n))
+        const entries = await unzip(await f.arrayBuffer(), (n) => SCAN_FILE.test(n) || /\.dentalProject$/i.test(n) || /(^|\/)case\.json$/i.test(n))
+        // A lab case folder (jaws, die, case.json): read it as a case, like a .sih.
+        const lab = looksLikeLabCase(entries.map((e) => e.name)) ? sihFromLabFiles(entries.map((e) => ({ name: e.name, data: e.data.buffer })), order.tooth ? { tooth: order.tooth } : {}) : null
+        if (lab) {
+          sih ??= { tooth: lab.case.tooth, material: materialFromText(lab.case.material) ?? undefined }
+          for (const sc of lab.scans) if (sc.role === 'prep' || sc.role === 'antagonist') files.push(new File([plyBinary(sc.geometry) as Uint8Array<ArrayBuffer>], sihScanFileName(sc)))
+          continue
+        }
         for (const e of entries) {
+          if (/(^|\/)case\.json$/i.test(e.name)) continue
           const base = e.name.split('/').pop()!
           if (/\.dentalProject$/i.test(base)) project ??= new TextDecoder().decode(e.data)
           else files.push(new File([e.data], base))

@@ -1,7 +1,8 @@
 import { NEW_ORDER, assignToSlots, orderFromProject, parseDentalProject, scanSlots, type SlotId } from '../crown/order'
 import { fdiToUniversal } from '../crown/library'
 import { materialFromText } from '../crown/materials'
-import { isSih, readSih, plyBinary, sihScanFileName } from '../core/sih'
+import { looksLikeLabCase, sihFromLabFiles } from '../core/labCase'
+import { isSih, readSih, plyBinary, sihScanFileName, type SihCase } from '../core/sih'
 import { unzip } from '../core/unzip'
 import { zip } from '../core/zip'
 import { CONTRACT, type CrownJob, type CrownOrder, type CrownOutcome, type ScanInput } from './contract'
@@ -37,7 +38,10 @@ const base = (n: string): string => n.split(/[\\/]/).pop()!
  * plus a job.json carrying the tooth, material, scan roles and the margin.
  */
 async function sihBundle(f: BundleFile): Promise<BundleFile[]> {
-  const c = await readSih(f.data)
+  return caseBundle(await readSih(f.data))
+}
+
+function caseBundle(c: SihCase): BundleFile[] {
   const out: BundleFile[] = []
   const nameOf = new Map<string, string>()
   for (const s of c.scans) {
@@ -79,7 +83,12 @@ export async function expandBundle(files: BundleFile[]): Promise<BundleFile[]> {
  * CLI flag) wins over job.json, which wins over a .dentalProject.
  */
 export async function jobFromBundle(input: BundleFile[], order: Partial<CrownOrder> = {}, jobId?: string): Promise<{ job: CrownJob | null; problems: string[]; notes: string[] }> {
-  const files = await expandBundle(input)
+  let files = await expandBundle(input)
+  // A lab case folder (jaws, die, case.json) without a job.json: read it as a case.
+  if (!files.some((f) => f.name.toLowerCase() === 'job.json') && looksLikeLabCase(files.map((f) => f.name))) {
+    const lab = sihFromLabFiles(files, typeof order.tooth === 'number' ? { tooth: order.tooth, system: order.system ?? 'universal' } : {})
+    if (lab) files = caseBundle(lab)
+  }
   const notes: string[] = []
   const text = (f: BundleFile): string => new TextDecoder().decode(f.data)
   const jj = files.find((f) => f.name.toLowerCase() === 'job.json')

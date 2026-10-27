@@ -16,11 +16,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import * as THREE from 'three'
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
-import { parseScan } from '../src/core/meshConvert'
-import { plyBinary, readSih, writeSih, type SihCase, type SihScan } from '../src/core/sih'
-import { SurfaceIndex } from '../src/crown/geom'
-import { fdiToUniversal } from '../src/crown/library'
+import { sihFromLabFiles } from '../src/core/labCase'
+import { plyBinary, readSih, writeSih } from '../src/core/sih'
 
 const args = process.argv.slice(2).filter((a) => a !== '--')
 const flag = (n: string): string | undefined => {
@@ -31,84 +28,18 @@ const [cmd, input] = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && arg
 const ab = (b: Buffer): ArrayBuffer => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer
 const MESH = /\.(obj|ply|stl)$/i
 
-/** A die set into its jaw: the jaw's own copy of that area (within 1.2 mm of the die) removed. */
-function setDie(jaw: THREE.BufferGeometry, die: THREE.BufferGeometry): THREE.BufferGeometry {
-  const near = new SurfaceIndex(die)
-  const pos: number[] = []
-  const col: number[] = []
-  const idx: number[] = []
-  const coloured = !!jaw.getAttribute('color') && !!die.getAttribute('color')
-  const add = (g: THREE.BufferGeometry, keep: (a: number, b: number, c: number) => boolean): void => {
-    const p = g.getAttribute('position')
-    const c = g.getAttribute('color')
-    const ix = g.index
-    const base = pos.length / 3
-    for (let i = 0; i < p.count; i++) {
-      pos.push(p.getX(i), p.getY(i), p.getZ(i))
-      if (coloured) col.push(c.getX(i), c.getY(i), c.getZ(i))
-    }
-    const n = ix ? ix.count : p.count
-    for (let t = 0; t < n; t += 3) {
-      const a = ix ? ix.getX(t) : t, b = ix ? ix.getX(t + 1) : t + 1, cc = ix ? ix.getX(t + 2) : t + 2
-      if (keep(a, b, cc)) idx.push(base + a, base + b, base + cc)
-    }
-  }
-  const jp = jaw.getAttribute('position')
-  add(jaw, (a, b, c) => !near.closest([(jp.getX(a) + jp.getX(b) + jp.getX(c)) / 3, (jp.getY(a) + jp.getY(b) + jp.getY(c)) / 3, (jp.getZ(a) + jp.getZ(b) + jp.getZ(c)) / 3], 1.2))
-  add(die, () => true)
-  const g = new THREE.BufferGeometry()
-  g.setAttribute('position', new THREE.BufferAttribute(Float32Array.from(pos), 3))
-  if (coloured) g.setAttribute('color', new THREE.BufferAttribute(Float32Array.from(col), 3))
-  g.setIndex(idx)
-  return g
-}
-
 async function pack(dir: string): Promise<void> {
   const names = readdirSync(dir).filter((n) => statSync(join(dir, n)).isFile())
-  const find = (re: RegExp): string | undefined => names.find((n) => re.test(n) && MESH.test(n))
-  const load = (n: string): THREE.BufferGeometry => (/\.stl$/i.test(n) && /crown|design/i.test(n) ? new STLLoader().parse(ab(readFileSync(join(dir, n)))) : parseScan(n, ab(readFileSync(join(dir, n)))))
-  const info = existsSync(join(dir, 'case.json')) ? (JSON.parse(readFileSync(join(dir, 'case.json'), 'utf8')) as { fdi_tooth?: number; material?: string; margin_points?: [number, number, number][]; restorations?: Array<{ fdi: number; type: string }> }) : {}
-  const fdi = flag('tooth') ? (args.includes('--fdi') ? Number(flag('tooth')) : null) : (info.fdi_tooth ?? info.restorations?.find((r) => /Crown|Inlay|Onlay|Veneer/i.test(r.type))?.fdi ?? null)
-  const tooth = fdi !== null ? fdiToUniversal(fdi) : flag('tooth') ? Number(flag('tooth')) : null
-  if (!tooth) throw new Error(`${dir}: which tooth? Give --tooth, or a case.json with fdi_tooth.`)
-  const upperTooth = tooth <= 16
-  const prepName = find(/^prep_jaw\./i) ?? find(upperTooth ? /^upper_jaw\./i : /^lower_jaw\./i)
-  const antName = find(/^opposing_jaw\./i) ?? find(upperTooth ? /^lower_jaw\./i : /^upper_jaw\./i)
-  if (!prepName) throw new Error(`${dir}: no prep jaw scan (prep_jaw.* or ${upperTooth ? 'upper' : 'lower'}_jaw.*).`)
-  const prepJaw: 'upper' | 'lower' = upperTooth ? 'upper' : 'lower'
-  const antJaw: 'upper' | 'lower' = upperTooth ? 'lower' : 'upper'
-  const dieName = find(new RegExp(`^(prep_)?die(_${fdi ?? ''})?\\.`, 'i')) ?? find(/^(prep_)?die/i)
-  let prep = load(prepName)
-  if (dieName) prep = setDie(prep, load(dieName))
-  const scans: SihScan[] = [{ role: 'prep', jaw: prepJaw, source: dieName ? `${prepName} + ${dieName}` : prepName, geometry: prep }]
-  if (antName) scans.push({ role: 'antagonist', jaw: antJaw, source: antName, geometry: load(antName) })
-  if (dieName) scans.push({ role: 'die', jaw: prepJaw, source: dieName, geometry: load(dieName) })
-  const raw: Array<[RegExp, SihScan['role'], 'upper' | 'lower' | undefined]> = [
-    [/^prep_raw\./i, 'raw-prep', prepJaw],
-    [/^opposing_raw\./i, 'raw-antagonist', antJaw],
-    [upperTooth ? /^upper_raw\./i : /^lower_raw\./i, 'raw-prep', prepJaw],
-    [upperTooth ? /^lower_raw\./i : /^upper_raw\./i, 'raw-antagonist', antJaw],
-    [/^bite_raw\./i, 'raw-bite', undefined]
-  ]
-  for (const [re, role, jaw] of raw) {
-    const n = find(re)
-    if (n && !scans.some((s) => s.source === n)) scans.push({ role, ...(jaw ? { jaw } : {}), source: n, geometry: load(n) })
-  }
-  const crownName = names.find((n) => /^(crown|design)[^/]*\.stl$/i.test(n))
-  const used = new Set([prepName, antName, dieName, crownName, 'case.json', ...scans.map((s) => s.source)].filter(Boolean) as string[])
-  const extra = names.filter((n) => !used.has(n) && !MESH.test(n) && !n.startsWith('.')).map((n) => ({ name: n, data: new Uint8Array(readFileSync(join(dir, n))) }))
-  const c: SihCase = {
-    case: { id: basename(dir), tooth, system: 'universal', ...(flag('material') ?? info.material ? { material: flag('material') ?? info.material } : {}), ...(flag('shade') ? { shade: flag('shade') } : {}) },
-    scans,
-    ...(info.margin_points || crownName ? { design: { ...(info.margin_points ? { margin: info.margin_points } : {}), ...(crownName ? { crown: load(crownName) } : {}) } } : {}),
-    ...(extra.length ? { extra } : {})
-  }
+  const files = names.map((n) => ({ name: n, data: ab(readFileSync(join(dir, n))) }))
+  const tooth = flag('tooth') ? Number(flag('tooth')) : undefined
+  const c = sihFromLabFiles(files, { id: basename(dir), ...(tooth !== undefined ? { tooth, system: args.includes('--fdi') ? ('fdi' as const) : ('universal' as const) } : {}), material: flag('material'), shade: flag('shade') })
+  if (!c) throw new Error(`${dir}: not a lab case (needs prep_jaw.* / upper_jaw.* / lower_jaw.*, and a tooth from --tooth or case.json).`)
   const bytes = await writeSih(c)
   const out = flag('out') ?? `${dir.replace(/[\\/]$/, '')}.sih`
   writeFileSync(out, bytes)
   const size = (n: number): string => `${(n / 1024 / 1024).toFixed(1)} MB`
   const before = names.reduce((s, n) => s + statSync(join(dir, n)).size, 0)
-  console.log(`${out}: #${tooth} · ${scans.map((s) => s.role).join(', ')}${crownName ? ' · crown' : ''}${info.margin_points ? ' · margin' : ''} · ${size(bytes.length)} (folder ${size(before)})`)
+  console.log(`${out}: #${c.case.tooth} · ${c.scans.map((x) => x.role).join(', ')}${c.design?.crown ? ' · crown' : ''}${c.design?.margin ? ' · margin' : ''} · ${size(bytes.length)} (folder ${size(before)})`)
 }
 
 async function open(file: string): Promise<Awaited<ReturnType<typeof readSih>>> {
