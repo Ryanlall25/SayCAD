@@ -1,0 +1,44 @@
+[youtube] Extracting URL: https://www.youtube.com/watch?v=2BSTz2Bgxw0
+[youtube] 2BSTz2Bgxw0: Downloading webpage
+WARNING: [youtube] No supported JavaScript runtime could be found. Only deno is enabled by default; to use another runtime add  --js-runtimes RUNTIME[:PATH]  to your command/config. YouTube extraction without a JS runtime has been deprecated, and some formats may be missing. See  https://github.com/yt-dlp/yt-dlp/wiki/EJS  for details on installing one
+[youtube] 2BSTz2Bgxw0: Downloading visionos player API JSON
+WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing
+ERROR: [youtube] 2BSTz2Bgxw0: Sign in to confirm you’re not a bot. This helps protect our community. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
+yt-dlp subs failed
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+  File "/home/runner/.local/lib/python3.12/site-packages/youtube_transcript_api/_api.py", line 71, in fetch
+    self.list(video_id)
+  File "/home/runner/.local/lib/python3.12/site-packages/youtube_transcript_api/_api.py", line 127, in list
+    return self._fetcher.fetch(video_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/.local/lib/python3.12/site-packages/youtube_transcript_api/_transcripts.py", line 356, in fetch
+    self._fetch_captions_json(video_id),
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/.local/lib/python3.12/site-packages/youtube_transcript_api/_transcripts.py", line 373, in _fetch_captions_json
+    raise exception.with_proxy_config(self._proxy_config)
+  File "/home/runner/.local/lib/python3.12/site-packages/youtube_transcript_api/_transcripts.py", line 364, in _fetch_captions_json
+    return self._extract_captions_json(innertube_data, video_id)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/.local/lib/python3.12/site-packages/youtube_transcript_api/_transcripts.py", line 385, in _extract_captions_json
+    self._assert_playability(innertube_data.get("playabilityStatus"), video_id)
+  File "/home/runner/.local/lib/python3.12/site-packages/youtube_transcript_api/_transcripts.py", line 404, in _assert_playability
+    raise RequestBlocked(video_id)
+youtube_transcript_api._errors.RequestBlocked: 
+Could not retrieve a transcript for the video https://www.youtube.com/watch?v=2BSTz2Bgxw0! This is most likely caused by:
+
+YouTube is blocking requests from your IP. This usually is due to one of the following reasons:
+- You have done too many requests and your IP has been blocked by YouTube
+- You are doing requests from an IP belonging to a cloud provider (like AWS, Google Cloud Platform, Azure, etc.). Unfortunately, most IPs from cloud providers are blocked by YouTube.
+
+There are two things you can do to work around this:
+1. Use proxies to hide your IP address, as explained in the "Working around IP bans" section of the README (https://github.com/jdepoix/youtube-transcript-api?tab=readme-ov-file#working-around-ip-bans-requestblocked-or-ipblocked-exception).
+2. (NOT RECOMMENDED) If you authenticate your requests using cookies, you will be able to continue doing requests for a while. However, YouTube will eventually permanently ban the account that you have used to authenticate with! So only do this if you don't mind your account being banned!
+
+If you are sure that the described cause is not responsible for this error and that a transcript should be retrievable, please create an issue at https://github.com/jdepoix/youtube-transcript-api/issues. Please add which version of youtube_transcript_api you are using and provide the information needed to replicate the error. Also make sure that there are no open issues which already describe your problem!
+[youtube] Extracting URL: https://www.youtube.com/watch?v=2BSTz2Bgxw0
+[youtube] 2BSTz2Bgxw0: Downloading webpage
+WARNING: [youtube] No supported JavaScript runtime could be found. Only deno is enabled by default; to use another runtime add  --js-runtimes RUNTIME[:PATH]  to your command/config. YouTube extraction without a JS runtime has been deprecated, and some formats may be missing. See  https://github.com/yt-dlp/yt-dlp/wiki/EJS  for details on installing one
+[youtube] 2BSTz2Bgxw0: Downloading visionos player API JSON
+WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing
+ERROR: [youtube] 2BSTz2Bgxw0: Sign in to confirm you’re not a bot. This helps protect our community. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
