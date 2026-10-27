@@ -52,6 +52,9 @@ writeFileSync(zipPath, zipFiles([
   ['Smith/readme.txt', Buffer.from('scanner export')]
 ]))
 
+const sihPath = join(out, 'synthetic-19.sih')
+execFileSync('npx', ['vite-node', 'dev/make-sih-fixture.ts', sihPath], { stdio: 'inherit' })
+
 const server = spawn('node', ['server/index.mjs'], { env: { ...process.env, PORT: '8797' }, stdio: 'pipe' })
 process.on('exit', () => server.kill()) // also when a step throws
 await new Promise((r) => server.stdout.once('data', r))
@@ -138,7 +141,7 @@ await page.evaluate(() => localStorage.setItem('saycad.pro', '0'))
 // ── Path 2: one zip before the tooth is known ───────────────────────────
 await page.reload()
 await page.getByRole('button', { name: 'New Crown', exact: true }).click()
-await choose('Have the whole scanner export? Import the .zip', [zipPath])
+await choose('Have a .sih case or the whole scanner export? Import it', [zipPath])
 await page.waitForSelector('.nc-note', { timeout: 30000 })
 console.log('zip held:', await page.locator('.nc-note').innerText())
 await page.getByRole('button', { name: 'Tooth 19' }).click()
@@ -148,6 +151,17 @@ console.log('zip placed:', placed.join(' | '))
 if (!placed.includes('Smith-mandibular.stl') || !placed.includes('Smith-maxillary.stl')) await fail('zip scans not placed by jaw')
 if (!(await page.getByRole('button', { name: 'Design Crown' }).count())) await fail('no Design Crown after the zip')
 await shot('7-zip-ready')
+
+// ── Path 3: a .sih case — the tooth and every scan come from the file ────
+await page.reload()
+await page.getByRole('button', { name: 'New Crown', exact: true }).click()
+await choose('Have a .sih case or the whole scanner export? Import it', [sihPath])
+await page.waitForFunction(() => document.querySelector('.nc-count')?.textContent === '3/3', null, { timeout: 30000 })
+const sihPlaced = await page.locator('.nc-file-main b').allInnerTexts()
+console.log('sih placed:', sihPlaced.join(' | '), '·', await page.locator('.nc-note').innerText().catch(() => ''))
+if (!sihPlaced.includes('prep-lowerjaw.ply') || !sihPlaced.includes('antagonist-upperjaw.ply')) await fail('.sih scans not placed')
+if (!(await page.getByRole('button', { name: 'Design Crown' }).count())) await fail('no Design Crown after the .sih')
+await shot('8-sih-ready')
 
 await browser.close()
 server.kill()

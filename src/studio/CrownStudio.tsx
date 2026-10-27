@@ -42,6 +42,7 @@ import {
   type SampleFn
 } from '../ai/client'
 import { zip } from '../core/zip'
+import { writeSih, type SihRole } from '../core/sih'
 import { clearModels, deleteCase, listCases, loadCase, loadModel, newCaseId, saveCase, saveModel, updateCase, type CaseMeta } from './caseStore'
 import NewCase, { type NewCaseResult } from './NewCase'
 import ReviewDeck, { type AdjustTarget } from './ReviewDeck'
@@ -1224,6 +1225,39 @@ export default function CrownStudio(): React.JSX.Element {
     )
   }
 
+  /** The whole case as one .sih: scans by role, tooth, margin, axis, crown and record. */
+  async function exportCase(): Promise<void> {
+    const s = state.current
+    const d = s.design
+    const roles: Partial<Record<string, SihRole>> = { prep: 'prep', antagonist: 'antagonist', bite: 'bite', preop: 'preop' }
+    const scans = files.filter((f) => roles[f.role]).map((f) => ({ role: roles[f.role]!, jaw: (s.tooth <= 16 ? (f.role === 'prep' ? 'upper' : 'lower') : f.role === 'prep' ? 'lower' : 'upper') as 'upper' | 'lower', source: f.name, geometry: f.geometry }))
+    let crown: THREE.BufferGeometry | undefined
+    if (d) {
+      crown = new THREE.BufferGeometry()
+      crown.setAttribute('position', new THREE.BufferAttribute(d.crown.positions.slice(), 3))
+      if (d.crown.indices) crown.setIndex(new THREE.BufferAttribute(d.crown.indices.slice(), 1))
+    }
+    const bytes = await writeSih({
+      case: { id: baseName(), tooth: s.tooth, system: 'universal', restoration: 'crown', material: s.params.material },
+      scans,
+      ...(d ? { design: { margin: d.margin.points, insertionAxis: d.frame.occlusal, frame: d.frame, crown, record: JSON.parse(designRecord()) } } : {})
+    })
+    const name = `${baseName()}.sih`
+    const blob = new Blob([bytes], { type: 'application/vnd.smilehub.sih+zip' })
+    if (downloadsRef.current) {
+      try {
+        await downloadsRef.current.save({ filename: name, data: blob })
+        setStatus(`Saved ${name}.`)
+      } catch (e) {
+        const code = (e as { code?: string }).code
+        setStatus(code === 'declined' ? 'Download cancelled.' : `Download unavailable here (${code ?? 'error'}).`)
+      }
+      return
+    }
+    download(blob, name)
+    setStatus(`Saved ${name} — the whole case in one file.`)
+  }
+
   async function exportCrown(share: boolean): Promise<void> {
     const g = crownGeometry()
     if (!g) return
@@ -1748,7 +1782,8 @@ export default function CrownStudio(): React.JSX.Element {
                     {!downloadsRef.current && (
                       <button className="st-btn tinted block" disabled={!d.exportable && override.trim().length < 5} onClick={() => void exportCrown(true)}>Share…</button>
                     )}
-                    <p className="st-foot">Includes a .design.json with margin, parameters and checks, so the crown can be audited or reproduced.</p>
+                    <button className="st-btn tinted block" onClick={() => void exportCase()}>Save Case (.sih)</button>
+                    <p className="st-foot">Includes a .design.json with margin, parameters and checks, so the crown can be audited or reproduced. A .sih keeps the whole case — scans, tooth, margin and crown — in one file.</p>
                   </>
                 )}
               </>
