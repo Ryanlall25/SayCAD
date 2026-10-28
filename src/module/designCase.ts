@@ -11,6 +11,7 @@ import { autoDesign, prepareCase, type DesignResult } from '../crown/pipeline'
 import { parseShapeModel, templateFromModel } from '../crown/ssm'
 import type { CriticResult } from '../crown/critics'
 import type { DesignParams } from '../crown/design'
+import type { CrownGrid } from '../crown/grid'
 import { CONTRACT, ENGINE_VERSION, validateJob, type CrownJob, type CrownOutcome, type DesignRecord, type ScanInput, type Verdict } from './contract'
 
 /**
@@ -20,7 +21,8 @@ import { CONTRACT, ENGINE_VERSION, validateJob, type CrownJob, type CrownOutcome
  * thickness, QC — and stops with `needs-input` (never a guess) when it
  * can't do a step on its own. Works in a browser worker and in Node.
  */
-export function designCase(job: CrownJob): CrownOutcome {
+/** `dev.onStage` sees the outer surface after each design stage (tooth-local grid); for tools and tests only. */
+export function designCase(job: CrownJob, dev?: { onStage?: (stage: string, g: CrownGrid) => void }): CrownOutcome {
   const base = { contract: CONTRACT, jobId: job?.jobId ?? '', caseRef: job?.order?.caseRef, engine: { contract: CONTRACT, version: ENGINE_VERSION } } as const
   const problems = validateJob(job)
   if (problems.length) {
@@ -28,13 +30,13 @@ export function designCase(job: CrownJob): CrownOutcome {
     return job?.contract === CONTRACT ? { ...base, status: 'needs-input', needs } : { ...base, status: 'failed', error: problems.join(' ') }
   }
   try {
-    return run(job, base)
+    return run(job, base, dev)
   } catch (e) {
     return { ...base, status: 'failed', error: e instanceof Error ? e.message : String(e) }
   }
 }
 
-function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'caseRef' | 'engine'>): CrownOutcome {
+function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'caseRef' | 'engine'>, dev?: { onStage?: (stage: string, g: CrownGrid) => void }): CrownOutcome {
   const t0 = now()
   const timings: Record<string, number> = {}
   const tooth = job.order.system === 'fdi' ? fdiToUniversal(job.order.tooth)! : job.order.tooth
@@ -93,7 +95,7 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
 
   let r: DesignResult
   try {
-    r = autoDesign(pc, { tap, margin, params: { ...job.options?.params, material }, template })
+    r = autoDesign(pc, { tap, margin, params: { ...job.options?.params, material }, template, onStage: dev?.onStage })
   } catch (e) {
     return { ...base, status: 'needs-input', tooth, intake, prepFoundBy, needs: [{ kind: 'margin', message: e instanceof Error ? e.message : String(e) }] }
   }
