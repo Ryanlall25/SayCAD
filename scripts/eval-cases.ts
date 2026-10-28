@@ -121,6 +121,8 @@ for (const c of readdirSync(root).filter((d) => /^case\d+$/.test(d)).sort()) {
       mkdirSync(join(dir, 'out'), { recursive: true })
       writeFileSync(join(dir, 'out', `crown-${mode}.stl`), Buffer.from(out.files.crownStl))
       if (record?.margin) writeFileSync(join(dir, 'out', `margin-${mode}.json`), JSON.stringify(record.margin))
+      if (record?.frame) writeFileSync(join(dir, 'out', `frame-${mode}.json`), JSON.stringify(record.frame))
+      writeFileSync(join(dir, 'out', `checks-${mode}.json`), JSON.stringify(out.checks ?? [], null, 1))
     }
   }
 }

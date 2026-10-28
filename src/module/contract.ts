@@ -14,7 +14,7 @@
 
 import type { CriticResult } from '../crown/critics'
 import type { DesignParams } from '../crown/design'
-import type { Vec3 } from '../crown/geom'
+import type { ToothFrame, Vec3 } from '../crown/geom'
 import type { MaterialId } from '../crown/materials'
 
 export const CONTRACT = 'saycad.crown/1'
@@ -135,6 +135,8 @@ export interface DesignRecord {
   anatomy: string
   checks: CriticResult[]
   alignedToZ: boolean
+  /** Tooth frame the crown was designed in (case coordinates). */
+  frame?: ToothFrame
 }
 
 /** The technician's call on an outcome — sent back to the host and kept for learning. */

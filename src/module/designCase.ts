@@ -159,7 +159,8 @@ export function assembleOutcome(a: {
     prepFoundBy: a.prepFoundBy,
     anatomy: a.anatomy,
     checks: a.results,
-    alignedToZ: align
+    alignedToZ: align,
+    frame: a.frame
   }
   const date = record.createdAt.slice(0, 10).replace(/-/g, '')
   const conf = a.margin.confidence
