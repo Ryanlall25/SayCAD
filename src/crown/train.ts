@@ -2,11 +2,12 @@ import * as THREE from 'three'
 import { toothClassOf, type ToothClass } from './anatomy'
 import { estimateFrame } from './frame'
 import { SurfaceIndex, toLocal, toWorld, type ToothFrame } from './geom'
-import { detectMargin, marginError } from './margin'
+import { detectMargin, marginError, marginFromTaps } from './margin'
+import { insertionAxis } from './insertion'
 import { autoDesign, prepareCase } from './pipeline'
 import { weld } from './slice'
 import { normaliseToReference, sampleCrownOuter, surfaceDeviation, templateFromModel, trainShapeModel, type ShapeModel } from './ssm'
-import type { CrownGrid } from './grid'
+import { gridBounds, type CrownGrid } from './grid'
 
 /**
  * Learning from the lab's finished cases, and measuring the result.
@@ -31,6 +32,8 @@ export interface TrainingCase {
   antagonist?: THREE.BufferGeometry | null
   /** The crown the technician designed and shipped. */
   crown: THREE.BufferGeometry
+  /** The technician's margin (world), when the case carries it: used instead of detecting one. */
+  margin?: [number, number, number][]
 }
 
 export interface CaseAnalysis {
@@ -44,6 +47,8 @@ export interface CaseAnalysis {
   marginError?: { mean: number; p95: number; max: number }
   /** Technician crown on the grid, normalised to the class reference. */
   shape?: CrownGrid
+  /** The crown's real size before normalising (mm): mesiodistal, buccolingual, height. */
+  size?: { md: number; bl: number; h: number }
 }
 
 export interface EvaluationRow {
@@ -67,6 +72,11 @@ function tapFromCrown(prep: SurfaceIndex, crown: THREE.BufferGeometry): [number,
   return prep.closest([c.x, c.y, c.z], 20)?.point ?? null
 }
 
+function sizeOf(g: CrownGrid): { md: number; bl: number; h: number } {
+  const b = gridBounds(g)
+  return { md: b.max[0] - b.min[0], bl: b.max[2] - b.min[2], h: b.max[1] - b.min[1] }
+}
+
 export function analyseCase(tc: TrainingCase): CaseAnalysis {
   const cls = toothClassOf(tc.toothNumber)
   try {
@@ -74,9 +84,12 @@ export function analyseCase(tc: TrainingCase): CaseAnalysis {
     const prep = new SurfaceIndex(prepW)
     const tap = tapFromCrown(prep, tc.crown)
     if (!tap) return { id: tc.id, toothNumber: tc.toothNumber, cls, ok: false, error: 'crown is not over the prep scan (are the files registered?)' }
-    const margin = detectMargin(prep, tap)
+    const margin = tc.margin?.length ? marginFromTaps(prep, tc.margin) : detectMargin(prep, tap)
     if (margin.points.length < 16) return { id: tc.id, toothNumber: tc.toothNumber, cls, ok: false, error: 'margin not found' }
-    const { frame } = estimateFrame(margin.points, margin.axis.up, tc.toothNumber, prepW)
+    // The designer's own frame: built on the path of insertion, as autoDesign does,
+    // so learned anatomy lands untilted when the engine places it.
+    const axis = insertionAxis(prepW, margin.points, margin.axis.up).axis
+    const { frame } = estimateFrame(margin.points, axis, tc.toothNumber, prepW)
     const sampled = sampleCrownOuter(tc.crown, frame, NU, NV)
     if (!sampled) return { id: tc.id, toothNumber: tc.toothNumber, cls, ok: false, error: 'could not trace the crown on the grid' }
     const crownMarginWorld = sampled.margin.map((p) => toWorld(frame, p))
@@ -87,7 +100,8 @@ export function analyseCase(tc: TrainingCase): CaseAnalysis {
       ok: true,
       frame,
       marginError: marginError(margin.points, crownMarginWorld),
-      shape: normaliseToReference(sampled.grid, cls)
+      shape: normaliseToReference(sampled.grid, cls),
+      size: sizeOf(sampled.grid)
     }
   } catch (e) {
     return { id: tc.id, toothNumber: tc.toothNumber, cls, ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -91,7 +91,9 @@ export const DEFAULT_PARAMS: DesignParams = {
   contactMesialMm: -0.03,
   contactDistalMm: -0.03,
   occlusalClearanceMm: 0.05,
-  occlusalContacts: true,
+  // Off: lifting every cusp tip into contact made crowns taller than the lab's
+  // (technicians leave 0.06–0.13 mm at the closest point, 9 lower molars).
+  occlusalContacts: false,
   cuspScale: 1,
   grooveScale: 1,
   buccalBulgeMm: 0,
@@ -173,6 +175,31 @@ function measureSpace(n: SurfaceIndex | null, sign: 1 | -1, yLo: number, yHi: nu
   }
   return Number.isFinite(best) ? best : null
 }
+
+/**
+ * Height of a neighbour's marginal ridge beside the contact: its highest point
+ * within 1.5 mm of the contact surface (local frame, y = occlusal).
+ */
+function neighbourRidge(n: SurfaceIndex | null, sign: 1 | -1, x: number | null): number | null {
+  if (!n || x === null) return null
+  let best = -Infinity
+  for (let dx = 0.2; dx <= 1.5; dx += 0.325) {
+    for (const z of [-2, -1, 0, 1, 2]) {
+      const h = n.raycast([sign * (x + dx), 30, z], [0, -1, 0], 0, 40)
+      if (h) best = Math.max(best, h.point[1])
+    }
+  }
+  return Number.isFinite(best) ? best : null
+}
+
+/**
+ * Bucco-lingual width beyond the margin's (mm), measured on the lab's own
+ * crowns: lower first molars 0.55 (0.11–1.05, 9 crowns). Classes not yet
+ * measured keep the earlier rule (at least 1.4 mm).
+ */
+const BL_OVER_MARGIN: Partial<Record<ToothClass, number>> = { lowerMolar: 0.55 }
+/** Mesiodistal length beyond the margin's (mm), same crowns: 1.6 (0.78–2.82). */
+const MD_OVER_MARGIN: Partial<Record<ToothClass, number>> = { lowerMolar: 1.6 }
 
 /** Grid address of a named region on a fitted crown. */
 export function regionCentre(name: RegionName, grid: CrownGrid, cuspTips: OuterResult['cuspTips']): { i: number; j: number } | null {
@@ -491,24 +518,34 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   }
   let W: number
   let xc: number
-  const ratio = Wt / Math.max(1, Math.max(...env.marginRow.map((p) => Math.abs(p[0]))) * 2)
   if (xm !== null && xd !== null) {
     W = xm + xd
     xc = (xm - xd) / 2
     steps.push(`mesiodistal space ${W.toFixed(2)} mm between neighbours`)
   } else if (xm !== null || xd !== null) {
+    // One neighbour: the crown takes its usual length over the margin, and
+    // reaches the neighbour only when that is close enough to touch.
     const known = (xm ?? xd) as number
-    W = clamp(Math.max(marginMD * ratio, known + marginMD / 2), marginMD + 0.6, Math.max(Wt * 1.4, marginMD + 0.6))
-    xc = xm !== null ? known - W / 2 : W / 2 - known
-    steps.push(`one neighbour only — width ${W.toFixed(2)} mm from margin proportions`)
+    const sign = xm !== null ? 1 : -1
+    const usual = marginMD + (MD_OVER_MARGIN[env.toothClass] ?? 1.2)
+    if (known <= usual / 2 + 0.6) {
+      W = known + usual / 2
+      xc = sign * (known - W / 2)
+      steps.push(`one neighbour only — width ${W.toFixed(2)} mm, in contact with it`)
+    } else {
+      W = usual
+      xc = 0
+      steps.push(`one neighbour only, ${known.toFixed(1)} mm away — usual width ${W.toFixed(2)} mm`)
+    }
   } else {
-    W = Math.max(marginMD * 1.15, marginMD + 1.2)
+    W = marginMD + (MD_OVER_MARGIN[env.toothClass] ?? 1.2)
     xc = 0
     steps.push(`no neighbours found — width ${W.toFixed(2)} mm from margin`)
   }
   W += 0.15 // a hair wide, so the contact step trims into a definite contact
   const sx = W / Wt
-  const D = Math.max(Dt * sx, marginBL + 1.4)
+  const blOver = BL_OVER_MARGIN[env.toothClass]
+  const D = blOver !== undefined ? marginBL + blOver : Math.max(Dt * sx, marginBL + 1.4)
   const sz = D / Dt
   const rot = (params.rotationDeg * Math.PI) / 180
   const cr = Math.cos(rot)
@@ -530,6 +567,44 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     const r = median(ratios)
     if (Number.isFinite(r)) sy = clamp(r, sx * 0.55, sx * 1.5)
     steps.push(`vertical scale ${sy.toFixed(2)} from antagonist (${ratios.length} cusp probes)`)
+  }
+  // Technicians level the marginal ridges with the neighbours' (measured on the
+  // lab's crowns: within ~0.3 mm), so the neighbours set the height; the
+  // antagonist only caps it (cusps reaching up into its fossae made crowns
+  // 1–3 mm too tall).
+  {
+    const ridgeOf = (sign: 1 | -1): number => {
+      let best = -Infinity
+      let edge = -Infinity
+      for (let j = 0; j < g.nv; j++) for (let i = 0; i < nu; i++) edge = Math.max(edge, sign * place(getP(tpl.grid, i, j), 1)[0])
+      for (let j = 0; j < g.nv; j++) {
+        for (let i = 0; i < nu; i++) {
+          const p = place(getP(tpl.grid, i, j), 1)
+          if (sign * p[0] > edge - 1.2) best = Math.max(best, p[1])
+        }
+      }
+      return best
+    }
+    const ratios: number[] = []
+    for (const [n, sign, x] of [[mesial, 1, xm], [distal, -1, xd]] as const) {
+      // Only a neighbour the crown will touch: one across a gap says nothing about this tooth.
+      if (x === null || x > W / 2 + sign * xc + 0.6) continue
+      const target = neighbourRidge(n, sign, x)
+      const own = ridgeOf(sign)
+      // A neighbour ridge far below this tooth's own (a short or broken tooth) says little.
+      if (target !== null && own > 0.5 && target > own * sx * 0.45) ratios.push(target / own)
+    }
+    if (ratios.length) {
+      const r = ratios.reduce((a, b) => a + b, 0) / ratios.length
+      const capped = Math.min(clamp(r, sx * 0.55, sx * 1.5), env.antagonist ? sy : Infinity)
+      steps.push(`vertical scale ${capped.toFixed(2)} from the neighbours' marginal ridges (${ratios.length} side${ratios.length > 1 ? 's' : ''})`)
+      sy = capped
+    } else if (sy > sx) {
+      // No usable neighbour: keep the tooth's own proportions rather than
+      // stretching the cusps up to a distant antagonist.
+      steps.push(`vertical scale ${sx.toFixed(2)} — tooth proportions (no neighbour ridge to level with)`)
+      sy = sx
+    }
   }
   for (let j = 0; j < g.nv; j++) for (let i = 0; i < nu; i++) setP(g, i, j, place(getP(tpl.grid, i, j), sy))
   g.pole = place(tpl.grid.pole, sy)

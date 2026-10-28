@@ -1,7 +1,9 @@
-import type { ToothClass } from './anatomy'
+import type { Template, ToothClass } from './anatomy'
 import type { CrownGrid } from './grid'
 import { autoDesign, type DesignRequest, type DesignResult, type PreparedCase } from './pipeline'
 import { parseShapeModel, templateFromModel, type ShapeModel } from './ssm'
+import { gridBounds } from './grid'
+import type { Vec3 } from './geom'
 
 /**
  * Starting anatomy from the lab's own finished crowns.
@@ -20,7 +22,27 @@ export interface DonorSet {
   version: 1
   cls: ToothClass
   /** One single-crown shape model per donor, normalised to the class reference. */
-  donors: Array<{ id: string; tooth?: number; model: ShapeModel }>
+  donors: Array<{ id: string; tooth?: number; model: ShapeModel; size?: { md: number; bl: number; h: number } }>
+}
+
+/**
+ * A donor's template with its own real proportions: stored shapes are
+ * normalised per axis to the class reference, which loses each crown's
+ * height-to-width ratio (a 0.52 crown came back 0.64 — 1.6 mm too tall).
+ */
+export function donorTemplate(d: DonorSet['donors'][number]): Template {
+  const t = templateFromModel(d.model)
+  if (!d.size) return t
+  const b = gridBounds(t.grid)
+  const s: Vec3 = [d.size.md / (b.max[0] - b.min[0]), d.size.h / (b.max[1] - b.min[1]), d.size.bl / (b.max[2] - b.min[2])]
+  const g = { ...t.grid, pts: t.grid.pts.slice() }
+  for (let k = 0; k < g.pts.length; k += 3) {
+    g.pts[k] *= s[0]
+    g.pts[k + 1] = (g.pts[k + 1] - b.min[1]) * s[1] + b.min[1]
+    g.pts[k + 2] *= s[2]
+  }
+  g.pole = [t.grid.pole[0] * s[0], (t.grid.pole[1] - b.min[1]) * s[1] + b.min[1], t.grid.pole[2] * s[2]]
+  return { ...t, grid: g }
 }
 
 export function parseDonorSet(json: string): DonorSet | null {
@@ -54,18 +76,20 @@ export interface DonorChoice {
  */
 export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: DonorSet, opts: { maxDonors?: number; exclude?: string } = {}): DonorChoice | null {
   const donors = set.donors.filter((d) => d.id !== opts.exclude).slice(0, opts.maxDonors ?? 12)
-  let best: (DonorChoice & { passes: boolean }) | null = null
+  let best: (DonorChoice & { passes: boolean; stages: Array<[string, CrownGrid]> }) | null = null
   let margin = req.margin
   let tap = req.tap
   for (const d of donors) {
     let fitted: CrownGrid | null = null
     let final: CrownGrid | null = null
+    const stages: Array<[string, CrownGrid]> = []
     const r = autoDesign(pc, {
       ...req,
       tap: margin ? undefined : tap,
       margin,
-      template: templateFromModel(d.model),
+      template: donorTemplate(d),
       onStage: (s, g) => {
+        if (req.onStage) stages.push([s, { ...g, pts: g.pts.slice(), pole: [...g.pole] as CrownGrid['pole'] }])
         if (s === 'emergence') fitted = { ...g, pts: g.pts.slice() }
         if (s === 'final') final = g
       }
@@ -75,8 +99,10 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
     tap = undefined
     if (!fitted || !final) continue
     const passes = !r.report.results.some((x) => x.verdict === 'fail')
-    const c = { result: r, donor: d.id, reshapingMm: reshaping(fitted, final), tried: donors.length, passes }
+    const c = { result: r, donor: d.id, reshapingMm: reshaping(fitted, final), tried: donors.length, passes, stages }
     if (!best || (c.passes && !best.passes) || (c.passes === best.passes && c.reshapingMm < best.reshapingMm)) best = c
   }
+  // The caller's stage hook sees the chosen design only.
+  if (best && req.onStage) for (const [s, g] of best.stages) req.onStage(s, g)
   return best
 }

@@ -17,7 +17,11 @@ import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { SurfaceIndex, toLocal, type Vec3 } from '../src/crown/geom'
 import type { CrownGrid } from '../src/crown/grid'
 import { designCase } from '../src/module'
-import { parseScan } from '../src/core/meshConvert'
+import { fdiToUniversal } from '../src/crown/library'
+import { trainShapeModel } from '../src/crown/ssm'
+import { analyseCase } from '../src/crown/train'
+import { toothClassOf } from '../src/crown/anatomy'
+import { listCases, loadLabCase } from './lib/labCases'
 
 const args = process.argv.slice(2).filter((a) => a !== '--')
 const root = args.find((a) => !a.startsWith('--')) ?? 'dev/cases/pick'
@@ -28,38 +32,38 @@ for (const f of existsSync('public/models') ? readdirSync('public/models') : [])
   const t = /^lib-round-t(\d+)\.json$/.exec(f)
   if (t) anatomy[`t${t[1]}`] = readFileSync(join('public/models', f), 'utf8')
 }
-const ab = (b: Buffer): ArrayBuffer => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer
-const scan = (dir: string, f: string) => ({ name: f, data: ab(readFileSync(join(dir, f))) })
-
-function prepWithDie(dir: string) {
-  const jaw = parseScan('prep_jaw.obj', ab(readFileSync(join(dir, 'prep_jaw.obj'))))
-  const die = parseScan('prep_die.obj', ab(readFileSync(join(dir, 'prep_die.obj'))))
-  const near = new SurfaceIndex(die)
-  const pos: number[] = []
-  const idx: number[] = []
-  for (const [g, all] of [[jaw, false], [die, true]] as const) {
-    const p = g.getAttribute('position')
-    const ix = g.index!
-    const base = pos.length / 3
-    for (let i = 0; i < p.count; i++) pos.push(p.getX(i), p.getY(i), p.getZ(i))
-    for (let t = 0; t < ix.count; t += 3) {
-      const a = ix.getX(t), b = ix.getX(t + 1), c = ix.getX(t + 2)
-      const cen: Vec3 = [(p.getX(a) + p.getX(b) + p.getX(c)) / 3, (p.getY(a) + p.getY(b) + p.getY(c)) / 3, (p.getZ(a) + p.getZ(b) + p.getZ(c)) / 3]
-      if (all || !near.closest(cen, 1.2)) idx.push(base + a, base + b, base + c)
-    }
-  }
-  return { name: 'prep_jaw+die.obj', mesh: { positions: Float32Array.from(pos), indices: Uint32Array.from(idx) } }
-}
-
 const mean = (x: number[]): number => (x.length ? x.reduce((s, v) => s + v, 0) / x.length : NaN)
 const f2 = (x: number): string => (Number.isFinite(x) ? (x >= 0 ? '+' : '') + x.toFixed(2) : '  —  ')
 
-for (const c of readdirSync(root).filter((d) => /^case\d+$/.test(d)).sort()) {
-  const dir = join(root, c)
-  const info = JSON.parse(readFileSync(join(dir, 'case.json'), 'utf8')) as { fdi_tooth: number; margin_points: Vec3[] }
+// --self: start from the case's OWN technician crown — the ceiling: whatever is
+// lost is lost by the design steps, not by the choice of starting anatomy.
+// --donors: start from the lab's other crowns (public/models/donors-*.json).
+const summary: Array<{ id: string; all: number; occ: number; relief: number; fails: string[] }> = []
+const self = args.includes('--self')
+const pi = args.indexOf('--params')
+const params = pi >= 0 ? JSON.parse(args[pi + 1]) : undefined
+const donorFiles = args.includes('--donors') && existsSync('public/models') ? readdirSync('public/models').filter((f) => /^donors-\w+\.json$/.test(f)) : []
+for (const c of listCases(root)) {
+  const lc = loadLabCase(root, c)
+  const dir = lc.dir
+  const info = { fdi_tooth: lc.fdi, margin_points: lc.margin }
+  if (!lc.antagonist) continue
+  let caseAnatomy = anatomy
+  if (self) {
+    const a = analyseCase({ id: c, toothNumber: fdiToUniversal(lc.fdi)!, prep: lc.prepGeometry, crown: lc.crown, margin: lc.margin })
+    if (!a.ok || !a.shape) { console.log(c, 'skip:', a.error); continue }
+    // As a one-crown donor set, so the template keeps the crown's real proportions.
+    caseAnatomy = { [`donors-${toothClassOf(fdiToUniversal(lc.fdi)!)}`]: JSON.stringify({ version: 1, cls: a.cls, donors: [{ id: c, model: trainShapeModel(a.cls, [a.shape]), size: a.size }] }) }
+  } else if (donorFiles.length) {
+    caseAnatomy = { ...anatomy }
+    for (const f of donorFiles) {
+      const set = JSON.parse(readFileSync(join('public/models', f), 'utf8')) as { donors: Array<{ id: string }> }
+      caseAnatomy[f.replace(/\.json$/, '')] = JSON.stringify({ ...set, donors: set.donors.filter((d) => d.id !== c) })
+    }
+  }
   const stages: Array<[string, CrownGrid]> = []
   const out = designCase(
-    { contract: 'saycad.crown/1', jobId: c, order: { tooth: info.fdi_tooth, system: 'fdi', material: 'zirconia-hs' }, scans: { prep: prepWithDie(dir), antagonist: scan(dir, 'opposing_jaw.obj') }, options: { anatomy, margin: info.margin_points } } as Parameters<typeof designCase>[0],
+    { contract: 'saycad.crown/1', jobId: c, order: { tooth: info.fdi_tooth, system: 'fdi', material: 'zirconia-hs' }, scans: { prep: lc.prep, antagonist: lc.antagonist }, options: { anatomy: caseAnatomy, margin: info.margin_points, ...(params ? { params } : {}) } } as Parameters<typeof designCase>[0],
     { onStage: (s, g) => stages.push([s, { ...g, pts: g.pts.slice(), pole: [...g.pole] as Vec3 }]) }
   )
   const frame = out.files?.designRecord?.frame
@@ -68,7 +72,7 @@ for (const c of readdirSync(root).filter((d) => /^case\d+$/.test(d)).sort()) {
     continue
   }
   // The technician's crown in the tooth frame.
-  const tg = new STLLoader().parse(ab(readFileSync(join(dir, 'crown_exocad.stl'))))
+  const tg = lc.crown.clone()
   const tp = tg.getAttribute('position')
   for (let i = 0; i < tp.count; i++) {
     const q = toLocal(frame, [tp.getX(i), tp.getY(i), tp.getZ(i)])
@@ -99,6 +103,22 @@ for (const c of readdirSync(root).filter((d) => /^case\d+$/.test(d)).sort()) {
     return Math.sign(d[0] * n[0] + d[1] * n[1] + d[2] * n[2]) * h.distance
   }
   const outerY = (p: Vec3): number | null => tech.raycast([p[0], 40, p[2]], [0, -1, 0], 0, 60)?.point[1] ?? null
+  if (args.includes('--size')) {
+    // Size and position of the placed crown vs the technician's, tooth frame (mm).
+    const box = (xs: number[][]) => { const mn = [Infinity, Infinity, Infinity]; const mx = [-Infinity, -Infinity, -Infinity]; for (const p of xs) for (let k = 0; k < 3; k++) { mn[k] = Math.min(mn[k], p[k]); mx[k] = Math.max(mx[k], p[k]) } return { mn, mx, d: mx.map((v, k) => v - mn[k]), c: mx.map((v, k) => (v + mn[k]) / 2) } }
+    const tpts: number[][] = []
+    const tq = tg.getAttribute('position')
+    for (let i = 0; i < tq.count; i++) tpts.push([tq.getX(i), tq.getY(i), tq.getZ(i)])
+    const T = box(tpts)
+    const M = box(lc.margin.map((m) => toLocal(frame, m)))
+    console.log(`${c} margin  MD ${M.d[0].toFixed(2)} BL ${M.d[2].toFixed(2)} | technician MD-margin ${(T.d[0] - M.d[0]).toFixed(2)} BL-margin ${(T.d[2] - M.d[2]).toFixed(2)} BL/MD ${(T.d[2] / T.d[0]).toFixed(3)}`)
+    for (const [name, g] of stages.filter(([n]) => n === 'placed' || n === 'final')) {
+      const gp: number[][] = []
+      for (let k = 0; k < g.pts.length; k += 3) gp.push([g.pts[k], g.pts[k + 1], g.pts[k + 2]])
+      const O = box(gp)
+      console.log(`${c} ${name.padEnd(7)} MD ${O.d[0].toFixed(2)} vs ${T.d[0].toFixed(2)} | BL ${O.d[2].toFixed(2)} vs ${T.d[2].toFixed(2)} | top ${O.mx[1].toFixed(2)} vs ${T.mx[1].toFixed(2)} | centre x ${O.c[0].toFixed(2)} vs ${T.c[0].toFixed(2)}, z ${O.c[2].toFixed(2)} vs ${T.c[2].toFixed(2)}`)
+    }
+  }
   console.log(`\n${c} #${info.fdi_tooth}  (mm, signed distance to the technician's crown: + = ours outside theirs)`)
   console.log('stage        cervical  middle   occlusal | |cerv|  |mid|  |occ| | relief ours/tech')
   for (const [name, g] of stages) {
@@ -129,5 +149,15 @@ for (const c of readdirSync(root).filter((d) => /^case\d+$/.test(d)).sort()) {
     }
     const abs = (x: number[]): number => mean(x.map(Math.abs))
     console.log(`${name.padEnd(12)} ${f2(mean(cerv)).padStart(7)}  ${f2(mean(mid)).padStart(6)}   ${f2(mean(occ)).padStart(6)}  | ${abs(cerv).toFixed(2)}   ${abs(mid).toFixed(2)}   ${abs(occ).toFixed(2)} | ${spread(hOurs).toFixed(2)} / ${spread(hTech).toFixed(2)}`)
+    if (name === 'final') {
+      const all = [...cerv, ...mid, ...occ]
+      summary.push({ id: c, all: abs(all), occ: abs(occ), relief: Math.abs(spread(hOurs) - spread(hTech)), fails: (out.checks ?? []).filter((x) => x.verdict === 'fail').map((x) => x.id) })
+    }
   }
+}
+if (summary.length) {
+  console.log('\nSUMMARY (final)  surface |dist| all / occlusal, |relief error|, fails')
+  for (const r of summary) console.log(`  ${r.id.padEnd(8)} ${r.all.toFixed(3)} / ${r.occ.toFixed(3)}  relief ${r.relief.toFixed(2)}  ${r.fails.join(',')}`)
+  const m = (k: 'all' | 'occ' | 'relief'): string => mean(summary.map((r) => r[k])).toFixed(3)
+  console.log(`  MEAN     ${m('all')} / ${m('occ')}  relief ${m('relief')}  fails ${summary.filter((r) => r.fails.length).length}/${summary.length}`)
 }

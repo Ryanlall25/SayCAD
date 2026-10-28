@@ -36,7 +36,7 @@ const cases = listCases(root).map((id) => loadLabCase(root, id))
 console.log(`${cases.length} cases: ${cases.map((c) => `${c.id}#${c.fdi}`).join(' ')}`)
 const shapes = new Map<string, CrownGrid>()
 for (const c of cases) {
-  const a = analyseCase({ id: c.id, toothNumber: fdiToUniversal(c.fdi)!, prep: c.prepGeometry, crown: c.crown })
+  const a = analyseCase({ id: c.id, toothNumber: fdiToUniversal(c.fdi)!, prep: c.prepGeometry, crown: c.crown, margin: c.margin })
   if (a.ok && a.shape) shapes.set(c.id, a.shape)
   else console.log(`  ${c.id}: not used for training (${a.error})`)
 }

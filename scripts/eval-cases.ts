@@ -113,6 +113,10 @@ for (const c of readdirSync(root).filter((d) => /^case\d+$/.test(d)).sort()) {
   const info = JSON.parse(readFileSync(join(dir, 'case.json'), 'utf8')) as { fdi_tooth: number; margin_points: Vec3[] }
   const truthCrown = new SurfaceIndex(new STLLoader().parse(ab(readFileSync(join(dir, 'crown_exocad.stl')))))
   const prep = prepWithDie(dir) ?? scanIn(dir, 'prep_jaw')
+  if (!readdirSync(dir).some((x) => x.startsWith('opposing_jaw.'))) {
+    console.log(`${c}: no opposing scan — skipped`)
+    continue
+  }
   const antagonist = scanIn(dir, 'opposing_jaw')
   for (const mode of ['auto', 'tech-margin'] as const) {
     const t0 = Date.now()

@@ -25,13 +25,13 @@ for (const root of roots) {
   for (const id of listCases(root)) {
     const c = loadLabCase(root, id)
     const tooth = fdiToUniversal(c.fdi)!
-    const a = analyseCase({ id, toothNumber: tooth, prep: c.prepGeometry, crown: c.crown })
+    const a = analyseCase({ id, toothNumber: tooth, prep: c.prepGeometry, crown: c.crown, margin: c.margin })
     if (!a.ok || !a.shape) {
       console.log(`skip ${id} #${c.fdi}: ${a.error}`)
       continue
     }
     const set = sets.get(a.cls) ?? sets.set(a.cls, { version: 1, cls: a.cls, donors: [] }).get(a.cls)!
-    set.donors.push({ id, tooth, model: trainShapeModel(a.cls, [a.shape], { source: `lab crown ${id}` }) })
+    set.donors.push({ id, tooth, model: trainShapeModel(a.cls, [a.shape], { source: `lab crown ${id}` }), size: a.size })
     console.log(`${id} #${c.fdi} → ${a.cls}`)
   }
 }
