@@ -3,6 +3,7 @@ import type { CrownGrid } from './grid'
 import { autoDesign, type DesignRequest, type DesignResult, type PreparedCase } from './pipeline'
 import { parseShapeModel, templateFromModel, type ShapeModel } from './ssm'
 import { gridBounds } from './grid'
+import { toothSide } from './findPrep'
 import type { Vec3 } from './geom'
 
 /**
@@ -75,7 +76,12 @@ export interface DonorChoice {
  * design that passes every check, or the least-reshaped overall.
  */
 export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: DonorSet, opts: { maxDonors?: number; exclude?: string } = {}): DonorChoice | null {
-  const donors = set.donors.filter((d) => d.id !== opts.exclude).slice(0, opts.maxDonors ?? 12)
+  const all = set.donors.filter((d) => d.id !== opts.exclude)
+  // Same position in the arch first: a class spans teeth of different form
+  // (lower first molars have five cusps, second molars four).
+  const pos = toothSide(pc.toothNumber).pos
+  const same = all.filter((d) => d.tooth !== undefined && toothSide(d.tooth).pos === pos)
+  const donors = (same.length >= 3 ? same : all).slice(0, opts.maxDonors ?? 24)
   let best: (DonorChoice & { passes: boolean; stages: Array<[string, CrownGrid]> }) | null = null
   let margin = req.margin
   let tap = req.tap

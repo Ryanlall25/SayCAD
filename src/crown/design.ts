@@ -253,6 +253,61 @@ export function applySculpt(grid: CrownGrid, centre: { i: number; j: number }, a
   }
 }
 
+/**
+ * Moves vertices toward the prep (along ∓x) by a per-vertex amount, smoothed
+ * over the grid (never below what each vertex needs), stopping each at the
+ * material minimum over the fitting surface.
+ */
+function relieveField(
+  grid: CrownGrid,
+  need: Float64Array,
+  sign: 1 | -1,
+  wall: { intaglio: SurfaceIndex; minAxialMm: number; minOcclusalMm: number } | undefined,
+  onLimit: () => void
+): void {
+  const { nu, nv } = grid
+  let f = need
+  for (let pass = 0; pass < 4; pass++) {
+    const g = new Float64Array(nu * nv)
+    for (let j = 1; j < nv; j++) {
+      for (let i = 0; i < nu; i++) {
+        let s = 0
+        let c = 0
+        for (let dj = -1; dj <= 1; dj++) {
+          const jj = j + dj
+          if (jj < 1 || jj >= nv) continue
+          for (let di = -1; di <= 1; di++) {
+            s += f[jj * nu + ((i + di + nu) % nu)]
+            c++
+          }
+        }
+        g[j * nu + i] = Math.max(need[j * nu + i], s / c)
+      }
+    }
+    f = g
+  }
+  for (let j = 1; j < nv; j++) {
+    const wt = smoothstep(0.015, 0.09, j / nv)
+    for (let i = 0; i < nu; i++) {
+      const m = f[j * nu + i] * wt
+      if (m < 1e-4) continue
+      const p = getP(grid, i, j)
+      let q: Vec3 = [p[0] - sign * m, p[1], p[2]]
+      if (wall) {
+        const min = gridNormal(grid, i, j)[1] > 0.55 || j > nv * 0.6 ? wall.minOcclusalMm : wall.minAxialMm
+        const dq = wall.intaglio.closest(q, min + 1)?.distance ?? Infinity
+        if (dq < min) {
+          const dp = wall.intaglio.closest(p, min + 1)?.distance ?? Infinity
+          const t = dp > dq && dp > min ? (dp - min) / (dp - dq) : 0
+          q = [p[0] + (q[0] - p[0]) * t, p[1], p[2]]
+          onLimit()
+        }
+      }
+      setP(grid, i, j, q)
+    }
+  }
+}
+
 /** RBF push/pull until the closest approach to a neighbour equals `target`. */
 function enforceContact(
   grid: CrownGrid,
@@ -297,6 +352,17 @@ function enforceContact(
     if (e > 3.5) {
       log.push(`${sign > 0 ? 'mesial' : 'distal'} neighbour ${min.toFixed(2)} mm away — too far to reach; contact left open`)
       return { gap: min }
+    }
+    if (e < 0) {
+      // Overlap: each vertex inside the neighbour moves just clear of it, the
+      // field smoothed so the wall stays fair — the proximal surface takes
+      // the neighbour's shape, as a technician's adapted contact does. One
+      // blob around the worst point would drag the whole wall in by its depth
+      // (an overhanging neighbour: 1 mm too deep along its whole slope).
+      const need = new Float64Array(grid.nu * grid.nv)
+      for (const [i, j] of candidates) need[j * grid.nu + i] = Math.max(0, target - n.signedDistance(getP(grid, i, j), [sign, 0, 0], 5))
+      relieveField(grid, need, sign, wall, () => (limited = true))
+      continue
     }
     for (let j = 1; j < grid.nv; j++) {
       const wt = smoothstep(0.015, 0.09, j / grid.nv)
