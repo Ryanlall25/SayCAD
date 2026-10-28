@@ -8,7 +8,6 @@ import {
   gridNormal,
   marginDistances,
   setP,
-  smoothField,
   smoothGrid,
   thetaOf,
   type CrownGrid
@@ -403,6 +402,8 @@ function enforceContact(
 
 /** Lowers anything closer than `clearance` to the antagonist; optionally first
  *  raises cusp tips into contact. */
+const RELIEF_SIGMA_MM = 1.0
+
 export function enforceOcclusion(
   grid: CrownGrid,
   ant: SurfaceIndex,
@@ -462,11 +463,24 @@ export function enforceOcclusion(
     else for (let k = j0 * grid.nu; k < grid.nu * grid.nv; k++) visit(k)
     active = next
     if (!any) break
-    const blurred = smoothField(grid, deficit, 3)
+    // Relief as smooth dimples, not a stamp: each intruding vertex lowers its
+    // surroundings by a Gaussian of its depth (σ 1 mm), and a vertex takes the
+    // deepest. Lowering each vertex by its own deficit printed the opposing
+    // cusps into the crown as pits.
+    const src: Array<[Vec3, number]> = []
+    for (let k = j0 * grid.nu; k < grid.nu * grid.nv; k++) if (deficit[k] > 0) src.push([getP(grid, k % grid.nu, Math.floor(k / grid.nu)), deficit[k]])
+    const SIG2 = 2 * RELIEF_SIGMA_MM * RELIEF_SIGMA_MM
+    const reach2 = 9 * RELIEF_SIGMA_MM * RELIEF_SIGMA_MM
     for (let j = j0; j < grid.nv; j++) {
       for (let i = 0; i < grid.nu; i++) {
         const k = j * grid.nu + i
-        const d = Math.max(deficit[k], blurred[k] * 1.5) * smoothstep(j0, j0 + 4, j)
+        const q = getP(grid, i, j)
+        let env = deficit[k]
+        for (const [c, dc] of src) {
+          const d2 = (q[0] - c[0]) ** 2 + (q[1] - c[1]) ** 2 + (q[2] - c[2]) ** 2
+          if (d2 < reach2) env = Math.max(env, dc * Math.exp(-d2 / SIG2))
+        }
+        const d = env * smoothstep(j0, j0 + 4, j)
         if (d <= 0) continue
         const p = getP(grid, i, j)
         // Never relieve below the material floor: thickness outranks occlusion,
