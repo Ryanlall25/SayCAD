@@ -110,7 +110,7 @@ export function centreAxis(scan: SurfaceIndex, seed: Vec3, up: Vec3, depth = 1.2
 }
 
 /** Reads one radial profile and returns ranked finish-line candidates. */
-export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0.45, creases = false): Array<{ r: number; h: number; score: number }> {
+export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0.45, creases = false, wallDeg = 55): Array<{ r: number; h: number; score: number }> {
   const step = 0.04
   const sampled = resample(raw, step)
   const line = smoothLine(sampled, 1.5)
@@ -148,11 +148,11 @@ export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0
     for (let j = i + 1; j < n && s[j] - s[i] <= 0.4; j++) if (alpha[j] < -60 * DEG && alpha[j] > -150 * DEG) return true
     return false
   }
-  // The axial wall: first ≥ 0.8 mm run descending steeper than 55°.
+  // The axial wall: first ≥ 0.8 mm run descending steeper than wallDeg (55°).
   let wallStart = -1
   let runStart = -1
   for (let i = 0; i < n; i++) {
-    if (alpha[i] < -55 * DEG && alpha[i] > -125 * DEG) {
+    if (alpha[i] < -wallDeg * DEG && alpha[i] > -(180 - wallDeg) * DEG) {
       if (runStart < 0) runStart = i
       if (s[i] - s[runStart] >= 0.8) {
         wallStart = runStart
@@ -186,6 +186,8 @@ export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0
     // A finish line drops away steeply below its edge (root, or the die); a
     // corner that rolls over into a gentle slope is a gingival crest.
     const edge = steepAfter(at)
+    // A tapered wall (reserve pass): only true edges count.
+    if (wallDeg < 55 && !edge) continue
     out.push({ r: p.r, h: p.h, score: edge || !creases ? -tau[i] + 0.6 * clamp(chamfer, 0, 2) : 0.4 * -tau[i], at, edge })
   }
   // Scans taken without retraction: the gum hugs the prep and the finish
@@ -311,7 +313,7 @@ function fourierFit(th: number[], y: number[], w: number[], order: number): (t: 
  * (re-weighted) so the dive itself doesn't pull it.
  */
 const ORDER = 2
-function rejectDives(cands: Candidate[][], picks: number[], missing: boolean[], thetas: number[]): void {
+function rejectDives(cands: Candidate[][], picks: number[], missing: boolean[], thetas: number[], frame: AxisFrame, reserve: Candidate[][]): void {
   const K = picks.length
   const idx = picks.map((j, k) => (missing[k] ? -1 : j))
   const ok = idx.map((j) => j >= 0)
@@ -335,10 +337,20 @@ function rejectDives(cands: Candidate[][], picks: number[], missing: boolean[], 
     if (!ok[k]) continue
     const res = (c: Candidate): number => Math.hypot(c.h - fh(thetas[k]), 0.5 * (c.r - fr(thetas[k])))
     if (res(cands[k][idx[k]]) <= 0.8) continue
+    // Off the wave: the nearest candidate on it — the profile's own, or one
+    // read with a tapered wall (a short or heavily tapered side of the prep
+    // has no 55° wall above its finish line).
+    cands[k].push(...reserve[k])
     let best = -1
     for (let j = 0; j < cands[k].length; j++) if (res(cands[k][j]) < 0.5 && (best < 0 || res(cands[k][j]) < res(cands[k][best]))) best = j
     if (best >= 0) picks[k] = best
-    else missing[k] = true
+    else {
+      // No corner on the wave here (a feather edge, a scan hole): take the
+      // wave itself, at low confidence so the line is flagged for review.
+      const at = { r: fr(thetas[k]), h: fh(thetas[k]) }
+      cands[k].push({ ...at, score: 0.2, point: profileToWorld(frame, thetas[k], at) })
+      picks[k] = cands[k].length - 1
+    }
   }
 }
 
@@ -359,16 +371,23 @@ function detectOnce(
   const slicer = new RadialSlicer(scan.geometry, frame, radius, topH - 12, topH + 3)
   const thetas: number[] = []
   const cands: Candidate[][] = []
+  const reserve: Candidate[][] = []
   for (let k = 0; k < K; k++) {
     const th = (k / K) * Math.PI * 2
     thetas.push(th)
     const prof = mainProfile(slicer.slice(th), topH)
     const list = prof ? profileCandidates(prof, topH, minTurn, creases) : []
     cands.push(list.map((c) => ({ ...c, point: profileToWorld(frame, th, { r: c.r, h: c.h }) })))
+    const spare = prof ? profileCandidates(prof, topH, minTurn, creases, 35) : []
+    reserve.push(spare.map((c) => ({ ...c, point: profileToWorld(frame, th, { r: c.r, h: c.h }) })))
   }
   const typicalR = median(cands.flatMap((c) => c.slice(0, 1).map((x) => x.r))) || 4
+  // Tapered-wall corners join the loop search at a discount: continuity
+  // takes them only where the usual read has nothing on the loop.
+  const RESERVE_PENALTY = 0.6
+  for (let k = 0; k < K; k++) for (const c of reserve[k]) if (!cands[k].some((x) => Math.hypot(x.r - c.r, x.h - c.h) < 0.3)) cands[k].push({ ...c, score: c.score - RESERVE_PENALTY })
   const { picks, missing } = chooseLoop(cands, (2 * Math.PI * typicalR) / K)
-  rejectDives(cands, picks, missing, thetas)
+  rejectDives(cands, picks, missing, thetas, frame, reserve)
   const points: Array<Vec3 | null> = picks.map((j, k) => (missing[k] ? null : cands[k][j].point))
   const scores = picks.map((j, k) => (missing[k] ? 0 : cands[k][j].score))
   const missingCount = points.filter((p) => !p).length
