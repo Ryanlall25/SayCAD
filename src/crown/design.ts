@@ -8,6 +8,7 @@ import {
   gridNormal,
   marginDistances,
   setP,
+  smoothField,
   smoothGrid,
   thetaOf,
   type CrownGrid
@@ -403,6 +404,47 @@ function enforceContact(
 /** Lowers anything closer than `clearance` to the antagonist; optionally first
  *  raises cusp tips into contact. */
 /**
+ * The material floor under each vertex, made smooth: taken straight off the
+ * scanned prep it was as rough as the scan, and a tight prep's relief —
+ * clamped at it vertex by vertex — came out torn. Each vertex takes the
+ * Gaussian-weighted mean of the nearby floors (σ FLOOR_SIGMA in plan view)
+ * plus a small margin; envelopes of cones or caps showed through as facets
+ * or dimples. Where the mean dips under a real floor, the thickness step's
+ * smooth lift makes up the difference. Index −1 is the pole.
+ */
+const FLOOR_SIGMA = 0.8
+const FLOOR_MARGIN = 0.03
+function smoothFloors(grid: CrownGrid, j0: number, floorY?: (p: Vec3) => number | null): (k: number, p: Vec3) => number | null {
+  if (!floorY) return () => null
+  const raw: Array<[number, number, number]> = []
+  for (let j = j0; j < grid.nv; j++) {
+    for (let i = 0; i < grid.nu; i++) {
+      const p = getP(grid, i, j)
+      const f = floorY(p)
+      if (f !== null) raw.push([p[0], p[2], f])
+    }
+  }
+  const pf = floorY(grid.pole)
+  if (pf !== null) raw.push([grid.pole[0], grid.pole[2], pf])
+  const cache = new Map<number, number | null>()
+  return (k, p) => {
+    if (cache.has(k)) return cache.get(k)!
+    let sw = 0
+    let sf = 0
+    for (const [x, z, f] of raw) {
+      const d2 = (p[0] - x) ** 2 + (p[2] - z) ** 2
+      if (d2 > 9 * FLOOR_SIGMA * FLOOR_SIGMA) continue
+      const w = Math.exp(-d2 / (2 * FLOOR_SIGMA * FLOOR_SIGMA))
+      sw += w
+      sf += w * f
+    }
+    const v = sw > 1e-6 ? sf / sw + FLOOR_MARGIN : null
+    cache.set(k, v)
+    return v
+  }
+}
+
+/**
  * Lowers one vertex by `d`, never below the material floor (thickness
  * outranks occlusion; the high spot left is reported by the critic).
  * Returns how far it moved.
@@ -464,12 +506,7 @@ export function enforceOcclusion(
   floorY?: (p: Vec3) => number | null
 ): void {
   const j0 = Math.round(grid.nv * 0.3)
-  const floors = new Map<number, number | null>()
-  const floorOf = (k: number, p: Vec3): number | null => {
-    if (!floorY) return null
-    if (!floors.has(k)) floors.set(k, floorY(p))
-    return floors.get(k)!
-  }
+  const floorOf = smoothFloors(grid, j0, floorY)
   if (raise) {
     let raised = 0
     for (const tip of cuspTips) {
@@ -570,7 +607,10 @@ export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centr
   if (!src.length) return
   const S2 = 2 * SIGMA * SIGMA
   const reach2 = 9 * SIGMA * SIGMA
-  let maxLift = 0
+  // The largest request reaching each vertex, then smoothed over the grid:
+  // a bare maximum of many requests left a bump at each one. What the
+  // smoothing gives back, the thickness step restores.
+  const lift = new Float64Array(grid.nu * grid.nv)
   for (let j = 1; j < grid.nv; j++) {
     const wt = smoothstep(j0 - 6, j0 + 2, j)
     if (wt <= 0) continue
@@ -581,9 +621,18 @@ export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centr
         const d2 = (p[0] - x) ** 2 + (p[2] - z) ** 2
         if (d2 < reach2) d = Math.max(d, l * Math.exp(-d2 / S2))
       }
-      if (d * wt < 1e-3) continue
-      setP(grid, i, j, [p[0], p[1] + d * wt, p[2]])
-      maxLift = Math.max(maxLift, d * wt)
+      lift[j * grid.nu + i] = d * wt
+    }
+  }
+  const smooth = smoothField(grid, lift, 6)
+  let maxLift = 0
+  for (let j = 1; j < grid.nv; j++) {
+    for (let i = 0; i < grid.nu; i++) {
+      const d = smooth[j * grid.nu + i]
+      if (d < 1e-3) continue
+      const p = getP(grid, i, j)
+      setP(grid, i, j, [p[0], p[1] + d, p[2]])
+      maxLift = Math.max(maxLift, d)
     }
   }
   let pd = 0
