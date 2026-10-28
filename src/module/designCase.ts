@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { parseScan } from '../core/meshConvert'
 import { toothClassOf } from '../crown/anatomy'
-import { bestMargin, findPrep } from '../crown/findPrep'
+import { choosePrep, findPrep } from '../crown/findPrep'
 import { SurfaceIndex, type ToothFrame, type Vec3 } from '../crown/geom'
 import { fdiToUniversal } from '../crown/library'
 import { marginFromTaps } from '../crown/margin'
@@ -73,16 +73,14 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
     prepFoundBy = 'host'
   } else {
     const g = findPrep(pc.prepIndex, pc.antagonist ? new SurfaceIndex(pc.antagonist.clone()) : null, tooth)
-    if (!g.point) {
-      return { ...base, status: 'needs-input', tooth, intake, needs: [{ kind: 'prep-location', message: g.reason ?? 'Show where the prep is.' }], timingsMs: { ...timings, find: lap(t0) } }
+    // Of the teeth out of contact, the one with a clear finish line all round.
+    const pick = choosePrep(pc.prepIndex, g)
+    if (!pick.point) {
+      return { ...base, status: 'needs-input', tooth, intake, needs: [{ kind: 'prep-location', message: pick.reason }], timingsMs: { ...timings, find: lap(t0) } }
     }
-    tap = g.point
+    tap = pick.point
     prepFoundBy = 'bite'
-    // The bite also gives the occlusal direction: a steadier margin search on real scans.
-    if (g.ups?.length) {
-      const best = bestMargin(pc.prepIndex, g.point, g.ups)
-      if (best.points.length >= 16) margin = best
-    }
+    margin = pick.margin
   }
   timings.find = lap(t0)
 

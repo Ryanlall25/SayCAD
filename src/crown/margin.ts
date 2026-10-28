@@ -270,6 +270,78 @@ function chooseLoop(cands: Candidate[][], spacing: number): { picks: number[]; m
   return { picks: bestPicks, missing: bestPicks.map((j, k) => j === cands[k].length) }
 }
 
+/** Least-squares Fourier series of order `order` through (θ, y), weighted. */
+function fourierFit(th: number[], y: number[], w: number[], order: number): (t: number) => number {
+  const basis = (t: number): number[] => {
+    const b = [1]
+    for (let o = 1; o <= order; o++) b.push(Math.cos(o * t), Math.sin(o * t))
+    return b
+  }
+  const m = 1 + 2 * order
+  const A = Array.from({ length: m }, () => new Array(m + 1).fill(0))
+  for (let i = 0; i < th.length; i++) {
+    if (!w[i]) continue
+    const b = basis(th[i])
+    for (let r = 0; r < m; r++) {
+      for (let c = 0; c < m; c++) A[r][c] += w[i] * b[r] * b[c]
+      A[r][m] += w[i] * b[r] * y[i]
+    }
+  }
+  for (let r = 0; r < m; r++) A[r][r] += 1e-6
+  for (let c = 0; c < m; c++) {
+    let p = c
+    for (let r = c + 1; r < m; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r
+    ;[A[c], A[p]] = [A[p], A[c]]
+    for (let r = 0; r < m; r++) {
+      if (r === c || !A[c][c]) continue
+      const f = A[r][c] / A[c][c]
+      for (let k = c; k <= m; k++) A[r][k] -= f * A[c][k]
+    }
+  }
+  const coef = A.map((row, r) => (row[r] ? row[m] / row[r] : 0))
+  return (t) => basis(t).reduce((s, b, k) => s + b * coef[k], 0)
+}
+
+/**
+ * A finish line runs round the stump as a smooth wave. Where the loop dives
+ * off it for a stretch (onto the die's ditch, the socket edge or a
+ * neighbour's contact — the DP follows a gradual slide), re-pick the
+ * candidate that lies on the wave, or leave the sample to be filled from its
+ * neighbours. The wave: an order-2 Fourier fit (order 3 follows a 90° dive, order 1 cuts real scallops) of height and radius, robust
+ * (re-weighted) so the dive itself doesn't pull it.
+ */
+const ORDER = 2
+function rejectDives(cands: Candidate[][], picks: number[], missing: boolean[], thetas: number[]): void {
+  const K = picks.length
+  const idx = picks.map((j, k) => (missing[k] ? -1 : j))
+  const ok = idx.map((j) => j >= 0)
+  if (ok.filter(Boolean).length < K * 0.5) return
+  const h = idx.map((j, k) => (j >= 0 ? cands[k][j].h : 0))
+  const r = idx.map((j, k) => (j >= 0 ? cands[k][j].r : 0))
+  let w: number[] = ok.map((x) => (x ? 1 : 0))
+  let fh = fourierFit(thetas, h, w, ORDER)
+  let fr = fourierFit(thetas, r, w, ORDER)
+  for (let it = 0; it < 4; it++) {
+    // Tukey weights on the combined residual, scale 1 mm.
+    w = thetas.map((t, k) => {
+      if (!ok[k]) return 0
+      const e = Math.hypot(h[k] - fh(t), 0.5 * (r[k] - fr(t)))
+      return e < 1 ? (1 - e * e) ** 2 : 0
+    })
+    fh = fourierFit(thetas, h, w, ORDER)
+    fr = fourierFit(thetas, r, w, ORDER)
+  }
+  for (let k = 0; k < K; k++) {
+    if (!ok[k]) continue
+    const res = (c: Candidate): number => Math.hypot(c.h - fh(thetas[k]), 0.5 * (c.r - fr(thetas[k])))
+    if (res(cands[k][idx[k]]) <= 0.8) continue
+    let best = -1
+    for (let j = 0; j < cands[k].length; j++) if (res(cands[k][j]) < 0.5 && (best < 0 || res(cands[k][j]) < res(cands[k][best]))) best = j
+    if (best >= 0) picks[k] = best
+    else missing[k] = true
+  }
+}
+
 function detectOnce(
   scan: SurfaceIndex,
   centre: Vec3,
@@ -296,6 +368,7 @@ function detectOnce(
   }
   const typicalR = median(cands.flatMap((c) => c.slice(0, 1).map((x) => x.r))) || 4
   const { picks, missing } = chooseLoop(cands, (2 * Math.PI * typicalR) / K)
+  rejectDives(cands, picks, missing, thetas)
   const points: Array<Vec3 | null> = picks.map((j, k) => (missing[k] ? null : cands[k][j].point))
   const scores = picks.map((j, k) => (missing[k] ? 0 : cands[k][j].score))
   const missingCount = points.filter((p) => !p).length
