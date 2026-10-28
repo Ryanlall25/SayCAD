@@ -84,9 +84,14 @@ function coverage(prep: SurfaceIndex, ant: SurfaceIndex, samples: Vec3[], origin
  */
 export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth?: number): PrepGuess {
   const narrow = findPrepWithin(prep, antagonist, tooth, MAX_CLEAR)
-  if (narrow.point || narrow.candidates?.length || !antagonist || !narrow.blobsMm2) return narrow
+  if (!antagonist || !narrow.ups) return narrow
   const wide = findPrepWithin(prep, antagonist, tooth, MAX_CLEAR_WIDE)
-  return wide.point || wide.candidates?.length ? wide : narrow
+  if (!narrow.candidates?.length) return wide.point || wide.candidates?.length ? wide : narrow
+  // A deep prep (4–6 mm under the antagonist) can hide among narrow-band
+  // candidates that are really embrasures: list the wide band's too, after
+  // them, for choosePrep to judge by margin.
+  const extra = (wide.candidates ?? []).filter((w) => narrow.candidates!.every((c) => Math.hypot(c.point[0] - w.point[0], c.point[1] - w.point[1], c.point[2] - w.point[2]) > 3))
+  return { ...narrow, candidates: [...narrow.candidates, ...extra] }
 }
 
 function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth: number | undefined, maxClear: number): PrepGuess {
@@ -287,7 +292,7 @@ const marginScore = (m: MarginResult): number => {
  * position (unreliable on quadrant models) chose wrong in half the cases.
  * The tooth-position match only breaks near-ties.
  */
-export function choosePrep(index: SurfaceIndex, g: PrepGuess, maxCandidates = 5): { point: Vec3; margin: MarginResult } | { point: null; reason: string } {
+export function choosePrep(index: SurfaceIndex, g: PrepGuess, maxCandidates = 8): { point: Vec3; margin: MarginResult } | { point: null; reason: string } {
   const cands = g.candidates?.length ? g.candidates.slice(0, maxCandidates) : g.point ? [{ point: g.point, areaMm2: 0 }] : []
   if (!cands.length) return { point: null, reason: g.reason ?? 'Show where the prep is.' }
   const scored = cands
