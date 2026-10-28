@@ -6,6 +6,7 @@ import { syntheticMolarCase } from '../../crown/synthetic'
 import { zip } from '../../core/zip'
 import { CONTRACT, validateJob, type CrownJob } from '../contract'
 import { designCase } from '../designCase'
+import { MATERIALS } from '../../crown/materials'
 import { jobFromBundle, outcomeFiles, outcomeJson } from '../bundle'
 
 const c = syntheticMolarCase()
@@ -30,7 +31,7 @@ describe('saycad.crown/1 — designCase', () => {
     expect(o.verdict).not.toBe('blocked')
     expect(o.jobId).toBe('j1')
     expect(o.caseRef).toBe('SH-1001')
-    expect(o.summary!.minOcclusalThicknessMm).toBeGreaterThanOrEqual(0.7)
+    expect(o.summary!.minOcclusalThicknessMm).toBeGreaterThanOrEqual(MATERIALS['zirconia-hs'].minOcclusalMm)
     // The STL is a real binary STL of the solid.
     const g = new STLLoader().parse(o.files!.crownStl)
     expect(g.getAttribute('position').count / 3).toBeGreaterThan(5000)
