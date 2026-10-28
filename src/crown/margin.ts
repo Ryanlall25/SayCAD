@@ -163,6 +163,13 @@ export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0
   if (wallStart < 0) return []
   const out: Array<{ r: number; h: number; score: number; at: number; edge: boolean }> = []
   const back = Math.round(1.2 / step)
+  // Lowest point reached down the wall so far: a corner the profile climbed
+  // back up to, out of a trough, is the gum crest beyond it unless it drops
+  // away below (the lip of a deep chamfer over a ditch). From the wall on —
+  // the occlusal fossa sits below the cusps.
+  const lowest: number[] = new Array(n).fill(Infinity)
+  for (let i = wallStart; i < n; i++) lowest[i] = Math.min(line[i].h, i > wallStart ? lowest[i - 1] : Infinity)
+  const climbed = (i: number): boolean => line[i].h - lowest[i] > 0.5
   for (let i = Math.max(wallStart + 2, L + 1); i < n - L - 1; i++) {
     if (!(tau[i] < -minTurn && tau[i] <= tau[i - 1] && tau[i] <= tau[i + 1])) continue
     // Not too far below the prep top: margins sit within ~10 mm of it.
@@ -186,6 +193,8 @@ export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0
     // A finish line drops away steeply below its edge (root, or the die); a
     // corner that rolls over into a gentle slope is a gingival crest.
     const edge = steepAfter(at)
+    // The lip of a deep chamfer drops away (die ditch); a gum crest doesn't.
+    if (climbed(at) && !edge) continue
     // A tapered wall (reserve pass): only true edges count.
     if (wallDeg < 55 && !edge) continue
     out.push({ r: p.r, h: p.h, score: edge || !creases ? -tau[i] + 0.6 * clamp(chamfer, 0, 2) : 0.4 * -tau[i], at, edge })
@@ -195,7 +204,7 @@ export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0
   // the steep wall onto the gentler gum, with no true edge just below.
   for (let i = Math.max(wallStart + 2, L + 1); creases && i < n - L - 1; i++) {
     if (!(tau[i] > minTurn && tau[i] >= tau[i - 1] && tau[i] >= tau[i + 1])) continue
-    if (topH - line[i].h > 10) continue
+    if (topH - line[i].h > 10 || climbed(i)) continue
     if (meanAlpha(i, -0.8, -0.15) > -55 * DEG || meanAlpha(i, 0.15, 0.8) < -50 * DEG) continue
     // A true edge just below makes this a chamfer/shoulder floor; one just
     // above makes it the root meeting the gum below the margin.
