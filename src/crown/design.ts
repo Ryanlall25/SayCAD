@@ -14,6 +14,7 @@ import {
   type CrownGrid
 } from './grid'
 import { MATERIALS, type MaterialId } from './materials'
+import { toothSide } from './findPrep'
 
 /**
  * The outer-surface designer: template → case. Everything is tooth-local
@@ -124,6 +125,8 @@ export function resolvedMaterial(p: DesignParams): {
 
 export interface DesignEnv {
   toothClass: ToothClass
+  /** Universal number: tells first from second molars within a class. */
+  toothNumber?: number
   /** Margin points at each meridian angle, local. */
   marginRow: Vec3[]
   intaglio: CrownGrid
@@ -156,11 +159,6 @@ export interface OuterResult {
   measures: DesignMeasures
   /** Neighbours the design made contact with (null: none, or across an edentulous span). */
   neighbours: { mesial: SurfaceIndex | null; distal: SurfaceIndex | null }
-}
-
-function median(xs: number[]): number {
-  const s = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b)
-  return s.length ? s[Math.floor(s.length / 2)] : NaN
 }
 
 /** Distance along ±x from the crown axis to a neighbour (closest approach). */
@@ -198,8 +196,17 @@ function neighbourRidge(n: SurfaceIndex | null, sign: 1 | -1, x: number | null):
  * measured keep the earlier rule (at least 1.4 mm).
  */
 const BL_OVER_MARGIN: Partial<Record<ToothClass, number>> = { lowerMolar: 0.55 }
-/** Mesiodistal length beyond the margin's (mm), same crowns: 1.6 (0.78–2.82). */
+/**
+ * Mesiodistal length beyond the margin's (mm), same crowns: lower first
+ * molars 1.6 (0.78–2.82, 9 crowns), lower second molars 0.6 (0.21–0.93,
+ * 5 crowns) — a second molar's crown barely overhangs its margin.
+ */
 const MD_OVER_MARGIN: Partial<Record<ToothClass, number>> = { lowerMolar: 1.6 }
+const MD_OVER_SECOND_MOLAR: Partial<Record<ToothClass, number>> = { lowerMolar: 0.6 }
+const BL_OVER_SECOND_MOLAR: Partial<Record<ToothClass, number>> = { lowerMolar: 0.65 }
+const secondMolar = (env: DesignEnv): boolean => env.toothNumber !== undefined && toothSide(env.toothNumber).pos === 7
+const mdOver = (env: DesignEnv): number | undefined => (secondMolar(env) ? MD_OVER_SECOND_MOLAR[env.toothClass] : undefined) ?? MD_OVER_MARGIN[env.toothClass]
+const blOverOf = (env: DesignEnv): number | undefined => (secondMolar(env) ? BL_OVER_SECOND_MOLAR[env.toothClass] : undefined) ?? BL_OVER_MARGIN[env.toothClass]
 
 /** Grid address of a named region on a fitted crown. */
 export function regionCentre(name: RegionName, grid: CrownGrid, cuspTips: OuterResult['cuspTips']): { i: number; j: number } | null {
@@ -593,7 +600,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     // reaches the neighbour only when that is close enough to touch.
     const known = (xm ?? xd) as number
     const sign = xm !== null ? 1 : -1
-    const usual = marginMD + (MD_OVER_MARGIN[env.toothClass] ?? 1.2)
+    const usual = marginMD + (mdOver(env) ?? 1.2)
     if (known <= usual / 2 + 0.6) {
       W = known + usual / 2
       xc = sign * (known - W / 2)
@@ -604,13 +611,13 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
       steps.push(`one neighbour only, ${known.toFixed(1)} mm away — usual width ${W.toFixed(2)} mm`)
     }
   } else {
-    W = marginMD + (MD_OVER_MARGIN[env.toothClass] ?? 1.2)
+    W = marginMD + (mdOver(env) ?? 1.2)
     xc = 0
     steps.push(`no neighbours found — width ${W.toFixed(2)} mm from margin`)
   }
   W += 0.15 // a hair wide, so the contact step trims into a definite contact
   const sx = W / Wt
-  const blOver = BL_OVER_MARGIN[env.toothClass]
+  const blOver = blOverOf(env)
   const D = blOver !== undefined ? marginBL + blOver : Math.max(Dt * sx, marginBL + 1.4)
   const sz = D / Dt
   const rot = (params.rotationDeg * Math.PI) / 180
@@ -630,7 +637,10 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
       const h = env.antagonist.raycast([p[0], -2, p[2]], [0, 1, 0], 0, 30)
       if (h) ratios.push((h.point[1] - params.occlusalClearanceMm - 0.1) / p[1])
     }
-    const r = median(ratios)
+    // The most limiting tip: no cusp may reach the antagonist first (the
+    // median let two of five push in, and the bite step then carved them
+    // into pits on crowns 0.6–0.9 mm taller than the technician's).
+    const r = ratios.length ? Math.min(...ratios) : NaN
     if (Number.isFinite(r)) sy = clamp(r, sx * 0.55, sx * 1.5)
     steps.push(`vertical scale ${sy.toFixed(2)} from antagonist (${ratios.length} cusp probes)`)
   }
@@ -655,7 +665,10 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     for (const [n, sign, x] of [[mesial, 1, xm], [distal, -1, xd]] as const) {
       // Only a neighbour the crown will touch: one across a gap says nothing about this tooth.
       if (x === null || x > W / 2 + sign * xc + 0.6) continue
-      const target = neighbourRidge(n, sign, x)
+      // Curve of Spee: a lower second molar's mesial ridge sits ~0.7 mm over
+      // the first molar's (lab crowns: +0.7, +0.8); first molars level with it.
+      const ridge = neighbourRidge(n, sign, x)
+      const target = ridge === null ? null : ridge + (secondMolar(env) && sign > 0 && env.toothClass === 'lowerMolar' ? 0.7 : 0)
       const own = ridgeOf(sign)
       // A neighbour ridge far below this tooth's own (a short or broken tooth) says little.
       if (target !== null && own > 0.5 && target > own * sx * 0.45) ratios.push(target / own)
