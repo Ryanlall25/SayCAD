@@ -630,6 +630,12 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   }
   // Height: cusp tips to the antagonist.
   let sy = (sx + sz) / 2
+  // Two antagonist readings: the median tip (a cap when the neighbours set
+  // the height) and the most limiting tip (the height itself when there is
+  // no neighbour to level with — the median let two of five tips push in,
+  // and the bite step carved them into pits on crowns 0.6–0.9 mm too tall;
+  // as a cap it pulled first molars down under a single opposing cusp).
+  let syLimit = sy
   if (env.antagonist) {
     const ratios: number[] = []
     for (const tip of tpl.cuspTips) {
@@ -637,12 +643,11 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
       const h = env.antagonist.raycast([p[0], -2, p[2]], [0, 1, 0], 0, 30)
       if (h) ratios.push((h.point[1] - params.occlusalClearanceMm - 0.1) / p[1])
     }
-    // The most limiting tip: no cusp may reach the antagonist first (the
-    // median let two of five push in, and the bite step then carved them
-    // into pits on crowns 0.6–0.9 mm taller than the technician's).
-    const r = ratios.length ? Math.min(...ratios) : NaN
+    const sorted = ratios.slice().sort((a, b) => a - b)
+    const r = sorted.length ? sorted[Math.floor(sorted.length / 2)] : NaN
     if (Number.isFinite(r)) sy = clamp(r, sx * 0.55, sx * 1.5)
-    steps.push(`vertical scale ${sy.toFixed(2)} from antagonist (${ratios.length} cusp probes)`)
+    if (sorted.length) syLimit = clamp(sorted[0], sx * 0.55, sx * 1.5)
+    steps.push(`vertical scale ${sy.toFixed(2)} from antagonist (${ratios.length} cusp probes; first to touch ${syLimit.toFixed(2)})`)
   }
   // Technicians level the marginal ridges with the neighbours' (measured on the
   // lab's crowns: within ~0.3 mm), so the neighbours set the height; the
@@ -678,6 +683,9 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
       const capped = Math.min(clamp(r, sx * 0.55, sx * 1.5), env.antagonist ? sy : Infinity)
       steps.push(`vertical scale ${capped.toFixed(2)} from the neighbours' marginal ridges (${ratios.length} side${ratios.length > 1 ? 's' : ''})`)
       sy = capped
+    } else if (env.antagonist && syLimit <= sx) {
+      steps.push(`vertical scale ${syLimit.toFixed(2)} — the first cusp to touch the antagonist (no neighbour ridge to level with)`)
+      sy = syLimit
     } else if (sy > sx) {
       // No usable neighbour: keep the tooth's own proportions rather than
       // stretching the cusps up to a distant antagonist.
