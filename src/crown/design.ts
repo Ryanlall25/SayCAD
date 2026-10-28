@@ -8,7 +8,6 @@ import {
   gridNormal,
   marginDistances,
   setP,
-  smoothField,
   smoothGrid,
   thetaOf,
   type CrownGrid
@@ -403,6 +402,57 @@ function enforceContact(
 
 /** Lowers anything closer than `clearance` to the antagonist; optionally first
  *  raises cusp tips into contact. */
+/**
+ * Lowers one vertex by `d`, never below the material floor (thickness
+ * outranks occlusion; the high spot left is reported by the critic).
+ * Returns how far it moved.
+ */
+function relieveVertex(grid: CrownGrid, i: number, j: number, d: number, floor: number | null): number {
+  const p = getP(grid, i, j)
+  const y = floor === null ? p[1] - d : Math.max(Math.min(p[1], floor), p[1] - d)
+  setP(grid, i, j, [p[0], y, p[2]])
+  return p[1] - y
+}
+
+/**
+ * A cusp placed into the antagonist is lowered as a whole — a smooth vertical
+ * dip spread in plan view (σ 2 mm), the way a technician drops a high cusp —
+ * leaving only the last 0.1 mm for the per-vertex relief to turn into a
+ * contact. Relieving the whole intrusion vertex by vertex carved the opposing
+ * cusp's shape into the crown (scoops, shelves, pits). Never below the
+ * material floor.
+ */
+function lowerIntrusions(grid: CrownGrid, ant: SurfaceIndex, clearance: number, j0: number, floorOf: (k: number, p: Vec3) => number | null, log: string[]): void {
+  const SIGMA = 2.0
+  const src: Array<[number, number, number]> = []
+  for (let j = j0; j < grid.nv; j++) {
+    for (let i = 0; i < grid.nu; i++) {
+      const p = getP(grid, i, j)
+      const over = clearance - ant.gapUp(p, 4) - 0.1
+      if (over > 0.01) src.push([p[0], p[2], over])
+    }
+  }
+  if (!src.length) return
+  const S2 = 2 * SIGMA * SIGMA
+  const reach2 = 9 * SIGMA * SIGMA
+  let deepest = 0
+  for (let j = j0; j < grid.nv; j++) {
+    const wt = smoothstep(j0, j0 + 10, j)
+    for (let i = 0; i < grid.nu; i++) {
+      const p = getP(grid, i, j)
+      let d = 0
+      for (const [x, z, o] of src) {
+        const d2 = (p[0] - x) ** 2 + (p[2] - z) ** 2
+        if (d2 < reach2) d = Math.max(d, o * Math.exp(-d2 / S2))
+      }
+      d *= wt
+      if (d < 1e-3) continue
+      deepest = Math.max(deepest, relieveVertex(grid, i, j, d, floorOf(j * grid.nu + i, p)))
+    }
+  }
+  if (deepest > 0.05) log.push(`high cusps lowered up to ${deepest.toFixed(2)} mm`)
+}
+
 export function enforceOcclusion(
   grid: CrownGrid,
   ant: SurfaceIndex,
@@ -439,6 +489,7 @@ export function enforceOcclusion(
     }
     if (raised) log.push(`raised ${raised} cusp tip(s) into occlusal contact`)
   }
+  lowerIntrusions(grid, ant, clearance, j0, floorOf, log)
   // Only vertices near the antagonist can ever need relief; find them once.
   let active: number[] | null = null
   // Until clear: a deep overlap (a cusp placed into the antagonist) can take
@@ -462,18 +513,22 @@ export function enforceOcclusion(
     else for (let k = j0 * grid.nu; k < grid.nu * grid.nv; k++) visit(k)
     active = next
     if (!any) break
-    const blurred = smoothField(grid, deficit, 3)
+    // The residual as small smooth dips (σ 0.5 mm): a vertex takes the
+    // deepest Gaussian of a nearby deficit, so no single vertex pits.
+    const src: Array<[Vec3, number]> = []
+    for (let k = j0 * grid.nu; k < grid.nu * grid.nv; k++) if (deficit[k] > 0) src.push([getP(grid, k % grid.nu, Math.floor(k / grid.nu)), deficit[k]])
     for (let j = j0; j < grid.nv; j++) {
       for (let i = 0; i < grid.nu; i++) {
         const k = j * grid.nu + i
-        const d = Math.max(deficit[k], blurred[k] * 1.5) * smoothstep(j0, j0 + 4, j)
+        const q = getP(grid, i, j)
+        let env = deficit[k]
+        for (const [c, dc] of src) {
+          const d2 = (q[0] - c[0]) ** 2 + (q[1] - c[1]) ** 2 + (q[2] - c[2]) ** 2
+          if (d2 < 2.25 * 0.25) env = Math.max(env, dc * Math.exp(-d2 / (2 * 0.25)))
+        }
+        const d = env * smoothstep(j0, j0 + 10, j)
         if (d <= 0) continue
-        const p = getP(grid, i, j)
-        // Never relieve below the material floor: thickness outranks occlusion,
-        // and the resulting high spot is reported by the occlusion critic.
-        const f = floorOf(k, p)
-        const y = f === null ? p[1] - d : Math.max(Math.min(p[1], f), p[1] - d)
-        setP(grid, i, j, [p[0], y, p[2]])
+        relieveVertex(grid, i, j, d, floorOf(k, getP(grid, i, j)))
       }
     }
     const pd = ant.gapUp(grid.pole, 4)
@@ -483,6 +538,58 @@ export function enforceOcclusion(
       grid.pole = [grid.pole[0], f === null ? y : Math.max(Math.min(grid.pole[1], f), y), grid.pole[2]]
     }
   }
+}
+
+/**
+ * Where the prep is under-reduced, raise the occlusal table as one smooth
+ * shape — the way a technician lifts the whole cusp — before the per-vertex
+ * thickness step: each thin occlusal vertex asks for the height it lacks, the
+ * request spreads in plan view as a Gaussian (σ 1.5 mm), and every vertex
+ * rises by the largest request reaching it. The occlusal surface is a height
+ * field over the tooth, so a smooth vertical lift can't fold it; pushing only
+ * the thin vertices out left a raised lobe with a hard rim.
+ */
+export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centre: Vec3, minOcclusalMm: number, minAxialMm: number, log?: string[]): void {
+  const SIGMA = 1.5
+  const j0 = Math.round(grid.nv * 0.4)
+  const src: Array<[number, number, number]> = []
+  for (let j = j0; j < grid.nv; j++) {
+    for (let i = 0; i < grid.nu; i++) {
+      const p = getP(grid, i, j)
+      const n = gridNormal(grid, i, j)
+      // Every upward-facing vertex (cusp slopes too: left to the normal push
+      // they wrinkled); slopes count against the axial minimum.
+      if (n[1] < 0.25) continue
+      const need = n[1] > 0.55 || j > grid.nv * 0.6 ? minOcclusalMm : minAxialMm
+      const sd = intaglio.signedDistance(p, normalize(sub(centre, p)), need + 3)
+      const lack = need + 0.03 - sd
+      // Folded through (deeply negative) is the thickness step's to re-seat.
+      if (lack > 0.01 && sd > -0.3) src.push([p[0], p[2], lack / Math.max(0.45, n[1])])
+    }
+  }
+  if (!src.length) return
+  const S2 = 2 * SIGMA * SIGMA
+  const reach2 = 9 * SIGMA * SIGMA
+  let maxLift = 0
+  for (let j = 1; j < grid.nv; j++) {
+    const wt = smoothstep(j0 - 6, j0 + 2, j)
+    if (wt <= 0) continue
+    for (let i = 0; i < grid.nu; i++) {
+      const p = getP(grid, i, j)
+      let d = 0
+      for (const [x, z, l] of src) {
+        const d2 = (p[0] - x) ** 2 + (p[2] - z) ** 2
+        if (d2 < reach2) d = Math.max(d, l * Math.exp(-d2 / S2))
+      }
+      if (d * wt < 1e-3) continue
+      setP(grid, i, j, [p[0], p[1] + d * wt, p[2]])
+      maxLift = Math.max(maxLift, d * wt)
+    }
+  }
+  let pd = 0
+  for (const [x, z, l] of src) pd = Math.max(pd, l * Math.exp(-(x * x + z * z) / S2))
+  grid.pole = [grid.pole[0], grid.pole[1] + pd, grid.pole[2]]
+  log?.push(`occlusal table raised up to ${maxLift.toFixed(2)} mm over an under-reduced prep`)
 }
 
 /** Pushes the outer surface out until it clears the intaglio by the material minimum. */
@@ -546,7 +653,10 @@ export function enforceThickness(
 /** Lowest y a vertex may be relieved to: material floor above the intaglio. */
 export function occlusalFloor(intaglio: SurfaceIndex, minOcclusalMm: number): (p: Vec3) => number | null {
   return (p) => {
-    const h = intaglio.raycast([p[0], p[1] + 20, p[2]], [0, -1, 0], 0, 40)
+    // Past the edge of the fitting surface's footprint (a ray straight down
+    // misses it) the closest point stands in: a missing floor there let the
+    // relief cut notches beside clamped neighbours.
+    const h = intaglio.raycast([p[0], p[1] + 20, p[2]], [0, -1, 0], 0, 40) ?? intaglio.closest(p, 6)
     if (!h) return null
     // Thickness is measured along the intaglio normal; on a sloped intaglio
     // the vertical gap must be larger to give the same normal thickness.
@@ -804,12 +914,14 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
 
   // 6. Thickness (wins), then a light fairing pass and a final check of each.
   const centre: Vec3 = [0, env.intaglio.pole[1] * 0.45, 0]
+  raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, steps)
   enforceThickness(g, env.intaglioIndex, centre, mat)
   smoothGrid(g, 2, 0.25, 2)
   env.onStage?.('thickness1', g)
   if (mesial) enforceContact(g, mesial, 1, params.contactMesialMm, [], wall)
   if (distal) enforceContact(g, distal, -1, params.contactDistalMm, [], wall)
   if (env.antagonist) enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, false, [], occlusalFloor(env.intaglioIndex, mat.minOcclusalMm))
+  raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm)
   enforceThickness(g, env.intaglioIndex, centre, mat, 14)
   steps.push(`minimum thickness enforced (${mat.minAxialMm} axial / ${mat.minOcclusalMm} occlusal mm)`)
   env.onStage?.('final', g)
