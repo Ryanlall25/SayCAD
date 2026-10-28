@@ -41,12 +41,13 @@ for (const c of cases) {
   else console.log(`  ${c.id}: not used for training (${a.error})`)
 }
 
-interface Score { dev: number; p90: number; reliefOurs: number; reliefTech: number; fails: string[] }
+interface Score { dev: number; p90: number; reliefOurs: number; reliefTech: number; fails: string[]; correction: number }
 function score(c: LabCase, anatomy: Record<string, string>): Score | null {
   let finalGrid: CrownGrid | null = null
+  let fitted: CrownGrid | null = null
   const out = designCase(
     { contract: 'saycad.crown/1', jobId: c.id, order: { tooth: c.fdi, system: 'fdi', material: 'zirconia-hs' }, scans: { prep: c.prep, antagonist: c.antagonist! }, options: { anatomy, margin: c.margin } } as Parameters<typeof designCase>[0],
-    { onStage: (s, g) => { if (s === 'final') finalGrid = g } }
+    { onStage: (s, g) => { if (s === 'emergence') fitted = { ...g, pts: g.pts.slice() }; if (s === 'final') finalGrid = g } }
   )
   const frame = out.files?.designRecord?.frame
   if (!frame || !out.files?.crownStl || !finalGrid) return null
@@ -79,7 +80,13 @@ function score(c: LabCase, anatomy: Record<string, string>): Score | null {
     const s = [...h].sort((a, b) => a - b)
     return s[Math.floor(s.length * 0.95)] - s[Math.floor(s.length * 0.05)]
   }
+  // How much the contact, bite and thickness steps had to move the shape: a fit score
+  // that needs no technician crown, so the engine could use it to choose a donor.
+  let move = 0
+  const f0 = fitted as CrownGrid | null
+  if (f0) for (let k = 0; k < g.pts.length; k += 3) move += Math.hypot(g.pts[k] - f0.pts[k], g.pts[k + 1] - f0.pts[k + 1], g.pts[k + 2] - f0.pts[k + 2])
   return {
+    correction: f0 ? move / (g.pts.length / 3) : NaN,
     dev: d.reduce((s, x) => s + x, 0) / d.length,
     p90: d[Math.floor(d.length * 0.9)],
     reliefOurs: spread(hO),
@@ -90,9 +97,9 @@ function score(c: LabCase, anatomy: Record<string, string>): Score | null {
 
 const modelJson = (m: ShapeModel): string => JSON.stringify(m)
 const fmt = (s: Score | null): string => (s ? `${s.dev.toFixed(2)} / ${s.p90.toFixed(2)}  relief ${s.reliefOurs.toFixed(2)}${s.fails.length ? '  FAIL ' + s.fails.join(',') : ''}` : '—')
-const rows: string[] = ['case,fdi,variant,dev_mean,dev_p90,relief_ours,relief_tech,fails']
+const rows: string[] = ['case,fdi,variant,dev_mean,dev_p90,relief_ours,relief_tech,fails,correction']
 const log = (c: LabCase, v: string, s: Score | null): void => {
-  if (s) rows.push([c.id, c.fdi, v, s.dev.toFixed(3), s.p90.toFixed(3), s.reliefOurs.toFixed(3), s.reliefTech.toFixed(3), s.fails.join(' ')].join(','))
+  if (s) rows.push([c.id, c.fdi, v, s.dev.toFixed(3), s.p90.toFixed(3), s.reliefOurs.toFixed(3), s.reliefTech.toFixed(3), s.fails.join(' '), s.correction.toFixed(4)].join(','))
 }
 for (const c of cases) {
   if (!c.antagonist) continue

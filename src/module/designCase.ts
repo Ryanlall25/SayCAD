@@ -9,6 +9,7 @@ import { MATERIALS } from '../crown/materials'
 import { NEW_ORDER, checkScan, occlusionWarning, scanSlots, type ScanStats } from '../crown/order'
 import { autoDesign, prepareCase, type DesignResult } from '../crown/pipeline'
 import { parseShapeModel, templateFromModel } from '../crown/ssm'
+import { designFromDonors, parseDonorSet } from '../crown/donors'
 import type { CriticResult } from '../crown/critics'
 import type { DesignParams } from '../crown/design'
 import type { CrownGrid } from '../crown/grid'
@@ -93,9 +94,20 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
   const template = model && model.cls === cls ? templateFromModel(model) : undefined
   const anatomy = template ? `library — ${(JSON.parse(modelJson!) as { source?: string }).source ?? cls}` : 'textbook — no library tooth for this position'
 
+  // The lab's own finished crowns for this class, when given: each is tried and
+  // the one that needed the least reshaping to fit this case is kept.
+  const donorJson = job.options?.anatomy?.[`donors-${cls}`]
+  const donors = donorJson ? parseDonorSet(donorJson) : null
+
   let r: DesignResult
+  let anatomyUsed = anatomy
   try {
-    r = autoDesign(pc, { tap, margin, params: { ...job.options?.params, material }, template, onStage: dev?.onStage })
+    const req = { tap, margin, params: { ...job.options?.params, material }, onStage: dev?.onStage }
+    const pick = donors && donors.cls === cls ? designFromDonors(pc, req, donors) : null
+    if (pick) {
+      r = pick.result
+      anatomyUsed = `lab crown ${pick.donor} — least reshaping (${pick.reshapingMm.toFixed(2)} mm) of ${pick.tried}`
+    } else r = autoDesign(pc, { ...req, template })
   } catch (e) {
     return { ...base, status: 'needs-input', tooth, intake, prepFoundBy, needs: [{ kind: 'margin', message: e instanceof Error ? e.message : String(e) }] }
   }
@@ -113,7 +125,7 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
       positions: (r.crown.getAttribute('position') as THREE.BufferAttribute).array as Float32Array,
       indices: (r.crown.index as THREE.BufferAttribute).array as Uint32Array,
       prepFoundBy,
-      anatomy,
+      anatomy: anatomyUsed,
       intake
     }),
     timingsMs: { ...timings, ...r.timingsMs }
