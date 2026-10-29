@@ -14,6 +14,7 @@ import {
   type CrownGrid
 } from './grid'
 import { MATERIALS, type MaterialId } from './materials'
+import { toothSide } from './findPrep'
 
 /**
  * The outer-surface designer: template → case. Everything is tooth-local
@@ -91,7 +92,9 @@ export const DEFAULT_PARAMS: DesignParams = {
   contactMesialMm: -0.03,
   contactDistalMm: -0.03,
   occlusalClearanceMm: 0.05,
-  occlusalContacts: true,
+  // Off: lifting every cusp tip into contact made crowns taller than the lab's
+  // (technicians leave 0.06–0.13 mm at the closest point, 9 lower molars).
+  occlusalContacts: false,
   cuspScale: 1,
   grooveScale: 1,
   buccalBulgeMm: 0,
@@ -122,6 +125,8 @@ export function resolvedMaterial(p: DesignParams): {
 
 export interface DesignEnv {
   toothClass: ToothClass
+  /** Universal number: tells first from second molars within a class. */
+  toothNumber?: number
   /** Margin points at each meridian angle, local. */
   marginRow: Vec3[]
   intaglio: CrownGrid
@@ -156,11 +161,6 @@ export interface OuterResult {
   neighbours: { mesial: SurfaceIndex | null; distal: SurfaceIndex | null }
 }
 
-function median(xs: number[]): number {
-  const s = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b)
-  return s.length ? s[Math.floor(s.length / 2)] : NaN
-}
-
 /** Distance along ±x from the crown axis to a neighbour (closest approach). */
 function measureSpace(n: SurfaceIndex | null, sign: 1 | -1, yLo: number, yHi: number): number | null {
   if (!n) return null
@@ -173,6 +173,40 @@ function measureSpace(n: SurfaceIndex | null, sign: 1 | -1, yLo: number, yHi: nu
   }
   return Number.isFinite(best) ? best : null
 }
+
+/**
+ * Height of a neighbour's marginal ridge beside the contact: its highest point
+ * within 1.5 mm of the contact surface (local frame, y = occlusal).
+ */
+function neighbourRidge(n: SurfaceIndex | null, sign: 1 | -1, x: number | null): number | null {
+  if (!n || x === null) return null
+  let best = -Infinity
+  for (let dx = 0.2; dx <= 1.5; dx += 0.325) {
+    for (const z of [-2, -1, 0, 1, 2]) {
+      const h = n.raycast([sign * (x + dx), 30, z], [0, -1, 0], 0, 40)
+      if (h) best = Math.max(best, h.point[1])
+    }
+  }
+  return Number.isFinite(best) ? best : null
+}
+
+/**
+ * Bucco-lingual width beyond the margin's (mm), measured on the lab's own
+ * crowns: lower first molars 0.55 (0.11–1.05, 9 crowns). Classes not yet
+ * measured keep the earlier rule (at least 1.4 mm).
+ */
+const BL_OVER_MARGIN: Partial<Record<ToothClass, number>> = { lowerMolar: 0.55 }
+/**
+ * Mesiodistal length beyond the margin's (mm), same crowns: lower first
+ * molars 1.6 (0.78–2.82, 9 crowns), lower second molars 0.6 (0.21–0.93,
+ * 5 crowns) — a second molar's crown barely overhangs its margin.
+ */
+const MD_OVER_MARGIN: Partial<Record<ToothClass, number>> = { lowerMolar: 1.6 }
+const MD_OVER_SECOND_MOLAR: Partial<Record<ToothClass, number>> = { lowerMolar: 0.6 }
+const BL_OVER_SECOND_MOLAR: Partial<Record<ToothClass, number>> = { lowerMolar: 0.65 }
+const secondMolar = (env: DesignEnv): boolean => env.toothNumber !== undefined && toothSide(env.toothNumber).pos === 7
+const mdOver = (env: DesignEnv): number | undefined => (secondMolar(env) ? MD_OVER_SECOND_MOLAR[env.toothClass] : undefined) ?? MD_OVER_MARGIN[env.toothClass]
+const blOverOf = (env: DesignEnv): number | undefined => (secondMolar(env) ? BL_OVER_SECOND_MOLAR[env.toothClass] : undefined) ?? BL_OVER_MARGIN[env.toothClass]
 
 /** Grid address of a named region on a fitted crown. */
 export function regionCentre(name: RegionName, grid: CrownGrid, cuspTips: OuterResult['cuspTips']): { i: number; j: number } | null {
@@ -226,6 +260,61 @@ export function applySculpt(grid: CrownGrid, centre: { i: number; j: number }, a
   }
 }
 
+/**
+ * Moves vertices toward the prep (along ∓x) by a per-vertex amount, smoothed
+ * over the grid (never below what each vertex needs), stopping each at the
+ * material minimum over the fitting surface.
+ */
+function relieveField(
+  grid: CrownGrid,
+  need: Float64Array,
+  sign: 1 | -1,
+  wall: { intaglio: SurfaceIndex; minAxialMm: number; minOcclusalMm: number } | undefined,
+  onLimit: () => void
+): void {
+  const { nu, nv } = grid
+  let f = need
+  for (let pass = 0; pass < 4; pass++) {
+    const g = new Float64Array(nu * nv)
+    for (let j = 1; j < nv; j++) {
+      for (let i = 0; i < nu; i++) {
+        let s = 0
+        let c = 0
+        for (let dj = -1; dj <= 1; dj++) {
+          const jj = j + dj
+          if (jj < 1 || jj >= nv) continue
+          for (let di = -1; di <= 1; di++) {
+            s += f[jj * nu + ((i + di + nu) % nu)]
+            c++
+          }
+        }
+        g[j * nu + i] = Math.max(need[j * nu + i], s / c)
+      }
+    }
+    f = g
+  }
+  for (let j = 1; j < nv; j++) {
+    const wt = smoothstep(0.015, 0.09, j / nv)
+    for (let i = 0; i < nu; i++) {
+      const m = f[j * nu + i] * wt
+      if (m < 1e-4) continue
+      const p = getP(grid, i, j)
+      let q: Vec3 = [p[0] - sign * m, p[1], p[2]]
+      if (wall) {
+        const min = gridNormal(grid, i, j)[1] > 0.55 || j > nv * 0.6 ? wall.minOcclusalMm : wall.minAxialMm
+        const dq = wall.intaglio.closest(q, min + 1)?.distance ?? Infinity
+        if (dq < min) {
+          const dp = wall.intaglio.closest(p, min + 1)?.distance ?? Infinity
+          const t = dp > dq && dp > min ? (dp - min) / (dp - dq) : 0
+          q = [p[0] + (q[0] - p[0]) * t, p[1], p[2]]
+          onLimit()
+        }
+      }
+      setP(grid, i, j, q)
+    }
+  }
+}
+
 /** RBF push/pull until the closest approach to a neighbour equals `target`. */
 function enforceContact(
   grid: CrownGrid,
@@ -271,6 +360,17 @@ function enforceContact(
       log.push(`${sign > 0 ? 'mesial' : 'distal'} neighbour ${min.toFixed(2)} mm away — too far to reach; contact left open`)
       return { gap: min }
     }
+    if (e < 0) {
+      // Overlap: each vertex inside the neighbour moves just clear of it, the
+      // field smoothed so the wall stays fair — the proximal surface takes
+      // the neighbour's shape, as a technician's adapted contact does. One
+      // blob around the worst point would drag the whole wall in by its depth
+      // (an overhanging neighbour: 1 mm too deep along its whole slope).
+      const need = new Float64Array(grid.nu * grid.nv)
+      for (const [i, j] of candidates) need[j * grid.nu + i] = Math.max(0, target - n.signedDistance(getP(grid, i, j), [sign, 0, 0], 5))
+      relieveField(grid, need, sign, wall, () => (limited = true))
+      continue
+    }
     for (let j = 1; j < grid.nv; j++) {
       const wt = smoothstep(0.015, 0.09, j / grid.nv)
       for (let i = 0; i < grid.nu; i++) {
@@ -303,6 +403,98 @@ function enforceContact(
 
 /** Lowers anything closer than `clearance` to the antagonist; optionally first
  *  raises cusp tips into contact. */
+/**
+ * The material floor under each vertex, made smooth: taken straight off the
+ * scanned prep it was as rough as the scan, and a tight prep's relief —
+ * clamped at it vertex by vertex — came out torn. Each vertex takes the
+ * Gaussian-weighted mean of the nearby floors (σ FLOOR_SIGMA in plan view)
+ * plus a small margin; envelopes of cones or caps showed through as facets
+ * or dimples. Where the mean dips under a real floor, the thickness step's
+ * smooth lift makes up the difference. Index −1 is the pole.
+ */
+const FLOOR_SIGMA = 0.8
+const FLOOR_MARGIN = 0.03
+function smoothFloors(grid: CrownGrid, j0: number, floorY?: (p: Vec3) => number | null): (k: number, p: Vec3) => number | null {
+  if (!floorY) return () => null
+  const raw: Array<[number, number, number]> = []
+  for (let j = j0; j < grid.nv; j++) {
+    for (let i = 0; i < grid.nu; i++) {
+      const p = getP(grid, i, j)
+      const f = floorY(p)
+      if (f !== null) raw.push([p[0], p[2], f])
+    }
+  }
+  const pf = floorY(grid.pole)
+  if (pf !== null) raw.push([grid.pole[0], grid.pole[2], pf])
+  const cache = new Map<number, number | null>()
+  return (k, p) => {
+    if (cache.has(k)) return cache.get(k)!
+    let sw = 0
+    let sf = 0
+    for (const [x, z, f] of raw) {
+      const d2 = (p[0] - x) ** 2 + (p[2] - z) ** 2
+      if (d2 > 9 * FLOOR_SIGMA * FLOOR_SIGMA) continue
+      const w = Math.exp(-d2 / (2 * FLOOR_SIGMA * FLOOR_SIGMA))
+      sw += w
+      sf += w * f
+    }
+    const v = sw > 1e-6 ? sf / sw + FLOOR_MARGIN : null
+    cache.set(k, v)
+    return v
+  }
+}
+
+/**
+ * Lowers one vertex by `d`, never below the material floor (thickness
+ * outranks occlusion; the high spot left is reported by the critic).
+ * Returns how far it moved.
+ */
+function relieveVertex(grid: CrownGrid, i: number, j: number, d: number, floor: number | null): number {
+  const p = getP(grid, i, j)
+  const y = floor === null ? p[1] - d : Math.max(Math.min(p[1], floor), p[1] - d)
+  setP(grid, i, j, [p[0], y, p[2]])
+  return p[1] - y
+}
+
+/**
+ * A cusp placed into the antagonist is lowered as a whole — a smooth vertical
+ * dip spread in plan view (σ 2 mm), the way a technician drops a high cusp —
+ * leaving only the last 0.1 mm for the per-vertex relief to turn into a
+ * contact. Relieving the whole intrusion vertex by vertex carved the opposing
+ * cusp's shape into the crown (scoops, shelves, pits). Never below the
+ * material floor.
+ */
+function lowerIntrusions(grid: CrownGrid, ant: SurfaceIndex, clearance: number, j0: number, floorOf: (k: number, p: Vec3) => number | null, log: string[]): void {
+  const SIGMA = 2.0
+  const src: Array<[number, number, number]> = []
+  for (let j = j0; j < grid.nv; j++) {
+    for (let i = 0; i < grid.nu; i++) {
+      const p = getP(grid, i, j)
+      const over = clearance - ant.gapUp(p, 4) - 0.1
+      if (over > 0.01) src.push([p[0], p[2], over])
+    }
+  }
+  if (!src.length) return
+  const S2 = 2 * SIGMA * SIGMA
+  const reach2 = 9 * SIGMA * SIGMA
+  let deepest = 0
+  for (let j = j0; j < grid.nv; j++) {
+    const wt = smoothstep(j0, j0 + 10, j)
+    for (let i = 0; i < grid.nu; i++) {
+      const p = getP(grid, i, j)
+      let d = 0
+      for (const [x, z, o] of src) {
+        const d2 = (p[0] - x) ** 2 + (p[2] - z) ** 2
+        if (d2 < reach2) d = Math.max(d, o * Math.exp(-d2 / S2))
+      }
+      d *= wt
+      if (d < 1e-3) continue
+      deepest = Math.max(deepest, relieveVertex(grid, i, j, d, floorOf(j * grid.nu + i, p)))
+    }
+  }
+  if (deepest > 0.05) log.push(`high cusps lowered up to ${deepest.toFixed(2)} mm`)
+}
+
 export function enforceOcclusion(
   grid: CrownGrid,
   ant: SurfaceIndex,
@@ -314,12 +506,7 @@ export function enforceOcclusion(
   floorY?: (p: Vec3) => number | null
 ): void {
   const j0 = Math.round(grid.nv * 0.3)
-  const floors = new Map<number, number | null>()
-  const floorOf = (k: number, p: Vec3): number | null => {
-    if (!floorY) return null
-    if (!floors.has(k)) floors.set(k, floorY(p))
-    return floors.get(k)!
-  }
+  const floorOf = smoothFloors(grid, j0, floorY)
   if (raise) {
     let raised = 0
     for (const tip of cuspTips) {
@@ -339,6 +526,7 @@ export function enforceOcclusion(
     }
     if (raised) log.push(`raised ${raised} cusp tip(s) into occlusal contact`)
   }
+  lowerIntrusions(grid, ant, clearance, j0, floorOf, log)
   // Only vertices near the antagonist can ever need relief; find them once.
   let active: number[] | null = null
   // Until clear: a deep overlap (a cusp placed into the antagonist) can take
@@ -362,18 +550,22 @@ export function enforceOcclusion(
     else for (let k = j0 * grid.nu; k < grid.nu * grid.nv; k++) visit(k)
     active = next
     if (!any) break
-    const blurred = smoothField(grid, deficit, 3)
+    // The residual as small smooth dips (σ 0.5 mm): a vertex takes the
+    // deepest Gaussian of a nearby deficit, so no single vertex pits.
+    const src: Array<[Vec3, number]> = []
+    for (let k = j0 * grid.nu; k < grid.nu * grid.nv; k++) if (deficit[k] > 0) src.push([getP(grid, k % grid.nu, Math.floor(k / grid.nu)), deficit[k]])
     for (let j = j0; j < grid.nv; j++) {
       for (let i = 0; i < grid.nu; i++) {
         const k = j * grid.nu + i
-        const d = Math.max(deficit[k], blurred[k] * 1.5) * smoothstep(j0, j0 + 4, j)
+        const q = getP(grid, i, j)
+        let env = deficit[k]
+        for (const [c, dc] of src) {
+          const d2 = (q[0] - c[0]) ** 2 + (q[1] - c[1]) ** 2 + (q[2] - c[2]) ** 2
+          if (d2 < 2.25 * 0.25) env = Math.max(env, dc * Math.exp(-d2 / (2 * 0.25)))
+        }
+        const d = env * smoothstep(j0, j0 + 10, j)
         if (d <= 0) continue
-        const p = getP(grid, i, j)
-        // Never relieve below the material floor: thickness outranks occlusion,
-        // and the resulting high spot is reported by the occlusion critic.
-        const f = floorOf(k, p)
-        const y = f === null ? p[1] - d : Math.max(Math.min(p[1], f), p[1] - d)
-        setP(grid, i, j, [p[0], y, p[2]])
+        relieveVertex(grid, i, j, d, floorOf(k, getP(grid, i, j)))
       }
     }
     const pd = ant.gapUp(grid.pole, 4)
@@ -383,6 +575,70 @@ export function enforceOcclusion(
       grid.pole = [grid.pole[0], f === null ? y : Math.max(Math.min(grid.pole[1], f), y), grid.pole[2]]
     }
   }
+}
+
+/**
+ * Where the prep is under-reduced, raise the occlusal table as one smooth
+ * shape — the way a technician lifts the whole cusp — before the per-vertex
+ * thickness step: each thin occlusal vertex asks for the height it lacks, the
+ * request spreads in plan view as a Gaussian (σ 1.5 mm), and every vertex
+ * rises by the largest request reaching it. The occlusal surface is a height
+ * field over the tooth, so a smooth vertical lift can't fold it; pushing only
+ * the thin vertices out left a raised lobe with a hard rim.
+ */
+export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centre: Vec3, minOcclusalMm: number, minAxialMm: number, log?: string[]): void {
+  const SIGMA = 1.5
+  const j0 = Math.round(grid.nv * 0.4)
+  const src: Array<[number, number, number]> = []
+  for (let j = j0; j < grid.nv; j++) {
+    for (let i = 0; i < grid.nu; i++) {
+      const p = getP(grid, i, j)
+      const n = gridNormal(grid, i, j)
+      // Every upward-facing vertex (cusp slopes too: left to the normal push
+      // they wrinkled); slopes count against the axial minimum.
+      if (n[1] < 0.25) continue
+      const need = n[1] > 0.55 || j > grid.nv * 0.6 ? minOcclusalMm : minAxialMm
+      const sd = intaglio.signedDistance(p, normalize(sub(centre, p)), need + 3)
+      const lack = need + 0.03 - sd
+      // Folded through (deeply negative) is the thickness step's to re-seat.
+      if (lack > 0.01 && sd > -0.3) src.push([p[0], p[2], lack / Math.max(0.45, n[1])])
+    }
+  }
+  if (!src.length) return
+  const S2 = 2 * SIGMA * SIGMA
+  const reach2 = 9 * SIGMA * SIGMA
+  // The largest request reaching each vertex, then smoothed over the grid:
+  // a bare maximum of many requests left a bump at each one. What the
+  // smoothing gives back, the thickness step restores.
+  const lift = new Float64Array(grid.nu * grid.nv)
+  for (let j = 1; j < grid.nv; j++) {
+    const wt = smoothstep(j0 - 6, j0 + 2, j)
+    if (wt <= 0) continue
+    for (let i = 0; i < grid.nu; i++) {
+      const p = getP(grid, i, j)
+      let d = 0
+      for (const [x, z, l] of src) {
+        const d2 = (p[0] - x) ** 2 + (p[2] - z) ** 2
+        if (d2 < reach2) d = Math.max(d, l * Math.exp(-d2 / S2))
+      }
+      lift[j * grid.nu + i] = d * wt
+    }
+  }
+  const smooth = smoothField(grid, lift, 6)
+  let maxLift = 0
+  for (let j = 1; j < grid.nv; j++) {
+    for (let i = 0; i < grid.nu; i++) {
+      const d = smooth[j * grid.nu + i]
+      if (d < 1e-3) continue
+      const p = getP(grid, i, j)
+      setP(grid, i, j, [p[0], p[1] + d, p[2]])
+      maxLift = Math.max(maxLift, d)
+    }
+  }
+  let pd = 0
+  for (const [x, z, l] of src) pd = Math.max(pd, l * Math.exp(-(x * x + z * z) / S2))
+  grid.pole = [grid.pole[0], grid.pole[1] + pd, grid.pole[2]]
+  log?.push(`occlusal table raised up to ${maxLift.toFixed(2)} mm over an under-reduced prep`)
 }
 
 /** Pushes the outer surface out until it clears the intaglio by the material minimum. */
@@ -446,13 +702,43 @@ export function enforceThickness(
 /** Lowest y a vertex may be relieved to: material floor above the intaglio. */
 export function occlusalFloor(intaglio: SurfaceIndex, minOcclusalMm: number): (p: Vec3) => number | null {
   return (p) => {
-    const h = intaglio.raycast([p[0], p[1] + 20, p[2]], [0, -1, 0], 0, 40)
+    // Past the edge of the fitting surface's footprint (a ray straight down
+    // misses it) the closest point stands in: a missing floor there let the
+    // relief cut notches beside clamped neighbours.
+    const h = intaglio.raycast([p[0], p[1] + 20, p[2]], [0, -1, 0], 0, 40) ?? intaglio.closest(p, 6)
     if (!h) return null
     // Thickness is measured along the intaglio normal; on a sloped intaglio
     // the vertical gap must be larger to give the same normal thickness.
     const ny = Math.abs(intaglio.faceNormal(h.faceIndex)[1])
     return h.point[1] + (minOcclusalMm + 0.01) / Math.max(0.45, ny)
   }
+}
+
+/**
+ * Maps template heights (0 at the margin, top at H) onto a crown of height
+ * H·sy keeping the top OCCLUSAL_RELIEF_MM at true scale: slope k below, 1
+ * above, blended over 1 mm around the junction. Falls back to a uniform
+ * scale when the crown is too short to keep its occlusal table whole.
+ */
+const OCCLUSAL_RELIEF_MM = 2.0
+export function heightMap(H: number, sy: number): (y: number) => number {
+  const target = H * sy
+  const y0 = H - OCCLUSAL_RELIEF_MM
+  const k = y0 > 0.5 ? (target - OCCLUSAL_RELIEF_MM) / y0 : NaN
+  if (!(k > 0.25) || Math.abs(sy - 1) < 1e-3) return (y) => y * sy
+  // f(y) = k·y + (1 − k)·∫₀ʸ smoothstep(y0 − ½, y0 + ½, t) dt
+  const S = (y: number): number => {
+    if (y <= y0 - 0.5) return 0
+    const n = 24
+    const top = Math.min(y, y0 + 0.5)
+    let acc = 0
+    for (let i = 0; i < n; i++) {
+      const t = y0 - 0.5 + ((i + 0.5) / n) * (top - (y0 - 0.5))
+      acc += smoothstep(y0 - 0.5, y0 + 0.5, t)
+    }
+    return (acc / n) * (top - (y0 - 0.5)) + Math.max(0, y - (y0 + 0.5))
+  }
+  return (y) => (y <= 0 ? y * k : k * y + (1 - k) * S(y))
 }
 
 /** Designs the outer crown surface for a prepared case. */
@@ -489,26 +775,50 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     xd = null
     distal = null
   }
+  // A space far longer than this tooth's usual length (lab crowns ran at most
+  // ~1.2 mm over the usual) is not one the technician fills: the crown keeps
+  // its length, touches the mesial neighbour and leaves the distal open
+  // (lab case040: 11.8 mm space, technician's crown 10.0 with a 2.2 mm gap).
+  if (xm !== null && xd !== null && xm + xd > marginMD + (mdOver(env) ?? 1.2) + 1.3) {
+    steps.push(`space ${(xm + xd).toFixed(1)} mm is far longer than this tooth — distal left open`)
+    xd = null
+    distal = null
+  }
   let W: number
   let xc: number
-  const ratio = Wt / Math.max(1, Math.max(...env.marginRow.map((p) => Math.abs(p[0]))) * 2)
   if (xm !== null && xd !== null) {
     W = xm + xd
     xc = (xm - xd) / 2
     steps.push(`mesiodistal space ${W.toFixed(2)} mm between neighbours`)
   } else if (xm !== null || xd !== null) {
+    // One neighbour: the crown takes its usual length over the margin, and
+    // reaches the neighbour only when that is close enough to touch.
     const known = (xm ?? xd) as number
-    W = clamp(Math.max(marginMD * ratio, known + marginMD / 2), marginMD + 0.6, Math.max(Wt * 1.4, marginMD + 0.6))
-    xc = xm !== null ? known - W / 2 : W / 2 - known
-    steps.push(`one neighbour only — width ${W.toFixed(2)} mm from margin proportions`)
+    const sign = xm !== null ? 1 : -1
+    const usual = marginMD + (mdOver(env) ?? 1.2)
+    if (known <= usual / 2 + 0.6) {
+      W = known + usual / 2
+      xc = sign * (known - W / 2)
+      steps.push(`one neighbour only — width ${W.toFixed(2)} mm, in contact with it`)
+    } else {
+      W = usual
+      xc = 0
+      steps.push(`one neighbour only, ${known.toFixed(1)} mm away — usual width ${W.toFixed(2)} mm`)
+      // Too far to touch at its usual length: the contact step mustn't then
+      // stretch the crown to it (lab case064: 1.3 mm longer than the
+      // technician's, who left a 0.8 mm gap).
+      if (xm !== null) mesial = null
+      else distal = null
+    }
   } else {
-    W = Math.max(marginMD * 1.15, marginMD + 1.2)
+    W = marginMD + (mdOver(env) ?? 1.2)
     xc = 0
     steps.push(`no neighbours found — width ${W.toFixed(2)} mm from margin`)
   }
   W += 0.15 // a hair wide, so the contact step trims into a definite contact
   const sx = W / Wt
-  const D = Math.max(Dt * sx, marginBL + 1.4)
+  const blOver = blOverOf(env)
+  const D = blOver !== undefined ? marginBL + blOver : Math.max(Dt * sx, marginBL + 1.4)
   const sz = D / Dt
   const rot = (params.rotationDeg * Math.PI) / 180
   const cr = Math.cos(rot)
@@ -520,6 +830,12 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   }
   // Height: cusp tips to the antagonist.
   let sy = (sx + sz) / 2
+  // Two antagonist readings: the median tip (a cap when the neighbours set
+  // the height) and the most limiting tip (the height itself when there is
+  // no neighbour to level with — the median let two of five tips push in,
+  // and the bite step carved them into pits on crowns 0.6–0.9 mm too tall;
+  // as a cap it pulled first molars down under a single opposing cusp).
+  let syLimit = sy
   if (env.antagonist) {
     const ratios: number[] = []
     for (const tip of tpl.cuspTips) {
@@ -527,12 +843,69 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
       const h = env.antagonist.raycast([p[0], -2, p[2]], [0, 1, 0], 0, 30)
       if (h) ratios.push((h.point[1] - params.occlusalClearanceMm - 0.1) / p[1])
     }
-    const r = median(ratios)
+    const sorted = ratios.slice().sort((a, b) => a - b)
+    const r = sorted.length ? sorted[Math.floor(sorted.length / 2)] : NaN
     if (Number.isFinite(r)) sy = clamp(r, sx * 0.55, sx * 1.5)
-    steps.push(`vertical scale ${sy.toFixed(2)} from antagonist (${ratios.length} cusp probes)`)
+    if (sorted.length) syLimit = clamp(sorted[0], sx * 0.55, sx * 1.5)
+    steps.push(`vertical scale ${sy.toFixed(2)} from antagonist (${ratios.length} cusp probes; first to touch ${syLimit.toFixed(2)})`)
   }
-  for (let j = 0; j < g.nv; j++) for (let i = 0; i < nu; i++) setP(g, i, j, place(getP(tpl.grid, i, j), sy))
-  g.pole = place(tpl.grid.pole, sy)
+  // Technicians level the marginal ridges with the neighbours' (measured on the
+  // lab's crowns: within ~0.3 mm), so the neighbours set the height; the
+  // antagonist only caps it (cusps reaching up into its fossae made crowns
+  // 1–3 mm too tall).
+  {
+    const ridgeOf = (sign: 1 | -1): number => {
+      let best = -Infinity
+      let edge = -Infinity
+      for (let j = 0; j < g.nv; j++) for (let i = 0; i < nu; i++) edge = Math.max(edge, sign * place(getP(tpl.grid, i, j), 1)[0])
+      for (let j = 0; j < g.nv; j++) {
+        for (let i = 0; i < nu; i++) {
+          const p = place(getP(tpl.grid, i, j), 1)
+          if (sign * p[0] > edge - 1.2) best = Math.max(best, p[1])
+        }
+      }
+      return best
+    }
+    const ratios: number[] = []
+    for (const [n, sign, x] of [[mesial, 1, xm], [distal, -1, xd]] as const) {
+      // Only a neighbour the crown will touch: one across a gap says nothing about this tooth.
+      if (x === null || x > W / 2 + sign * xc + 0.6) continue
+      // The lab's technicians set a lower molar's mesial marginal ridge a
+      // little above the neighbour's: first molars +0.23 mm (−0.58…+1.03,
+      // 12 crowns), second molars +0.43 (−0.22…+0.82, 3) — curve of Spee.
+      const ridge = neighbourRidge(n, sign, x)
+      const target = ridge === null ? null : ridge + (sign > 0 && env.toothClass === 'lowerMolar' ? (secondMolar(env) ? 0.45 : 0.25) : 0)
+      const own = ridgeOf(sign)
+      // A neighbour ridge far below this tooth's own (a short or broken tooth) says little.
+      if (target !== null && own > 0.5 && target > own * sx * 0.45) ratios.push(target / own)
+    }
+    if (ratios.length) {
+      const r = ratios.reduce((a, b) => a + b, 0) / ratios.length
+      const capped = Math.min(clamp(r, sx * 0.55, sx * 1.5), env.antagonist ? sy : Infinity)
+      steps.push(`vertical scale ${capped.toFixed(2)} from the neighbours' marginal ridges (${ratios.length} side${ratios.length > 1 ? 's' : ''})`)
+      sy = capped
+    } else if (env.antagonist && syLimit <= sx) {
+      steps.push(`vertical scale ${syLimit.toFixed(2)} — the first cusp to touch the antagonist (no neighbour ridge to level with)`)
+      sy = syLimit
+    } else if (sy > sx) {
+      // No usable neighbour: keep the tooth's own proportions rather than
+      // stretching the cusps up to a distant antagonist.
+      steps.push(`vertical scale ${sx.toFixed(2)} — tooth proportions (no neighbour ridge to level with)`)
+      sy = sx
+    }
+  }
+  // The height change goes into the walls, not the occlusal anatomy: a
+  // uniform vertical scale (0.73–0.78 on short preps) shrank cusp height and
+  // fissure depth with it; a technician keeps the occlusal table and
+  // shortens or lengthens the crown below it.
+  const H = Math.max(tpl.grid.pole[1], ...Array.from({ length: g.nv * nu }, (_, k) => tpl.grid.pts[3 * k + 1]))
+  const lift = heightMap(H, sy)
+  const placed = (p: Vec3): Vec3 => {
+    const q = place(p, 1)
+    return [q[0], lift(q[1]), q[2]]
+  }
+  for (let j = 0; j < g.nv; j++) for (let i = 0; i < nu; i++) setP(g, i, j, placed(getP(tpl.grid, i, j)))
+  g.pole = placed(tpl.grid.pole)
   env.onStage?.('placed', g)
   if (params.heightOffsetMm) {
     for (let j = 0; j < g.nv; j++) {
@@ -642,12 +1015,14 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
 
   // 6. Thickness (wins), then a light fairing pass and a final check of each.
   const centre: Vec3 = [0, env.intaglio.pole[1] * 0.45, 0]
+  raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, steps)
   enforceThickness(g, env.intaglioIndex, centre, mat)
   smoothGrid(g, 2, 0.25, 2)
   env.onStage?.('thickness1', g)
   if (mesial) enforceContact(g, mesial, 1, params.contactMesialMm, [], wall)
   if (distal) enforceContact(g, distal, -1, params.contactDistalMm, [], wall)
   if (env.antagonist) enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, false, [], occlusalFloor(env.intaglioIndex, mat.minOcclusalMm))
+  raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm)
   enforceThickness(g, env.intaglioIndex, centre, mat, 14)
   steps.push(`minimum thickness enforced (${mat.minAxialMm} axial / ${mat.minOcclusalMm} occlusal mm)`)
   env.onStage?.('final', g)

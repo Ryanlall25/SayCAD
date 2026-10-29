@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { parseScan } from '../core/meshConvert'
 import { toothClassOf } from '../crown/anatomy'
-import { bestMargin, findPrep } from '../crown/findPrep'
+import { choosePrep, findPrep } from '../crown/findPrep'
 import { SurfaceIndex, type ToothFrame, type Vec3 } from '../crown/geom'
 import { fdiToUniversal } from '../crown/library'
 import { marginFromTaps } from '../crown/margin'
@@ -9,8 +9,10 @@ import { MATERIALS } from '../crown/materials'
 import { NEW_ORDER, checkScan, occlusionWarning, scanSlots, type ScanStats } from '../crown/order'
 import { autoDesign, prepareCase, type DesignResult } from '../crown/pipeline'
 import { parseShapeModel, templateFromModel } from '../crown/ssm'
+import { designFromDonors, parseDonorSet } from '../crown/donors'
 import type { CriticResult } from '../crown/critics'
 import type { DesignParams } from '../crown/design'
+import type { CrownGrid } from '../crown/grid'
 import { CONTRACT, ENGINE_VERSION, validateJob, type CrownJob, type CrownOutcome, type DesignRecord, type ScanInput, type Verdict } from './contract'
 
 /**
@@ -20,7 +22,8 @@ import { CONTRACT, ENGINE_VERSION, validateJob, type CrownJob, type CrownOutcome
  * thickness, QC — and stops with `needs-input` (never a guess) when it
  * can't do a step on its own. Works in a browser worker and in Node.
  */
-export function designCase(job: CrownJob): CrownOutcome {
+/** `dev.onStage` sees the outer surface after each design stage (tooth-local grid); for tools and tests only. */
+export function designCase(job: CrownJob, dev?: { onStage?: (stage: string, g: CrownGrid) => void }): CrownOutcome {
   const base = { contract: CONTRACT, jobId: job?.jobId ?? '', caseRef: job?.order?.caseRef, engine: { contract: CONTRACT, version: ENGINE_VERSION } } as const
   const problems = validateJob(job)
   if (problems.length) {
@@ -28,13 +31,13 @@ export function designCase(job: CrownJob): CrownOutcome {
     return job?.contract === CONTRACT ? { ...base, status: 'needs-input', needs } : { ...base, status: 'failed', error: problems.join(' ') }
   }
   try {
-    return run(job, base)
+    return run(job, base, dev)
   } catch (e) {
     return { ...base, status: 'failed', error: e instanceof Error ? e.message : String(e) }
   }
 }
 
-function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'caseRef' | 'engine'>): CrownOutcome {
+function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'caseRef' | 'engine'>, dev?: { onStage?: (stage: string, g: CrownGrid) => void }): CrownOutcome {
   const t0 = now()
   const timings: Record<string, number> = {}
   const tooth = job.order.system === 'fdi' ? fdiToUniversal(job.order.tooth)! : job.order.tooth
@@ -70,16 +73,14 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
     prepFoundBy = 'host'
   } else {
     const g = findPrep(pc.prepIndex, pc.antagonist ? new SurfaceIndex(pc.antagonist.clone()) : null, tooth)
-    if (!g.point) {
-      return { ...base, status: 'needs-input', tooth, intake, needs: [{ kind: 'prep-location', message: g.reason ?? 'Show where the prep is.' }], timingsMs: { ...timings, find: lap(t0) } }
+    // Of the teeth out of contact, the one with a clear finish line all round.
+    const pick = choosePrep(pc.prepIndex, g)
+    if (!pick.point) {
+      return { ...base, status: 'needs-input', tooth, intake, needs: [{ kind: 'prep-location', message: pick.reason }], timingsMs: { ...timings, find: lap(t0) } }
     }
-    tap = g.point
+    tap = pick.point
     prepFoundBy = 'bite'
-    // The bite also gives the occlusal direction: a steadier margin search on real scans.
-    if (g.ups?.length) {
-      const best = bestMargin(pc.prepIndex, g.point, g.ups)
-      if (best.points.length >= 16) margin = best
-    }
+    margin = pick.margin
   }
   timings.find = lap(t0)
 
@@ -91,9 +92,20 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
   const template = model && model.cls === cls ? templateFromModel(model) : undefined
   const anatomy = template ? `library — ${(JSON.parse(modelJson!) as { source?: string }).source ?? cls}` : 'textbook — no library tooth for this position'
 
+  // The lab's own finished crowns for this class, when given: each is tried and
+  // the one that needed the least reshaping to fit this case is kept.
+  const donorJson = job.options?.anatomy?.[`donors-${cls}`]
+  const donors = donorJson ? parseDonorSet(donorJson) : null
+
   let r: DesignResult
+  let anatomyUsed = anatomy
   try {
-    r = autoDesign(pc, { tap, margin, params: { ...job.options?.params, material }, template })
+    const req = { tap, margin, params: { ...job.options?.params, material }, onStage: dev?.onStage }
+    const pick = donors && donors.cls === cls ? designFromDonors(pc, req, donors) : null
+    if (pick) {
+      r = pick.result
+      anatomyUsed = `lab crown ${pick.donor} — least reshaping (${pick.reshapingMm.toFixed(2)} mm) of ${pick.tried}`
+    } else r = autoDesign(pc, { ...req, template })
   } catch (e) {
     return { ...base, status: 'needs-input', tooth, intake, prepFoundBy, needs: [{ kind: 'margin', message: e instanceof Error ? e.message : String(e) }] }
   }
@@ -111,7 +123,7 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
       positions: (r.crown.getAttribute('position') as THREE.BufferAttribute).array as Float32Array,
       indices: (r.crown.index as THREE.BufferAttribute).array as Uint32Array,
       prepFoundBy,
-      anatomy,
+      anatomy: anatomyUsed,
       intake
     }),
     timingsMs: { ...timings, ...r.timingsMs }
@@ -159,7 +171,8 @@ export function assembleOutcome(a: {
     prepFoundBy: a.prepFoundBy,
     anatomy: a.anatomy,
     checks: a.results,
-    alignedToZ: align
+    alignedToZ: align,
+    frame: a.frame
   }
   const date = record.createdAt.slice(0, 10).replace(/-/g, '')
   const conf = a.margin.confidence

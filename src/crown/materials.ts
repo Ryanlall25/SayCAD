@@ -26,10 +26,12 @@ export const MATERIALS: Record<MaterialId, MaterialPreset> = {
     id: 'zirconia-hs',
     label: 'Zirconia (high-strength, 3Y/4Y)',
     minAxialMm: 0.5,
-    minOcclusalMm: 0.7,
+    // SmileHub's lab minimum (its technicians' crowns go to 0.42–0.65 mm over
+    // under-reduced preps); many 4Y pucks state more — confirm per puck IFU.
+    minOcclusalMm: 0.5,
     cementGapMm: 0.06,
     marginThicknessMm: 0.1,
-    note: 'Typical monolithic 3Y/4Y minimums; confirm against the puck IFU.'
+    note: 'Lab minimum 0.5 mm axial and occlusal for monolithic 3Y/4Y; confirm against the puck IFU.'
   },
   'zirconia-ht': {
     id: 'zirconia-ht',

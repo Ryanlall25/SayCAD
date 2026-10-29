@@ -33,6 +33,24 @@ for (const f of existsSync('public/models') ? readdirSync('public/models') : [])
   if (t && t[1] === library) anatomy[`t${t[2]}`] = readFileSync(join('public/models', f), 'utf8')
 }
 
+// --donors: the lab's own crowns (npm run train-donors) — each case is designed
+// from the OTHER cases' crowns only (leave-one-out).
+const donorSets: Array<{ cls: string; json: string }> = []
+if (args.includes('--donors')) {
+  for (const f of existsSync('public/models') ? readdirSync('public/models') : []) {
+    const m = /^donors-(\w+)\.json$/.exec(f)
+    if (m) donorSets.push({ cls: m[1], json: readFileSync(join('public/models', f), 'utf8') })
+  }
+}
+const donorsWithout = (id: string): Record<string, string> => {
+  const o: Record<string, string> = {}
+  for (const d of donorSets) {
+    const set = JSON.parse(d.json) as { donors: Array<{ id: string }> }
+    o[`donors-${d.cls}`] = JSON.stringify({ ...set, donors: set.donors.filter((x) => x.id !== id) })
+  }
+  return o
+}
+
 const ab = (b: Buffer): ArrayBuffer => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) as ArrayBuffer
 const scanIn = (dir: string, stem: string): { name: string; data: ArrayBuffer } => {
   const f = readdirSync(dir).find((x) => x.startsWith(stem + '.'))
@@ -95,6 +113,10 @@ for (const c of readdirSync(root).filter((d) => /^case\d+$/.test(d)).sort()) {
   const info = JSON.parse(readFileSync(join(dir, 'case.json'), 'utf8')) as { fdi_tooth: number; margin_points: Vec3[] }
   const truthCrown = new SurfaceIndex(new STLLoader().parse(ab(readFileSync(join(dir, 'crown_exocad.stl')))))
   const prep = prepWithDie(dir) ?? scanIn(dir, 'prep_jaw')
+  if (!readdirSync(dir).some((x) => x.startsWith('opposing_jaw.'))) {
+    console.log(`${c}: no opposing scan — skipped`)
+    continue
+  }
   const antagonist = scanIn(dir, 'opposing_jaw')
   for (const mode of ['auto', 'tech-margin'] as const) {
     const t0 = Date.now()
@@ -103,7 +125,7 @@ for (const c of readdirSync(root).filter((d) => /^case\d+$/.test(d)).sort()) {
       jobId: `${c}-${mode}`,
       order: { tooth: info.fdi_tooth, system: 'fdi', material: 'zirconia-hs' },
       scans: { prep, antagonist },
-      options: { anatomy, ...(mode === 'tech-margin' ? { margin: info.margin_points } : {}) }
+      options: { anatomy: { ...anatomy, ...donorsWithout(c) }, ...(mode === 'tech-margin' ? { margin: info.margin_points } : {}) }
     } as Parameters<typeof designCase>[0])
     const secs = (Date.now() - t0) / 1000
     const record = out.files?.designRecord ?? null
@@ -114,6 +136,7 @@ for (const c of readdirSync(root).filter((d) => /^case\d+$/.test(d)).sort()) {
     console.log(
       `${c} #${info.fdi_tooth} ${mode.padEnd(11)} ${out.status}${out.verdict ? '/' + out.verdict : ''} · margin ${fmt(me?.mean)} mean / ${fmt(me?.p95)} p95 mm · crown vs technician ${fmt(dev?.mean)} mean / ${fmt(dev?.p90)} p90 mm · ${secs.toFixed(1)} s`
     )
+    if (donorSets.length) console.log(`    anatomy: ${record?.anatomy}`)
     for (const f of [...fails, ...warns]) console.log(`    ${f.verdict.toUpperCase()} ${f.label}: ${f.measured}`)
     if (out.needs?.length) console.log('    needs:', out.needs.map((n) => n.message).join(' | '))
     rows.push([c, info.fdi_tooth, mode, out.status, out.verdict ?? '', fmt(me?.mean, 3), fmt(me?.p95, 3), fmt(dev?.mean, 3), fmt(dev?.p90, 3), fails.map((f) => f.id).join(' '), warns.map((f) => f.id).join(' '), secs.toFixed(1)].join(','))
@@ -121,6 +144,8 @@ for (const c of readdirSync(root).filter((d) => /^case\d+$/.test(d)).sort()) {
       mkdirSync(join(dir, 'out'), { recursive: true })
       writeFileSync(join(dir, 'out', `crown-${mode}.stl`), Buffer.from(out.files.crownStl))
       if (record?.margin) writeFileSync(join(dir, 'out', `margin-${mode}.json`), JSON.stringify(record.margin))
+      if (record?.frame) writeFileSync(join(dir, 'out', `frame-${mode}.json`), JSON.stringify(record.frame))
+      writeFileSync(join(dir, 'out', `checks-${mode}.json`), JSON.stringify(out.checks ?? [], null, 1))
     }
   }
 }

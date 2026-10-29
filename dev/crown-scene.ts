@@ -54,6 +54,8 @@ scene.background = new THREE.Color(0x101414)
 scene.add(new THREE.HemisphereLight(0xffffff, 0x404040, 1.1))
 const prepM = q.get('noprep') ? null : await loadScanMesh(q.get('prep')!, gum)
 if (prepM) scene.add(prepM)
+// A separate die (exocad Model Creator), shown seated in the prep jaw.
+if (q.get('die')) scene.add(await loadScanMesh(q.get('die')!, gum))
 const oppM = q.get('opp') ? await loadScanMesh(q.get('opp')!, opp) : null
 if (oppM) scene.add(oppM)
 if (q.get('crown')) scene.add(new THREE.Mesh(await load(q.get('crown')!), zr))
