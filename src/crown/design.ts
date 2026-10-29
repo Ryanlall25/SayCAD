@@ -714,6 +714,33 @@ export function occlusalFloor(intaglio: SurfaceIndex, minOcclusalMm: number): (p
   }
 }
 
+/**
+ * Maps template heights (0 at the margin, top at H) onto a crown of height
+ * H·sy keeping the top OCCLUSAL_RELIEF_MM at true scale: slope k below, 1
+ * above, blended over 1 mm around the junction. Falls back to a uniform
+ * scale when the crown is too short to keep its occlusal table whole.
+ */
+const OCCLUSAL_RELIEF_MM = 2.0
+export function heightMap(H: number, sy: number): (y: number) => number {
+  const target = H * sy
+  const y0 = H - OCCLUSAL_RELIEF_MM
+  const k = y0 > 0.5 ? (target - OCCLUSAL_RELIEF_MM) / y0 : NaN
+  if (!(k > 0.25) || Math.abs(sy - 1) < 1e-3) return (y) => y * sy
+  // f(y) = k·y + (1 − k)·∫₀ʸ smoothstep(y0 − ½, y0 + ½, t) dt
+  const S = (y: number): number => {
+    if (y <= y0 - 0.5) return 0
+    const n = 24
+    const top = Math.min(y, y0 + 0.5)
+    let acc = 0
+    for (let i = 0; i < n; i++) {
+      const t = y0 - 0.5 + ((i + 0.5) / n) * (top - (y0 - 0.5))
+      acc += smoothstep(y0 - 0.5, y0 + 0.5, t)
+    }
+    return (acc / n) * (top - (y0 - 0.5)) + Math.max(0, y - (y0 + 0.5))
+  }
+  return (y) => (y <= 0 ? y * k : k * y + (1 - k) * S(y))
+}
+
 /** Designs the outer crown surface for a prepared case. */
 export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   const steps: string[] = []
@@ -853,8 +880,18 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
       sy = sx
     }
   }
-  for (let j = 0; j < g.nv; j++) for (let i = 0; i < nu; i++) setP(g, i, j, place(getP(tpl.grid, i, j), sy))
-  g.pole = place(tpl.grid.pole, sy)
+  // The height change goes into the walls, not the occlusal anatomy: a
+  // uniform vertical scale (0.73–0.78 on short preps) shrank cusp height and
+  // fissure depth with it; a technician keeps the occlusal table and
+  // shortens or lengthens the crown below it.
+  const H = Math.max(tpl.grid.pole[1], ...Array.from({ length: g.nv * nu }, (_, k) => tpl.grid.pts[3 * k + 1]))
+  const lift = heightMap(H, sy)
+  const placed = (p: Vec3): Vec3 => {
+    const q = place(p, 1)
+    return [q[0], lift(q[1]), q[2]]
+  }
+  for (let j = 0; j < g.nv; j++) for (let i = 0; i < nu; i++) setP(g, i, j, placed(getP(tpl.grid, i, j)))
+  g.pole = placed(tpl.grid.pole)
   env.onStage?.('placed', g)
   if (params.heightOffsetMm) {
     for (let j = 0; j < g.nv; j++) {
