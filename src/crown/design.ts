@@ -775,6 +775,15 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     xd = null
     distal = null
   }
+  // A space far longer than this tooth's usual length (lab crowns ran at most
+  // ~1.2 mm over the usual) is not one the technician fills: the crown keeps
+  // its length, touches the mesial neighbour and leaves the distal open
+  // (lab case040: 11.8 mm space, technician's crown 10.0 with a 2.2 mm gap).
+  if (xm !== null && xd !== null && xm + xd > marginMD + (mdOver(env) ?? 1.2) + 1.3) {
+    steps.push(`space ${(xm + xd).toFixed(1)} mm is far longer than this tooth — distal left open`)
+    xd = null
+    distal = null
+  }
   let W: number
   let xc: number
   if (xm !== null && xd !== null) {
@@ -795,6 +804,11 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
       W = usual
       xc = 0
       steps.push(`one neighbour only, ${known.toFixed(1)} mm away — usual width ${W.toFixed(2)} mm`)
+      // Too far to touch at its usual length: the contact step mustn't then
+      // stretch the crown to it (lab case064: 1.3 mm longer than the
+      // technician's, who left a 0.8 mm gap).
+      if (xm !== null) mesial = null
+      else distal = null
     }
   } else {
     W = marginMD + (mdOver(env) ?? 1.2)
