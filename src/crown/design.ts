@@ -829,10 +829,11 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     for (const [n, sign, x] of [[mesial, 1, xm], [distal, -1, xd]] as const) {
       // Only a neighbour the crown will touch: one across a gap says nothing about this tooth.
       if (x === null || x > W / 2 + sign * xc + 0.6) continue
-      // Curve of Spee: a lower second molar's mesial ridge sits ~0.7 mm over
-      // the first molar's (lab crowns: +0.7, +0.8); first molars level with it.
+      // The lab's technicians set a lower molar's mesial marginal ridge a
+      // little above the neighbour's: first molars +0.23 mm (−0.58…+1.03,
+      // 12 crowns), second molars +0.43 (−0.22…+0.82, 3) — curve of Spee.
       const ridge = neighbourRidge(n, sign, x)
-      const target = ridge === null ? null : ridge + (secondMolar(env) && sign > 0 && env.toothClass === 'lowerMolar' ? 0.7 : 0)
+      const target = ridge === null ? null : ridge + (sign > 0 && env.toothClass === 'lowerMolar' ? (secondMolar(env) ? 0.45 : 0.25) : 0)
       const own = ridgeOf(sign)
       // A neighbour ridge far below this tooth's own (a short or broken tooth) says little.
       if (target !== null && own > 0.5 && target > own * sx * 0.45) ratios.push(target / own)
