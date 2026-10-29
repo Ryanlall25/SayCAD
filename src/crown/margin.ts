@@ -212,6 +212,21 @@ export function profileCandidates(raw: ProfilePoint[], topH: number, minTurn = 0
     const q = sampled[i]
     out.push({ r: q.r, h: q.h, score: tau[i] + 0.3, at: i, edge: false })
   }
+  // A dished prep (rim above its centre) has its finish line at the rim,
+  // where the wall begins — the corner the loop above starts past. Read in
+  // the reserve (tapered-wall) pass only: the sharpest convex turn within
+  // 0.4 mm before the wall, if it stands at or above the axis top (a normal
+  // prep's occlusal–axial line angle sits below it).
+  if (wallDeg < 55) {
+    let best = -1
+    for (let i = Math.max(L + 1, wallStart - Math.round(0.4 / step)); i <= wallStart + 1 && i < n - L - 1; i++) {
+      if (tau[i] < -minTurn && (best < 0 || tau[i] < tau[best])) best = i
+    }
+    if (best >= 0 && line[best].h >= topH - 0.2 && steepAfter(best)) {
+      const p = sampled[best]
+      out.push({ r: p.r, h: p.h, score: -tau[best], at: best, edge: true })
+    }
+  }
   // Earlier along the profile (nearer the prep top) wins ties.
   return out
     .sort((a, b) => a.at - b.at)
