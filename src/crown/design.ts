@@ -963,17 +963,9 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
 
   // 6. Thickness (wins), then a light fairing pass and a final check of each.
   const centre: Vec3 = [0, env.intaglio.pole[1] * 0.45, 0]
-  const beforeThickness = g.pts.slice()
   raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, steps)
   enforceThickness(g, env.intaglioIndex, centre, mat)
-  // Fair only where thickness moved the surface: fairing everywhere blunted
-  // the fissures (it cost a tenth of the occlusal relief on the lab crowns).
-  const moved = new Float64Array(g.nu * g.nv)
-  for (let k = 0; k < moved.length; k++) {
-    const d = Math.hypot(g.pts[3 * k] - beforeThickness[3 * k], g.pts[3 * k + 1] - beforeThickness[3 * k + 1], g.pts[3 * k + 2] - beforeThickness[3 * k + 2])
-    moved[k] = clamp(d / 0.05, 0, 1)
-  }
-  smoothGrid(g, 2, 0.25, 2, smoothField(g, moved, 2))
+  smoothGrid(g, 2, 0.25, 2)
   env.onStage?.('thickness1', g)
   if (mesial) enforceContact(g, mesial, 1, params.contactMesialMm, [], wall)
   if (distal) enforceContact(g, distal, -1, params.contactDistalMm, [], wall)
