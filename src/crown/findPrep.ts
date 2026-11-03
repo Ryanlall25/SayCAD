@@ -45,6 +45,8 @@ const MAX_CLEAR = 4.0
 const MAX_CLEAR_WIDE = 6.0
 const ERODE_MM = 2.0
 const MIN_BLOB_MM2 = 2.0
+const DEEP_CLEAR = 10.0
+const DEEP_ERODE_MM = 1.0
 
 function samplePositions(index: SurfaceIndex, max: number): Vec3[] {
   const pos = index.geometry.getAttribute('position')
@@ -94,7 +96,24 @@ export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null, to
   return { ...narrow, candidates: [...narrow.candidates, ...extra] }
 }
 
-function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth: number | undefined, maxClear: number): PrepGuess {
+/**
+ * Last resort when no candidate from findPrep shows a clear margin: a deep band
+ * (preps cut 4–10 mm under the opposing teeth, as on some upper-molar lab
+ * models), lighter erosion (a small or tilted prep top), searched along both
+ * occlusal estimates. choosePrep still judges every candidate by its margin, so
+ * the wider net admits more embrasures but not a worse pick.
+ */
+export function findPrepDeep(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth?: number): PrepGuess {
+  const a = findPrepWithin(prep, antagonist, tooth, DEEP_CLEAR, DEEP_ERODE_MM, 0)
+  if (!antagonist || !a.ups) return a
+  const b = findPrepWithin(prep, antagonist, tooth, DEEP_CLEAR, DEEP_ERODE_MM, 1)
+  const far = (w: { point: Vec3 }, list: Array<{ point: Vec3 }>) => list.every((c) => Math.hypot(c.point[0] - w.point[0], c.point[1] - w.point[1], c.point[2] - w.point[2]) > 3)
+  const ca = a.candidates ?? []
+  const cb = (b.candidates ?? []).filter((w) => far(w, ca))
+  return { ...a, point: null, candidates: [...ca, ...cb] }
+}
+
+function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth: number | undefined, maxClear: number, erodeMm = ERODE_MM, upPick = 0): PrepGuess {
   if (!antagonist) return { point: null, reason: 'No opposing scan — tap the prepared tooth.', blobsMm2: [] }
 
   // 1. Occlusal plane from the contacts.
@@ -124,9 +143,10 @@ function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, too
       }
     }
   }
+  const ups: Vec3[] = [n, normalize(sub(antMid, pca3(samples).mean))]
+  if (upPick) n = ups[upPick]
   const u = normalize(cross(Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], n))
   const v = cross(n, u)
-  const ups: Vec3[] = [n, normalize(sub(antMid, pca3(samples).mean))]
 
   // 2. Clearance grid over the prep scan's footprint.
   let umin = Infinity, umax = -Infinity, vmin = Infinity, vmax = -Infinity, hmax = -Infinity
@@ -159,7 +179,7 @@ function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, too
   }
 
   // 3. Erode (disc of ERODE_MM), then connected blobs.
-  const r = Math.round(ERODE_MM / CELL)
+  const r = Math.round(erodeMm / CELL)
   const offsets: Array<[number, number]> = []
   for (let di = -r; di <= r; di++) for (let dj = -r; dj <= r; dj++) if (di * di + dj * dj <= r * r) offsets.push([di, dj])
   const core = new Uint8Array(nu * nv)

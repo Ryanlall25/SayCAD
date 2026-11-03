@@ -54,4 +54,15 @@ describe('finish-line variants', () => {
     expect(marginError(drawn.points, c.margin).mean).toBeLessThan(0.12)
     expect(dot(drawn.axis.up, c.axis)).toBeGreaterThan(0.97)
   })
+
+  it('takes the occlusal side from a hint over the scan test (die set in a model jaw)', () => {
+    const c = syntheticMolarCase()
+    const scan = new SurfaceIndex(c.prep)
+    const taps = [0, 60, 120, 180, 240, 300].map((k) => c.margin[k])
+    const mid = taps.reduce((a, p) => [a[0] + p[0] / 6, a[1] + p[1] / 6, a[2] + p[2] / 6], [0, 0, 0])
+    const at = (s: number): [number, number, number] => [mid[0] + c.axis[0] * s, mid[1] + c.axis[1] * s, mid[2] + c.axis[2] * s]
+    expect(dot(marginFromTaps(scan, taps, 180, { above: at(4) }).axis.up, c.axis)).toBeGreaterThan(0.97)
+    // A hint on the other side wins: it is what the caller knows (the crown, the opposing arch).
+    expect(dot(marginFromTaps(scan, taps, 180, { above: at(-4) }).axis.up, c.axis)).toBeLessThan(-0.97)
+  })
 })

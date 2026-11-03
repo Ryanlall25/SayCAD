@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { parseScan } from '../core/meshConvert'
 import { toothClassOf } from '../crown/anatomy'
-import { choosePrep, findPrep } from '../crown/findPrep'
+import { choosePrep, findPrep, findPrepDeep } from '../crown/findPrep'
 import { SurfaceIndex, type ToothFrame, type Vec3 } from '../crown/geom'
 import { fdiToUniversal } from '../crown/library'
 import { marginFromTaps } from '../crown/margin'
@@ -66,7 +66,7 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
   let tap: Vec3 | undefined
   let margin
   if (job.options?.margin?.length) {
-    margin = marginFromTaps(pc.prepIndex, job.options.margin)
+    margin = marginFromTaps(pc.prepIndex, job.options.margin, 180, pc.antagonist ? { antagonist: new SurfaceIndex(pc.antagonist.clone()) } : undefined)
     prepFoundBy = 'margin-given'
   } else if (job.options?.tap) {
     tap = job.options.tap
@@ -74,7 +74,12 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
   } else {
     const g = findPrep(pc.prepIndex, pc.antagonist ? new SurfaceIndex(pc.antagonist.clone()) : null, tooth)
     // Of the teeth out of contact, the one with a clear finish line all round.
-    const pick = choosePrep(pc.prepIndex, g)
+    let pick = choosePrep(pc.prepIndex, g)
+    // Not found in the usual clearance band: look deeper before asking for a tap.
+    if (!pick.point && pc.antagonist) {
+      const deep = choosePrep(pc.prepIndex, findPrepDeep(pc.prepIndex, new SurfaceIndex(pc.antagonist.clone()), tooth), 10)
+      if (deep.point) pick = deep
+    }
     if (!pick.point) {
       return { ...base, status: 'needs-input', tooth, intake, needs: [{ kind: 'prep-location', message: pick.reason }], timingsMs: { ...timings, find: lap(t0) } }
     }

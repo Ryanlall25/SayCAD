@@ -84,7 +84,10 @@ export function analyseCase(tc: TrainingCase): CaseAnalysis {
     const prep = new SurfaceIndex(prepW)
     const tap = tapFromCrown(prep, tc.crown)
     if (!tap) return { id: tc.id, toothNumber: tc.toothNumber, cls, ok: false, error: 'crown is not over the prep scan (are the files registered?)' }
-    const margin = tc.margin?.length ? marginFromTaps(prep, tc.margin) : detectMargin(prep, tap)
+    const cb = new THREE.Vector3()
+    tc.crown.computeBoundingBox()
+    tc.crown.boundingBox!.getCenter(cb)
+    const margin = tc.margin?.length ? marginFromTaps(prep, tc.margin, 180, { above: [cb.x, cb.y, cb.z] }) : detectMargin(prep, tap)
     if (margin.points.length < 16) return { id: tc.id, toothNumber: tc.toothNumber, cls, ok: false, error: 'margin not found' }
     // The designer's own frame: built on the path of insertion, as autoDesign does,
     // so learned anatomy lands untilted when the engine places it.

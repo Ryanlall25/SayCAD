@@ -509,14 +509,28 @@ export function plausibleLoop(m: MarginResult): boolean {
  * resampled and snapped onto the scan. For finish lines the detector
  * can't see (feather-edge / vertical preps, heavily subgingival margins).
  */
-export function marginFromTaps(scan: SurfaceIndex, taps: Vec3[], K = 180): MarginResult {
+export function marginFromTaps(scan: SurfaceIndex, taps: Vec3[], K = 180, hint?: { above?: Vec3; antagonist?: SurfaceIndex }): MarginResult {
   if (taps.length < 4) throw new Error('Tap at least 4 points around the margin.')
   const fit = pca3(taps)
   let up = fit.axes[0]
-  // The prep top is a short ray away along +up; the root side is not.
-  const ahead = scan.raycast(fit.mean, up, 0, 20)
-  const behind = scan.raycast(fit.mean, scale(up, -1), 0, 20)
-  if ((behind?.distance ?? Infinity) < (ahead?.distance ?? Infinity)) up = scale(up, -1)
+  // Which side is occlusal. A point known to lie above the margin (the
+  // technician's crown) decides; else the opposing arch, straight ahead of the
+  // prep; else the prep top, a short ray away (fooled by a die set in a model
+  // jaw, whose socket can sit closer below the margin than the stump top above).
+  const side0 = (): number => {
+    if (hint?.above) return dot(sub(hint.above, fit.mean), up)
+    if (hint?.antagonist) {
+      const a = hint.antagonist.raycast(fit.mean, up, 0, 40)?.distance ?? Infinity
+      const b = hint.antagonist.raycast(fit.mean, scale(up, -1), 0, 40)?.distance ?? Infinity
+      if (a !== b) return b - a
+      const c = hint.antagonist.closest(fit.mean, 40)
+      if (c) return dot(sub(c.point, fit.mean), up)
+    }
+    const ahead = scan.raycast(fit.mean, up, 0, 20)?.distance ?? Infinity
+    const behind = scan.raycast(fit.mean, scale(up, -1), 0, 20)?.distance ?? Infinity
+    return behind < ahead ? -1 : 1
+  }
+  if (side0() < 0) up = scale(up, -1)
   const frame = axisFrame(fit.mean, up)
   const side = cross(up, frame.ref)
   const ordered = [...taps]
