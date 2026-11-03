@@ -191,22 +191,27 @@ function neighbourRidge(n: SurfaceIndex | null, sign: 1 | -1, x: number | null):
 }
 
 /**
- * Bucco-lingual width beyond the margin's (mm), measured on the lab's own
- * crowns: lower first molars 0.55 (0.11–1.05, 9 crowns). Classes not yet
- * measured keep the earlier rule (at least 1.4 mm).
+ * Crown length (MD) and width (BL) beyond the margin's, mm, measured on the
+ * lab's own crowns in the tooth frame — [first, second] tooth of the class
+ * (molars: 6, 7; premolars: 4, 5). Lower molars: 9 + 5 crowns (BL 0.11–1.05,
+ * MD 0.78–2.82 for first molars; second molars barely overhang their margin).
+ * Upper molars 9 + 7, upper premolars 8 + 7, lower premolars 5 + 5 crowns.
+ * Classes not listed keep the earlier rule (BL at least 1.4 mm over).
  */
-const BL_OVER_MARGIN: Partial<Record<ToothClass, number>> = { lowerMolar: 0.55 }
-/**
- * Mesiodistal length beyond the margin's (mm), same crowns: lower first
- * molars 1.6 (0.78–2.82, 9 crowns), lower second molars 0.6 (0.21–0.93,
- * 5 crowns) — a second molar's crown barely overhangs its margin.
- */
-const MD_OVER_MARGIN: Partial<Record<ToothClass, number>> = { lowerMolar: 1.6 }
-const MD_OVER_SECOND_MOLAR: Partial<Record<ToothClass, number>> = { lowerMolar: 0.6 }
-const BL_OVER_SECOND_MOLAR: Partial<Record<ToothClass, number>> = { lowerMolar: 0.65 }
+const OVER_MARGIN: Partial<Record<ToothClass, [{ md: number; bl: number }, { md: number; bl: number }]>> = {
+  lowerMolar: [{ md: 1.6, bl: 0.55 }, { md: 0.6, bl: 0.65 }],
+  upperMolar: [{ md: 1.37, bl: 0.82 }, { md: 1.17, bl: 0.6 }],
+  upperPremolar: [{ md: 1.44, bl: 1.12 }, { md: 1.45, bl: 0.92 }],
+  lowerPremolar: [{ md: 1.84, bl: 1.12 }, { md: 1.65, bl: 0.94 }]
+}
+const secondOfClass = (env: DesignEnv): boolean => {
+  if (env.toothNumber === undefined) return false
+  const pos = toothSide(env.toothNumber).pos
+  return env.toothClass.endsWith('Molar') ? pos === 7 : pos === 5
+}
 const secondMolar = (env: DesignEnv): boolean => env.toothNumber !== undefined && toothSide(env.toothNumber).pos === 7
-const mdOver = (env: DesignEnv): number | undefined => (secondMolar(env) ? MD_OVER_SECOND_MOLAR[env.toothClass] : undefined) ?? MD_OVER_MARGIN[env.toothClass]
-const blOverOf = (env: DesignEnv): number | undefined => (secondMolar(env) ? BL_OVER_SECOND_MOLAR[env.toothClass] : undefined) ?? BL_OVER_MARGIN[env.toothClass]
+const mdOver = (env: DesignEnv): number | undefined => OVER_MARGIN[env.toothClass]?.[secondOfClass(env) ? 1 : 0].md
+const blOverOf = (env: DesignEnv): number | undefined => OVER_MARGIN[env.toothClass]?.[secondOfClass(env) ? 1 : 0].bl
 
 /** Grid address of a named region on a fitted crown. */
 export function regionCentre(name: RegionName, grid: CrownGrid, cuspTips: OuterResult['cuspTips']): { i: number; j: number } | null {
