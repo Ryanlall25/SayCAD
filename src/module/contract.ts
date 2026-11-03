@@ -14,7 +14,7 @@
 
 import type { CriticResult } from '../crown/critics'
 import type { DesignParams } from '../crown/design'
-import type { Vec3 } from '../crown/geom'
+import type { ToothFrame, Vec3 } from '../crown/geom'
 import type { MaterialId } from '../crown/materials'
 
 export const CONTRACT = 'saycad.crown/1'
@@ -65,6 +65,8 @@ export interface CrownJob {
     /**
      * Anatomy models (ssm JSON), keyed by tooth class ("lowerMolar") or by one
      * tooth position ("t19", Universal) — a position key wins for its tooth.
+     * "donors-<class>" holds a donor set (the lab's own finished crowns, see
+     * crown/donors.ts): each is tried and the least-reshaped design is kept.
      */
     anatomy?: Record<string, string>
     /** Put the insertion axis on +Z in the exported STL (CAM nesting). */
@@ -135,6 +137,8 @@ export interface DesignRecord {
   anatomy: string
   checks: CriticResult[]
   alignedToZ: boolean
+  /** Tooth frame the crown was designed in (case coordinates). */
+  frame?: ToothFrame
 }
 
 /** The technician's call on an outcome — sent back to the host and kept for learning. */

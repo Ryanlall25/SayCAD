@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { dot } from '../geom'
 import { autoDesign, prepareCase } from '../pipeline'
+import { MATERIALS } from '../materials'
 import { mirrorToUpper, syntheticMolarCase } from '../synthetic'
 
 describe('auto design — synthetic #19', () => {
@@ -23,7 +24,7 @@ describe('auto design — synthetic #19', () => {
   it('meets material minimums, contacts and occlusion', () => {
     const s = r.report.summary
     expect(s.minAxialThicknessMm).toBeGreaterThanOrEqual(0.48)
-    expect(s.minOcclusalThicknessMm).toBeGreaterThanOrEqual(0.68)
+    expect(s.minOcclusalThicknessMm).toBeGreaterThanOrEqual(MATERIALS['zirconia-hs'].minOcclusalMm - 0.02)
     expect(s.mesialContactMm).not.toBeNull()
     expect(Math.abs(s.mesialContactMm! - r.params.contactMesialMm)).toBeLessThan(0.04)
     expect(Math.abs(s.distalContactMm! - r.params.contactDistalMm)).toBeLessThan(0.04)

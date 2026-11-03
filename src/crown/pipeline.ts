@@ -298,7 +298,7 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
   lap('intaglio')
 
   const outer = designOuter(
-    { toothClass: toothClassOf(pc.toothNumber), marginRow, intaglio: intaglio.grid, intaglioIndex, mesial, distal, antagonist, nv, templateOverride: req.template, onStage: req.onStage },
+    { toothClass: toothClassOf(pc.toothNumber), toothNumber: pc.toothNumber, marginRow, intaglio: intaglio.grid, intaglioIndex, mesial, distal, antagonist, nv, templateOverride: req.template, onStage: req.onStage },
     params
   )
   lap('outer')

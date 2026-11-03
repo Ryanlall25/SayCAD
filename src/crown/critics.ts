@@ -59,6 +59,33 @@ export interface CriticReport {
 
 const fmt = (x: number | null, d = 2): string => (x === null || !Number.isFinite(x) ? '—' : `${x.toFixed(d)} mm`)
 
+/**
+ * Distance to the fitting surface, negative inside the prep. The side comes
+ * from the direction to the closest point (seen from the centre under the
+ * fitting surface), which misreads a point just over a shoulder ledge —
+ * closest point straight below it, centre above — as inside. There, and only
+ * when parity agrees (a point outside crosses the fitting surface an odd
+ * number of times on its way to the centre), it counts as outside.
+ */
+export function capSignedDistance(intaglio: SurfaceIndex, p: Vec3, centre: Vec3, maxDistance: number): number {
+  const sd = intaglio.signedDistance(p, normalize(sub(centre, p)), maxDistance)
+  if (sd >= 0) return sd
+  const q = intaglio.closest(p, maxDistance)
+  if (!q || (p[1] - q.point[1]) < 0.7 * q.distance) return sd
+  const to = sub(centre, p)
+  const L = Math.hypot(to[0], to[1], to[2])
+  const d = normalize(to)
+  let t = 0
+  let crossings = 0
+  for (let k = 0; k < 12 && t < L; k++) {
+    const h = intaglio.raycast([p[0] + d[0] * t, p[1] + d[1] * t, p[2] + d[2] * t], d, 0, L - t)
+    if (!h) break
+    crossings++
+    t += h.distance + 0.05
+  }
+  return crossings % 2 === 1 ? -sd : sd
+}
+
 export function runCritics(c: CriticInputs): CriticReport {
   const results: CriticResult[] = []
   const g = c.outer
@@ -86,7 +113,8 @@ export function runCritics(c: CriticInputs): CriticReport {
   let negative = 0
   forEachVertex(g, (i, j, p) => {
     if (j === 0) return
-    const sd = c.intaglioIndex.signedDistance(p, normalize(sub(centre, p)), 6)
+    const nIn = gridNormal(g, i, j)
+    const sd = capSignedDistance(c.intaglioIndex, p, centre, 6)
     // Axial wall: inside the prep when a ray straight out from the axis still
     // meets the fitting surface (the ray toward the centre misreads points
     // just above the margin). Occlusal table: the centre ray.
@@ -96,8 +124,7 @@ export function runCritics(c: CriticInputs): CriticReport {
     } else if (sd < -0.01) negative++
     if (s[j * g.nu + i] < 1.0) return
     thickness[j * g.nu + i] = sd
-    const n = gridNormal(g, i, j)
-    const occ = n[1] > 0.55 || j > g.nv * 0.6
+    const occ = nIn[1] > 0.55 || j > g.nv * 0.6
     if (occ) {
       minOcc = Math.min(minOcc, sd)
       if (sd < c.material.minOcclusalMm - 0.02) thinOcc++

@@ -29,7 +29,7 @@ export interface PrepGuess {
   /** Eroded blob areas found, mm², largest first (diagnostics). */
   blobsMm2: number[]
   /** Every out-of-contact blob, largest first: its middle on the scan and its area. */
-  candidates?: Array<{ point: Vec3; areaMm2: number }>
+  candidates?: Array<{ point: Vec3; areaMm2: number; offDeg?: number }>
   /** Occlusal directions to try in the margin search: the bite plane's normal, then the direction between the arches. */
   ups?: Vec3[]
 }
@@ -45,6 +45,8 @@ const MAX_CLEAR = 4.0
 const MAX_CLEAR_WIDE = 6.0
 const ERODE_MM = 2.0
 const MIN_BLOB_MM2 = 2.0
+const DEEP_CLEAR = 10.0
+const DEEP_ERODE_MM = 1.0
 
 function samplePositions(index: SurfaceIndex, max: number): Vec3[] {
   const pos = index.geometry.getAttribute('position')
@@ -84,12 +86,34 @@ function coverage(prep: SurfaceIndex, ant: SurfaceIndex, samples: Vec3[], origin
  */
 export function findPrep(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth?: number): PrepGuess {
   const narrow = findPrepWithin(prep, antagonist, tooth, MAX_CLEAR)
-  if (narrow.point || narrow.candidates?.length || !antagonist || !narrow.blobsMm2) return narrow
+  if (!antagonist || !narrow.ups) return narrow
   const wide = findPrepWithin(prep, antagonist, tooth, MAX_CLEAR_WIDE)
-  return wide.point || wide.candidates?.length ? wide : narrow
+  if (!narrow.candidates?.length) return wide.point || wide.candidates?.length ? wide : narrow
+  // A deep prep (4–6 mm under the antagonist) can hide among narrow-band
+  // candidates that are really embrasures: list the wide band's too, after
+  // them, for choosePrep to judge by margin.
+  const extra = (wide.candidates ?? []).filter((w) => narrow.candidates!.every((c) => Math.hypot(c.point[0] - w.point[0], c.point[1] - w.point[1], c.point[2] - w.point[2]) > 3))
+  return { ...narrow, candidates: [...narrow.candidates, ...extra] }
 }
 
-function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth: number | undefined, maxClear: number): PrepGuess {
+/**
+ * Last resort when no candidate from findPrep shows a clear margin: a deep band
+ * (preps cut 4–10 mm under the opposing teeth, as on some upper-molar lab
+ * models), lighter erosion (a small or tilted prep top), searched along both
+ * occlusal estimates. choosePrep still judges every candidate by its margin, so
+ * the wider net admits more embrasures but not a worse pick.
+ */
+export function findPrepDeep(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth?: number): PrepGuess {
+  const a = findPrepWithin(prep, antagonist, tooth, DEEP_CLEAR, DEEP_ERODE_MM, 0)
+  if (!antagonist || !a.ups) return a
+  const b = findPrepWithin(prep, antagonist, tooth, DEEP_CLEAR, DEEP_ERODE_MM, 1)
+  const far = (w: { point: Vec3 }, list: Array<{ point: Vec3 }>) => list.every((c) => Math.hypot(c.point[0] - w.point[0], c.point[1] - w.point[1], c.point[2] - w.point[2]) > 3)
+  const ca = a.candidates ?? []
+  const cb = (b.candidates ?? []).filter((w) => far(w, ca))
+  return { ...a, point: null, candidates: [...ca, ...cb] }
+}
+
+function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, tooth: number | undefined, maxClear: number, erodeMm = ERODE_MM, upPick = 0): PrepGuess {
   if (!antagonist) return { point: null, reason: 'No opposing scan — tap the prepared tooth.', blobsMm2: [] }
 
   // 1. Occlusal plane from the contacts.
@@ -119,9 +143,10 @@ function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, too
       }
     }
   }
+  const ups: Vec3[] = [n, normalize(sub(antMid, pca3(samples).mean))]
+  if (upPick) n = ups[upPick]
   const u = normalize(cross(Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], n))
   const v = cross(n, u)
-  const ups: Vec3[] = [n, normalize(sub(antMid, pca3(samples).mean))]
 
   // 2. Clearance grid over the prep scan's footprint.
   let umin = Infinity, umax = -Infinity, vmin = Infinity, vmax = -Infinity, hmax = -Infinity
@@ -154,7 +179,7 @@ function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, too
   }
 
   // 3. Erode (disc of ERODE_MM), then connected blobs.
-  const r = Math.round(ERODE_MM / CELL)
+  const r = Math.round(erodeMm / CELL)
   const offsets: Array<[number, number]> = []
   for (let di = -r; di <= r; di++) for (let dj = -r; dj <= r; dj++) if (di * di + dj * dj <= r * r) offsets.push([di, dj])
   const core = new Uint8Array(nu * nv)
@@ -225,7 +250,7 @@ function findPrepWithin(prep: SurfaceIndex, antagonist: SurfaceIndex | null, too
     for (const p of top) if (p) hTop = Math.max(hTop, dot(p, n))
     for (const p of top) if (p && dot(p, n) > hTop - 7) toothLevel.push(p)
     const r = rankByTooth(candidates, toothLevel, n, tooth)
-    candidates = r.ranked.map(({ point, areaMm2 }) => ({ point, areaMm2 }))
+    candidates = r.ranked.map(({ point, areaMm2, offDeg }) => ({ point, areaMm2, offDeg }))
     if (r.confident) return { point: candidates[0].point, blobsMm2, candidates, ups }
     if (r.ranked[0].offDeg <= 20) return { point: null, reason: `More than one tooth near #${tooth} is out of contact — tap the one to restore.`, blobsMm2, candidates, ups }
   }
@@ -270,12 +295,37 @@ export function stumpTop(index: SurfaceIndex, near: Vec3, up: Vec3, radiusMm = 4
 export function bestMargin(index: SurfaceIndex, tap: Vec3, ups: Vec3[]): MarginResult {
   const tries: MarginResult[] = [detectMargin(index, tap)]
   for (const up of ups) tries.push(detectMargin(index, stumpTop(index, tap, up), { up }))
-  const score = (m: MarginResult): number => {
-    if (m.points.length < 16) return -1
-    const conf = m.confidence.reduce((a, b) => a + b, 0) / m.confidence.length
-    return conf + (plausibleLoop(m) ? 0.2 : 0) - 0.5 * m.missingFraction
-  }
-  return tries.reduce((a, b) => (score(b) > score(a) ? b : a))
+  return tries.reduce((a, b) => (marginScore(b) > marginScore(a) ? b : a))
+}
+
+const marginScore = (m: MarginResult): number => {
+  if (m.points.length < 16) return -1
+  const conf = m.confidence.reduce((a, b) => a + b, 0) / m.confidence.length
+  return conf + (plausibleLoop(m) ? 0.2 : 0) - 0.5 * m.missingFraction
+}
+
+/**
+ * Picks the prep among the out-of-contact candidates by the finish line each
+ * one shows: a prepared stump has a clear margin all round, while embrasures,
+ * gaps and natural teeth out of contact don't. On 14 lab lower molars the
+ * prep scored ≥ 0.63 and every other candidate ≤ 0.28, where the arch
+ * position (unreliable on quadrant models) chose wrong in half the cases.
+ * The tooth-position match only breaks near-ties.
+ */
+export function choosePrep(index: SurfaceIndex, g: PrepGuess, maxCandidates = 8): { point: Vec3; margin: MarginResult } | { point: null; reason: string } {
+  const cands = g.candidates?.length ? g.candidates.slice(0, maxCandidates) : g.point ? [{ point: g.point, areaMm2: 0 }] : []
+  if (!cands.length) return { point: null, reason: g.reason ?? 'Show where the prep is.' }
+  const scored = cands
+    .map((c) => {
+      const margin = bestMargin(index, c.point, g.ups ?? [])
+      const near = 'offDeg' in c && typeof c.offDeg === 'number' && c.offDeg <= 20 ? 0.1 : 0
+      return { point: c.point, margin, score: marginScore(margin) + near }
+    })
+    .sort((a, b) => b.score - a.score)
+  const [best, next] = scored
+  if (best.score < 0.45) return { point: null, reason: g.reason ?? 'No prepared tooth shows a clear margin — tap it.' }
+  if (next && next.score > best.score - 0.15) return { point: null, reason: 'More than one tooth shows a margin — tap the one to restore.' }
+  return { point: best.point, margin: best.margin }
 }
 
 /**
