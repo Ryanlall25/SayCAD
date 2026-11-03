@@ -312,7 +312,7 @@ const marginScore = (m: MarginResult): number => {
  * position (unreliable on quadrant models) chose wrong in half the cases.
  * The tooth-position match only breaks near-ties.
  */
-export function choosePrep(index: SurfaceIndex, g: PrepGuess, maxCandidates = 8): { point: Vec3; margin: MarginResult } | { point: null; reason: string } {
+export function choosePrep(index: SurfaceIndex, g: PrepGuess, maxCandidates = 8, minScore = 0.45): { point: Vec3; margin: MarginResult } | { point: null; reason: string } {
   const cands = g.candidates?.length ? g.candidates.slice(0, maxCandidates) : g.point ? [{ point: g.point, areaMm2: 0 }] : []
   if (!cands.length) return { point: null, reason: g.reason ?? 'Show where the prep is.' }
   const scored = cands
@@ -323,7 +323,7 @@ export function choosePrep(index: SurfaceIndex, g: PrepGuess, maxCandidates = 8)
     })
     .sort((a, b) => b.score - a.score)
   const [best, next] = scored
-  if (best.score < 0.45) return { point: null, reason: g.reason ?? 'No prepared tooth shows a clear margin — tap it.' }
+  if (best.score < minScore) return { point: null, reason: g.reason ?? 'No prepared tooth shows a clear margin — tap it.' }
   if (next && next.score > best.score - 0.15) return { point: null, reason: 'More than one tooth shows a margin — tap the one to restore.' }
   return { point: best.point, margin: best.margin }
 }
