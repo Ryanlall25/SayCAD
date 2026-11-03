@@ -708,7 +708,7 @@ export function enforceThickness(
           const j = j0 + dj
           if (j < 1 || j >= grid.nv * 0.45) continue
           for (let di = -R; di <= R; di++) {
-            const w = 1 - Math.hypot(di, dj) / (R + 1)
+            const w = (1 - Math.hypot(di, dj) / (R + 1)) ** 2
             if (w <= 0) continue
             const kk = j * grid.nu + ((i0 + di + grid.nu) % grid.nu)
             spread.set(kk, Math.max(spread.get(kk) ?? 0, l * w))
