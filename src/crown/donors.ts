@@ -64,6 +64,19 @@ function reshaping(before: CrownGrid, after: CrownGrid): number {
   return s / (after.pts.length / 3)
 }
 
+/** Cusp relief: spread (5th–95th percentile) of heights over the top 30 % of rows (mm). */
+export function occlusalRelief(g: CrownGrid): number {
+  const h: number[] = []
+  for (let j = Math.ceil(g.nv * 0.7); j < g.nv; j++) for (let i = 0; i < g.nu; i++) h.push(g.pts[(j * g.nu + i) * 3 + 1])
+  h.sort((a, b) => a - b)
+  return h.length ? h[Math.floor(h.length * 0.95)] - h[Math.floor(h.length * 0.05)] : 0
+}
+
+// mm of reshaping a millimetre of missing relief costs. On 16 lab upper
+// molars 0.6 brought relief from 1.27 to 1.49 mm (technicians' 1.56) with the
+// surface match unchanged (0.396 → 0.394 mm).
+const FLAT_WEIGHT = 0.6
+
 export interface DonorChoice {
   result: DesignResult
   donor: string
@@ -82,7 +95,14 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
   const pos = toothSide(pc.toothNumber).pos
   const same = all.filter((d) => d.tooth !== undefined && toothSide(d.tooth).pos === pos)
   const donors = (same.length >= 3 ? same : all).slice(0, opts.maxDonors ?? 24)
-  let best: (DonorChoice & { passes: boolean; stages: Array<[string, CrownGrid]> }) | null = null
+  // The set's usual cusp relief: least reshaping alone favoured flat donors
+  // (tall cusps need carving to the bite), and the chosen upper molars came
+  // out 20 % flatter than the technicians' (1.27 vs 1.58 mm); with each
+  // case's own crown the relief survived the steps (1.59 vs 1.55).
+  const reliefs = donors.map((d) => occlusalRelief(donorTemplate(d).grid)).sort((a, b) => a - b)
+  const usual = reliefs[Math.floor(reliefs.length / 2)] ?? 0
+  const score = (r: number, g: CrownGrid): number => r + FLAT_WEIGHT * Math.max(0, usual - occlusalRelief(g))
+  let best: (DonorChoice & { passes: boolean; stages: Array<[string, CrownGrid]>; score: number }) | null = null
   let margin = req.margin
   let tap = req.tap
   for (const d of donors) {
@@ -105,8 +125,9 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
     tap = undefined
     if (!fitted || !final) continue
     const passes = !r.report.results.some((x) => x.verdict === 'fail')
-    const c = { result: r, donor: d.id, reshapingMm: reshaping(fitted, final), tried: donors.length, passes, stages }
-    if (!best || (c.passes && !best.passes) || (c.passes === best.passes && c.reshapingMm < best.reshapingMm)) best = c
+    const rs = reshaping(fitted, final)
+    const c = { result: r, donor: d.id, reshapingMm: rs, tried: donors.length, passes, stages, score: score(rs, final) }
+    if (!best || (c.passes && !best.passes) || (c.passes === best.passes && c.score < best.score)) best = c
   }
   // The caller's stage hook sees the chosen design only.
   if (best && req.onStage) for (const [s, g] of best.stages) req.onStage(s, g)
