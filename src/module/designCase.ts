@@ -15,6 +15,8 @@ import type { DesignParams } from '../crown/design'
 import type { CrownGrid } from '../crown/grid'
 import { CONTRACT, ENGINE_VERSION, validateJob, type CrownJob, type CrownOutcome, type DesignRecord, type ScanInput, type Verdict } from './contract'
 
+const DEEP_MIN_SCORE = 0.8
+
 /**
  * The module's one entry point: a CrownJob in, a CrownOutcome out, with no
  * UI and no network. Runs the whole automated design — intake checks, find
@@ -75,9 +77,12 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
     const g = findPrep(pc.prepIndex, pc.antagonist ? new SurfaceIndex(pc.antagonist.clone()) : null, tooth)
     // Of the teeth out of contact, the one with a clear finish line all round.
     let pick = choosePrep(pc.prepIndex, g)
-    // Not found in the usual clearance band: look deeper before asking for a tap.
+    // Not found in the usual clearance band: look deeper before asking for a
+    // tap — but the wider net only answers when the margin reads clearly (the
+    // deep finds on lab upper molars scored ≥ 1.0; a 1.1 mm-off margin on a
+    // lower molar 0.65), else a tap costs less than a wrong finish line.
     if (!pick.point && pc.antagonist) {
-      const deep = choosePrep(pc.prepIndex, findPrepDeep(pc.prepIndex, new SurfaceIndex(pc.antagonist.clone()), tooth), 10)
+      const deep = choosePrep(pc.prepIndex, findPrepDeep(pc.prepIndex, new SurfaceIndex(pc.antagonist.clone()), tooth), 10, DEEP_MIN_SCORE)
       if (deep.point) pick = deep
     }
     if (!pick.point) {

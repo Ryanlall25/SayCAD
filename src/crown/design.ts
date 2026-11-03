@@ -472,6 +472,7 @@ function relieveVertex(grid: CrownGrid, i: number, j: number, d: number, floor: 
 function lowerIntrusions(grid: CrownGrid, ant: SurfaceIndex, clearance: number, j0: number, floorOf: (k: number, p: Vec3) => number | null, log: string[]): void {
   const SIGMA = 2.0
   const src: Array<[number, number, number]> = []
+  const own = new Float64Array(grid.nu * grid.nv)
   for (let j = j0; j < grid.nv; j++) {
     for (let i = 0; i < grid.nu; i++) {
       const p = getP(grid, i, j)
@@ -510,7 +511,7 @@ export function enforceOcclusion(
   /** Lowest allowed y for a vertex (material floor over the intaglio), or null. */
   floorY?: (p: Vec3) => number | null
 ): void {
-  const j0 = Math.round(grid.nv * 0.3)
+  const j0 = Math.round(grid.nv * 0.2) // from the lower wall: an upper molar's palatal wall can meet the lower lingual cusp (lab case085)
   const floorOf = smoothFloors(grid, j0, floorY)
   if (raise) {
     let raised = 0
@@ -591,10 +592,11 @@ export function enforceOcclusion(
  * field over the tooth, so a smooth vertical lift can't fold it; pushing only
  * the thin vertices out left a raised lobe with a hard rim.
  */
-export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centre: Vec3, minOcclusalMm: number, minAxialMm: number, log?: string[]): void {
+export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centre: Vec3, minOcclusalMm: number, minAxialMm: number, log?: string[], bite?: { antagonist: SurfaceIndex; clearanceMm: number }): void {
   const SIGMA = 1.5
   const j0 = Math.round(grid.nv * 0.4)
   const src: Array<[number, number, number]> = []
+  const own = new Float64Array(grid.nu * grid.nv)
   for (let j = j0; j < grid.nv; j++) {
     for (let i = 0; i < grid.nu; i++) {
       const p = getP(grid, i, j)
@@ -606,7 +608,10 @@ export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centr
       const sd = intaglio.signedDistance(p, normalize(sub(centre, p)), need + 3)
       const lack = need + 0.03 - sd
       // Folded through (deeply negative) is the thickness step's to re-seat.
-      if (lack > 0.01 && sd > -0.3) src.push([p[0], p[2], lack / Math.max(0.45, n[1])])
+      if (lack > 0.01 && sd > -0.3) {
+        src.push([p[0], p[2], lack / Math.max(0.45, n[1])])
+        own[j * grid.nu + i] = lack / Math.max(0.45, n[1])
+      }
     }
   }
   if (!src.length) return
@@ -633,9 +638,17 @@ export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centr
   let maxLift = 0
   for (let j = 1; j < grid.nv; j++) {
     for (let i = 0; i < grid.nu; i++) {
-      const d = smooth[j * grid.nu + i]
-      if (d < 1e-3) continue
+      let d = smooth[j * grid.nu + i]
       const p = getP(grid, i, j)
+      // What spreads in from a thin neighbour stops at the bite; a vertex's
+      // own lack still wins (thickness over occlusion). Uncapped, the spread
+      // lifted fossae and slopes 0.3–0.4 mm into the antagonist on preps with
+      // room to spare (lab cases 054, 056: ≥ 0.76 mm of space).
+      if (bite && d > own[j * grid.nu + i]) {
+        const room = bite.antagonist.gapUp(p, 2) - bite.clearanceMm
+        d = Math.max(own[j * grid.nu + i], Math.min(d, Math.max(0, room)))
+      }
+      if (d < 1e-3) continue
       setP(grid, i, j, [p[0], p[1] + d, p[2]])
       maxLift = Math.max(maxLift, d)
     }
@@ -1050,14 +1063,15 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
 
   // 6. Thickness (wins), then a light fairing pass and a final check of each.
   const centre: Vec3 = [0, env.intaglio.pole[1] * 0.45, 0]
-  raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, steps)
+  const bite = env.antagonist ? { antagonist: env.antagonist, clearanceMm: params.occlusalClearanceMm } : undefined
+  raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, steps, bite)
   enforceThickness(g, env.intaglioIndex, centre, mat)
   smoothGrid(g, 2, 0.25, 2)
   env.onStage?.('thickness1', g)
   if (mesial) enforceContact(g, mesial, 1, params.contactMesialMm, [], wall)
   if (distal) enforceContact(g, distal, -1, params.contactDistalMm, [], wall)
   if (env.antagonist) enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, false, [], occlusalFloor(env.intaglioIndex, mat.minOcclusalMm))
-  raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm)
+  raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, undefined, bite)
   enforceThickness(g, env.intaglioIndex, centre, mat, 14)
   steps.push(`minimum thickness enforced (${mat.minAxialMm} axial / ${mat.minOcclusalMm} occlusal mm)`)
   env.onStage?.('final', g)
