@@ -641,6 +641,8 @@ export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centr
   log?.push(`occlusal table raised up to ${maxLift.toFixed(2)} mm over an under-reduced prep`)
 }
 
+const AXIAL_SPREAD = 3
+
 /** Pushes the outer surface out until it clears the intaglio by the material minimum. */
 export function enforceThickness(
   grid: CrownGrid,
@@ -657,6 +659,7 @@ export function enforceThickness(
   for (let it = 0; it < passes; it++) {
     const s = marginDistances(grid)
     const moves: Array<[number, number, Vec3]> = []
+    const axial = new Map<number, number>()
     const keep: Array<[number, number]> = []
     for (const [i, j] of active) {
       const p = getP(grid, i, j)
@@ -679,7 +682,7 @@ export function enforceThickness(
         const out = normalize([p[0], 0, p[2]])
         const hit = intaglio.raycast(p, out, 0, full + 6)
         const lack = hit ? hit.distance + req : req - (intaglio.closest(p, full + 3)?.distance ?? Infinity)
-        if (lack > 0.012) moves.push([i, j, [p[0] + out[0] * lack, p[1], p[2] + out[2] * lack]])
+        if (lack > 0.012) axial.set(j * grid.nu + i, Math.max(axial.get(j * grid.nu + i) ?? 0, lack))
         continue
       }
       // Re-seat the vertex at the required distance along the intaglio's own
@@ -692,6 +695,33 @@ export function enforceThickness(
       moves.push([i, j, [c.point[0] + nq[0] * req, c.point[1] + nq[1] * req, c.point[2] + nq[2] * req]])
     }
     active = keep
+    // Axial pushes spread to their neighbours (tapering over AXIAL_SPREAD
+    // grid steps, rows below the 40 % line): one vertex pushed out alone
+    // stood out as a fin (lab case040: 0.85 mm at a single vertex). Moving
+    // out horizontally only ever adds thickness.
+    if (axial.size) {
+      const R = AXIAL_SPREAD
+      const spread = new Map<number, number>()
+      for (const [k, l] of axial) {
+        const i0 = k % grid.nu, j0 = Math.floor(k / grid.nu)
+        for (let dj = -R; dj <= R; dj++) {
+          const j = j0 + dj
+          if (j < 1 || j >= grid.nv * 0.45) continue
+          for (let di = -R; di <= R; di++) {
+            const w = 1 - Math.hypot(di, dj) / (R + 1)
+            if (w <= 0) continue
+            const kk = j * grid.nu + ((i0 + di + grid.nu) % grid.nu)
+            spread.set(kk, Math.max(spread.get(kk) ?? 0, l * w))
+          }
+        }
+      }
+      for (const [k, l] of spread) {
+        const i = k % grid.nu, j = Math.floor(k / grid.nu)
+        const p = getP(grid, i, j)
+        const out = normalize([p[0], 0, p[2]])
+        moves.push([i, j, [p[0] + out[0] * l, p[1], p[2] + out[2] * l]])
+      }
+    }
     if (!moves.length) break
     for (const [i, j, p] of moves) setP(grid, i, j, p)
     const pd = intaglio.signedDistance(grid.pole, [0, -1, 0], mat.minOcclusalMm + 3)
