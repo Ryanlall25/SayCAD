@@ -72,10 +72,11 @@ export function occlusalRelief(g: CrownGrid): number {
   return h.length ? h[Math.floor(h.length * 0.95)] - h[Math.floor(h.length * 0.05)] : 0
 }
 
-// mm of reshaping a millimetre of missing relief costs. On 16 lab upper
-// molars 0.6 brought relief from 1.27 to 1.49 mm (technicians' 1.56) with the
-// surface match unchanged (0.396 → 0.394 mm).
-const FLAT_WEIGHT = 0.6
+// mm of reshaping a millimetre of missing relief costs — molars only. On 16
+// lab upper molars 0.6 brought relief from 1.27 to 1.49 mm (technicians'
+// 1.56), mean deviation 0.216 → 0.209 mm; lower molars 0.176 → 0.174.
+// Premolars weren't flat (lower 1.34 vs 1.42 mm) and lost 0.005–0.007 mm.
+const FLAT_WEIGHT = (cls: string): number => (cls.endsWith('Molar') ? 0.6 : 0)
 
 export interface DonorChoice {
   result: DesignResult
@@ -101,7 +102,8 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
   // case's own crown the relief survived the steps (1.59 vs 1.55).
   const reliefs = donors.map((d) => occlusalRelief(donorTemplate(d).grid)).sort((a, b) => a - b)
   const usual = reliefs[Math.floor(reliefs.length / 2)] ?? 0
-  const score = (r: number, g: CrownGrid): number => r + FLAT_WEIGHT * Math.max(0, usual - occlusalRelief(g))
+  const w = FLAT_WEIGHT(set.cls)
+  const score = (r: number, g: CrownGrid): number => r + w * Math.max(0, usual - occlusalRelief(g))
   let best: (DonorChoice & { passes: boolean; stages: Array<[string, CrownGrid]>; score: number }) | null = null
   let margin = req.margin
   let tap = req.tap
