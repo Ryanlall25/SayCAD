@@ -488,7 +488,10 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   const patchRings = 4
   const transRows = 14
   const rings: Vec3[][] = []
-  const FP = 0.5 // contact patch: half the contour
+  // Contact patch: 65 % of the contour. At half, our bases touched the ridge
+  // over 32–41 % of their area against the technician's 40–64 % (median gap
+  // 0.19–0.57 mm vs 0.07–0.17).
+  const FP = 0.65
   for (let k = 1; k <= patchRings; k++) {
     const f = (FP * k) / patchRings
     rings.push(contour.map((p) => {
@@ -508,7 +511,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
       const z = zc + (p[2] - zc) * f
       const r = ridgeAt(x, z) ?? ridge0
       const r0 = ridgeAt(xc + (p[0] - xc) * FP, zc + (p[2] - zc) * FP) ?? ridge0
-      const y = Math.max(r + 0.5 * t * t, r0 + (p[1] - r0) * e)
+      const y = Math.max(r + 0.3 * t * t, r0 + (p[1] - r0) * e)
       return [x, Math.min(y, p[1] - 0.05 * (1 - t)), z] as Vec3
     }))
   }
