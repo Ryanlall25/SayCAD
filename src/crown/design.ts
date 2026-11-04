@@ -1128,7 +1128,8 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     // and a mostly-occlusal start at the margin (a straight-ish emergence).
     const T1: Vec3 = [((b[0] - a[0]) / 2) * jc, ((b[1] - a[1]) / 2) * jc, ((b[2] - a[2]) / 2) * jc]
     const chord: Vec3 = [P1[0] - m[0], P1[1] - m[1], P1[2] - m[2]]
-    const T0: Vec3 = [chord[0] * 0.9, Math.max(chord[1], 0.5) * 1.1, chord[2] * 0.9]
+    const ER = Number((globalThis as any).process?.env?.EMERG_R ?? 0.9)
+    const T0: Vec3 = [chord[0] * ER, Math.max(chord[1], 0.5) * 1.1, chord[2] * ER]
     for (let j = 0; j < jc; j++) {
       const t = j / jc
       const t2 = t * t
