@@ -44,6 +44,8 @@ export interface DesignRequest {
   nu?: number
   nv?: number
   template?: Template
+  /** Path of insertion (world) to design on, instead of searching one — a bridge's common axis. */
+  insertionAxis?: Vec3
   /** Dev: the outer grid after each design stage. */
   onStage?: (stage: string, g: CrownGrid) => void
 }
@@ -254,15 +256,15 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
   // margin, orientation and grid size — reuse them across parameter edits.
   const tiltM = params.axisTiltMesialDeg
   const tiltB = params.axisTiltBuccalDeg
-  const envKey = `${marginKey(margin)}|${pc.toothNumber}|${req.flipBuccal ? 1 : 0}|${nu}|${nv}|${tiltM}|${tiltB}`
+  const envKey = `${marginKey(margin)}|${req.insertionAxis?.map((x) => x.toFixed(6)).join(',') ?? ''}|${pc.toothNumber}|${req.flipBuccal ? 1 : 0}|${nu}|${nv}|${tiltM}|${tiltB}`
   let env = envCache.get(pc)
   if (!env || env.key !== envKey) {
     // Path of insertion: the least-undercut direction near the margin's axis
     // (searched once per margin), which the technician can then lean.
-    const aKey = marginKey(margin)
+    const aKey = `${marginKey(margin)}|${req.insertionAxis?.map((x) => x.toFixed(6)).join(',') ?? ''}`
     let ins = axisCache.get(pc)
     if (!ins || ins.key !== aKey) {
-      ins = { key: aKey, axis: insertionAxis(pc.prepWelded, margin.points, margin.axis.up).axis }
+      ins = { key: aKey, axis: req.insertionAxis ?? insertionAxis(pc.prepWelded, margin.points, margin.axis.up).axis }
       axisCache.set(pc, ins)
     }
     let fe = estimateFrame(margin.points, ins.axis, pc.toothNumber, pc.prepWelded, { flipBuccal: req.flipBuccal })

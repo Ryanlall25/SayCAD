@@ -148,6 +148,10 @@ export interface DesignMeasures {
   blWidthMm: number
   heightMm: number
   verticalScale: number
+  /** Opposing cusps the height was read from (0: no bite under this tooth). */
+  biteProbes: number
+  /** Neighbour marginal ridges the height was levelled with. */
+  ridgeSides: number
   steps: string[]
   /** Contacts that could not reach the neighbour (gap left, mm). */
   openContacts: Array<{ side: 'mesial' | 'distal'; gapMm: number }>
@@ -884,6 +888,8 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   // and the bite step carved them into pits on crowns 0.6–0.9 mm too tall;
   // as a cap it pulled first molars down under a single opposing cusp).
   let syLimit = sy
+  let biteProbes = 0
+  let ridgeSides = 0
   if (env.antagonist) {
     const ratios: number[] = []
     for (const tip of tpl.cuspTips) {
@@ -895,6 +901,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     const r = sorted.length ? sorted[Math.floor(sorted.length / 2)] : NaN
     if (Number.isFinite(r)) sy = clamp(r, sx * 0.55, sx * 1.5)
     if (sorted.length) syLimit = clamp(sorted[0], sx * 0.55, sx * 1.5)
+    biteProbes = ratios.length
     steps.push(`vertical scale ${sy.toFixed(2)} from antagonist (${ratios.length} cusp probes; first to touch ${syLimit.toFixed(2)})`)
   }
   // Technicians level the marginal ridges with the neighbours' (measured on the
@@ -927,6 +934,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
       // A neighbour ridge far below this tooth's own (a short or broken tooth) says little.
       if (target !== null && own > 0.5 && target > own * sx * 0.45) ratios.push(target / own)
     }
+    ridgeSides = ratios.length
     if (ratios.length) {
       const r = ratios.reduce((a, b) => a + b, 0) / ratios.length
       const capped = Math.min(clamp(r, sx * 0.55, sx * 1.5), env.antagonist ? sy : Infinity)
@@ -1088,6 +1096,8 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
       blWidthMm: b.max[2] - b.min[2],
       heightMm: b.max[1] - b.min[1],
       verticalScale: sy,
+      biteProbes,
+      ridgeSides,
       steps,
       openContacts
     }
