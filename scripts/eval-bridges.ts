@@ -187,6 +187,22 @@ for (const id of ids) {
     const loc = (g: THREE.BufferGeometry) => { const p = g.getAttribute('position'); const o: number[][] = []; for (let i = 0; i < p.count; i += 3) { const d = [p.getX(i) - f.origin[0], p.getY(i) - f.origin[1], p.getZ(i) - f.origin[2]]; o.push([dot(d, f.mesial), dot(d, f.occlusal), dot(d, f.buccal)]) } return o }
     const lt = loc(tech), lo = loc(ours)
     const tops = (pts: number[][]) => [[-99, -r.pontic.gapMm / 2], [-r.pontic.gapMm / 2, r.pontic.gapMm / 2], [r.pontic.gapMm / 2, 99]].map(([a, b]) => Math.max(...pts.filter((p) => p[0] > a && p[0] < b).map((p) => p[1])).toFixed(2))
+    const relief = (g: THREE.BufferGeometry): string => {
+      const gg = g.clone(); gg.computeVertexNormals()
+      const P = gg.getAttribute('position'), N = gg.getAttribute('normal')
+      const hs: number[] = []
+      const half = r.pontic.gapMm / 2 - 1
+      for (let i = 0; i < P.count; i++) {
+        const d = [P.getX(i) - f.origin[0], P.getY(i) - f.origin[1], P.getZ(i) - f.origin[2]]
+        const x = dot(d, f.mesial), y = dot(d, f.occlusal)
+        const n = [N.getX(i), N.getY(i), N.getZ(i)]
+        if (Math.abs(x) < half && dot(n, f.occlusal) > 0.3) hs.push(y)
+      }
+      hs.sort((a, b) => a - b)
+      const top = hs.filter((h) => h > hs[hs.length - 1] - 3)
+      return top.length ? (top[Math.floor(top.length * 0.95)] - top[Math.floor(top.length * 0.05)]).toFixed(2) : '—'
+    }
+    console.log(`    pontic occlusal relief: ours ${relief(ours)} mm · technician ${relief(tech)} mm`)
     console.log(`    unit tops over the ridge (distal / pontic / mesial): ours ${tops(lo).join(' / ')} · technician ${tops(lt).join(' / ')}`)
   }
   for (const a of r.abutments) {

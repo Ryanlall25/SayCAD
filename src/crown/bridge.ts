@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { toothClassOf, type ToothClass } from './anatomy'
-import { designFromDonors, donorTemplate, type DonorSet } from './donors'
+import { designFromDonors, donorTemplate, occlusalRelief, type DonorSet } from './donors'
 import { bestMargin, findPrep, findPrepDeep, marginScoreOf, scorePreps, toothSide } from './findPrep'
 import { SurfaceIndex, add, cross, dot, normalize, scale, sub, toLocal, toWorld, type ToothFrame, type Vec3 } from './geom'
 import type { CrownGrid } from './grid'
@@ -399,8 +399,13 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
     }
     return hi - lo
   }
+  // Among donors within 1 mm of the space, the one with the most cusp relief:
+  // by width alone the molar pontics came out 28 % flatter than the
+  // technician's (1.45 vs 2.03 mm on cases 018, 029). The bite step only
+  // carves; it can't add the anatomy back.
   cands.sort((a, b) => Math.abs(widthOf(a.t.grid) - gap) - Math.abs(widthOf(b.t.grid) - gap))
-  const donor = cands[0]
+  const fits = cands.filter((c) => Math.abs(widthOf(c.t.grid) - gap) <= Math.abs(widthOf(cands[0].t.grid) - gap) + 1)
+  const donor = fits.reduce((a, b) => (occlusalRelief(b.t.grid) > occlusalRelief(a.t.grid) ? b : a))
   const tg = donor.t.grid
   const Wt = widthOf(tg)
   // 0.2 mm into each abutment at the contact: held short, the connectors
