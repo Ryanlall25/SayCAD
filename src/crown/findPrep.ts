@@ -298,6 +298,9 @@ export function bestMargin(index: SurfaceIndex, tap: Vec3, ups: Vec3[]): MarginR
   return tries.reduce((a, b) => (marginScore(b) > marginScore(a) ? b : a))
 }
 
+/** How clearly a found margin reads (choosePrep's measure). */
+export const marginScoreOf = (m: MarginResult): number => marginScore(m)
+
 const marginScore = (m: MarginResult): number => {
   if (m.points.length < 16) return -1
   const conf = m.confidence.reduce((a, b) => a + b, 0) / m.confidence.length
@@ -312,16 +315,21 @@ const marginScore = (m: MarginResult): number => {
  * position (unreliable on quadrant models) chose wrong in half the cases.
  * The tooth-position match only breaks near-ties.
  */
-export function choosePrep(index: SurfaceIndex, g: PrepGuess, maxCandidates = 8, minScore = 0.45): { point: Vec3; margin: MarginResult } | { point: null; reason: string } {
+/** Every candidate's best margin and how clearly it reads, best first. */
+export function scorePreps(index: SurfaceIndex, g: PrepGuess, maxCandidates = 8): Array<{ point: Vec3; margin: MarginResult; score: number }> {
   const cands = g.candidates?.length ? g.candidates.slice(0, maxCandidates) : g.point ? [{ point: g.point, areaMm2: 0 }] : []
-  if (!cands.length) return { point: null, reason: g.reason ?? 'Show where the prep is.' }
-  const scored = cands
+  return cands
     .map((c) => {
       const margin = bestMargin(index, c.point, g.ups ?? [])
       const near = 'offDeg' in c && typeof c.offDeg === 'number' && c.offDeg <= 20 ? 0.1 : 0
       return { point: c.point, margin, score: marginScore(margin) + near }
     })
     .sort((a, b) => b.score - a.score)
+}
+
+export function choosePrep(index: SurfaceIndex, g: PrepGuess, maxCandidates = 8, minScore = 0.45): { point: Vec3; margin: MarginResult } | { point: null; reason: string } {
+  const scored = scorePreps(index, g, maxCandidates)
+  if (!scored.length) return { point: null, reason: g.reason ?? 'Show where the prep is.' }
   const [best, next] = scored
   if (best.score < minScore) return { point: null, reason: g.reason ?? 'No prepared tooth shows a clear margin — tap it.' }
   if (next && next.score > best.score - 0.15) return { point: null, reason: 'More than one tooth shows a margin — tap the one to restore.' }

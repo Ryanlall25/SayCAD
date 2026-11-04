@@ -19,7 +19,8 @@ import type { ToothClass } from '../src/crown/anatomy'
 import { SurfaceIndex, type Vec3 } from '../src/crown/geom'
 import { ab } from './lib/labCases'
 
-const args = process.argv.slice(2).filter((a) => a !== '--')
+const auto = process.argv.includes('--auto')
+const args = process.argv.slice(2).filter((a) => a !== '--' && a !== '--auto')
 const root = args[0]
 const ids = args.slice(1)
 const donors: Partial<Record<ToothClass, DonorSet>> = {}
@@ -102,7 +103,7 @@ for (const id of ids) {
   const t0 = performance.now()
   let r
   try {
-    r = await designBridge({ prep, antagonist: opp, units, donors })
+    r = await designBridge({ prep, antagonist: opp, units: auto ? units.map((x) => ({ ...x, margin: undefined })) : units, donors })
   } catch (e) {
     console.log(`${id}: FAILED — ${(e as Error).message}`)
     continue
@@ -167,12 +168,19 @@ for (const id of ids) {
   }
   const oc = [conn(ours, aEnd, midS), conn(ours, midS, bStart)]
   const tc = [conn(tech, aEnd, midS), conn(tech, midS, bStart)]
-  const fails = [...r.abutments.flatMap((a) => a.result.report.results.filter((x) => x.verdict === 'fail' && !x.id.startsWith('contact')).map((x) => `#${a.fdi} ${x.id}`))]
   console.log(`${id} ${units.map((x) => x.fdi + (x.role === 'pontic' ? 'p' : '')).join('-')} · ${secs} s · manifold ${r.manifoldOk ? 'ok' : 'BROKEN'} genus ${r.genus} · vs technician: ours→tech ${mean(dOT).toFixed(3)} mm (p90 ${dOT[Math.floor(dOT.length * 0.9)].toFixed(2)}), tech→ours ${mean(dTO).toFixed(3)} mm (p90 ${dTO[Math.floor(dTO.length * 0.9)].toFixed(2)})`)
   console.log(`    gum under narrowest section: ours ${[gumAt(ours, aEnd, midS), gumAt(ours, midS, bStart)].map((x) => x.toFixed(2)).join(' / ')} · technician ${[gumAt(tech, aEnd, midS), gumAt(tech, midS, bStart)].map((x) => x.toFixed(2)).join(' / ')}`)
   console.log(`    connector clearance: ${r.connectors.map((k) => `#${k.between[0]} gum ${k.gumClearanceMm?.toFixed(2)} bite ${k.biteClearanceMm?.toFixed(2)}`).join(' · ')}`)
   console.log(`    connectors ours ${oc.map((x) => x.toFixed(1)).join(' / ')} mm² · technician ${tc.map((x) => x.toFixed(1)).join(' / ')} mm² · pontic donor ${r.pontic.donor}, gap ${r.pontic.gapMm.toFixed(1)} mm · abutment donors ${r.abutments.map((a) => `#${a.fdi} ${a.donor}`).join(', ')}`)
-  if (fails.length) console.log(`    abutment fails: ${fails.join(', ')}`)
+  if (auto) {
+    const err = r.abutments.map((a) => {
+      const truth = units.find((x) => x.fdi === a.fdi)!.margin!
+      const d = a.result.margin.points.map((p) => Math.min(...truth.map((q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2])))).sort((x, y) => x - y)
+      return `#${a.fdi} ${(d.reduce((x, y) => x + y, 0) / d.length).toFixed(3)} mm (p95 ${d[Math.floor(d.length * 0.95)].toFixed(2)})`
+    })
+    console.log(`    found margins vs technician's: ${err.join(' · ')}`)
+  }
+  console.log(`    verdict: ${r.blockers.length ? 'BLOCKED — ' + r.blockers.join('; ') : 'ready for approval'}`)
   for (const n of r.notes) console.log(`    ${n}`)
   {
     const f = r.pontic.frame

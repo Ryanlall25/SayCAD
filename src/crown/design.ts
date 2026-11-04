@@ -313,7 +313,10 @@ function relieveField(
         const min = gridNormal(grid, i, j)[1] > 0.55 || j > nv * 0.6 ? wall.minOcclusalMm : wall.minAxialMm
         const dq = wall.intaglio.closest(q, min + 1)?.distance ?? Infinity
         if (dq < min) {
-          const dp = wall.intaglio.closest(p, min + 1)?.distance ?? Infinity
+          // Beyond the search radius the closest point is unknown: take the
+          // radius (Infinity made t = ∞/∞ = NaN and the crown came out NaN —
+          // lab case029's #45 on a bridge's common axis, case084 alone).
+          const dp = Math.min(wall.intaglio.closest(p, min + 1)?.distance ?? Infinity, min + 1)
           const t = dp > dq && dp > min ? (dp - min) / (dp - dq) : 0
           q = [p[0] + (q[0] - p[0]) * t, p[1], p[2]]
           onLimit()
@@ -396,7 +399,7 @@ function enforceContact(
           const min = gridNormal(grid, i, j)[1] > 0.55 || j > grid.nv * 0.6 ? wall.minOcclusalMm : wall.minAxialMm
           const dq = wall.intaglio.closest(q, min + 1)?.distance ?? Infinity
           if (dq < min) {
-            const dp = wall.intaglio.closest(p, min + 1)?.distance ?? Infinity
+            const dp = Math.min(wall.intaglio.closest(p, min + 1)?.distance ?? Infinity, min + 1)
             const f = dp > dq && dp > min ? (dp - min) / (dp - dq) : 0
             q = [p[0] + (q[0] - p[0]) * f, p[1], p[2]]
             limited = true
