@@ -681,6 +681,7 @@ const AXIAL_SPREAD = 3
  * to 0.39 mm² (technicians' 0.29; 0.3 gave 0.89).
  */
 const CONTACT_OPEN = 0.8
+const CONTACT_HOLD_MM = Number((globalThis as any).process?.env?.CONTACT_HOLD ?? 0.4)
 function shapeContacts(grid: CrownGrid, ant: SurfaceIndex, clearance: number, floorY: ((p: Vec3) => number | null) | undefined, log: string[]): void {
   const { nu, nv } = grid
   const j0 = Math.round(nv * 0.2)
@@ -700,9 +701,11 @@ function shapeContacts(grid: CrownGrid, ant: SurfaceIndex, clearance: number, fl
   // The drop as a field, smoothed before it is applied: per vertex it copied
   // the opposing scan's roughness into the crown (torn, dented fossae).
   const drop = new Float64Array(nu * nv)
+  const centreD2 = new Float64Array(nu * nv).fill(Infinity)
   for (const v of near) {
     let d2 = Infinity
     for (const c of centres) d2 = Math.min(d2, (c[0] - v.p[0]) ** 2 + (c[2] - v.p[2]) ** 2)
+    centreD2[v.k] = d2
     // Only what sits closer than the opened target comes down.
     const target = clearance + Math.min(0.25, CONTACT_OPEN * d2)
     drop[v.k] = Math.max(0, target - v.gap)
@@ -711,7 +714,13 @@ function shapeContacts(grid: CrownGrid, ant: SurfaceIndex, clearance: number, fl
   let opened = 0
   for (let j = j0; j < nv; j++) {
     for (let i = 0; i < nu; i++) {
-      const d = smooth[j * nu + i]
+      const k = j * nu + i
+      // The smoothing spread the surrounding drop onto the contact points
+      // themselves and lowered them off the antagonist (lower molars: 0.02 mm²
+      // in contact, technicians 0.61). Near a centre the drop fades back to
+      // the vertex's own (σ CONTACT_HOLD_MM), so each point stays at the clearance.
+      const hold = Number.isFinite(centreD2[k]) ? Math.exp(-centreD2[k] / (2 * CONTACT_HOLD_MM * CONTACT_HOLD_MM)) : 0
+      const d = Math.max(drop[k], smooth[k] * (1 - hold))
       if (d <= 0.005) continue
       const p = getP(grid, i, j)
       const f = floorY ? floorY(p) : null
