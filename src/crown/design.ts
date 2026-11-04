@@ -1109,6 +1109,15 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     mcz += m[2] / nu
   }
   const jMax = Math.max(3, Math.floor(g.nv * 0.55))
+  // How far out the wall leaves the margin (the start tangent's share of the
+  // outward run to the height of contour). At 0.9 the walls rose straight:
+  // 12–18° from the axis against the technicians' 17–24°, 0.22–0.39 mm out
+  // 1 mm above the margin against 0.36–0.52. At 2.2 lower molars and both
+  // premolar classes came to 17–25° and 0.30–0.49 mm, closer to the
+  // technicians' crowns and no new failures; upper molars lost a passing
+  // donor on a tall prep (case012) and their match on the technician's margin,
+  // so they keep 0.9.
+  const er = env.toothClass === 'upperMolar' ? 0.9 : 2.2
   for (let i = 0; i < nu; i++) {
     const m = env.marginRow[i]
     let jc = 2
@@ -1128,7 +1137,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     // and a mostly-occlusal start at the margin (a straight-ish emergence).
     const T1: Vec3 = [((b[0] - a[0]) / 2) * jc, ((b[1] - a[1]) / 2) * jc, ((b[2] - a[2]) / 2) * jc]
     const chord: Vec3 = [P1[0] - m[0], P1[1] - m[1], P1[2] - m[2]]
-    const T0: Vec3 = [chord[0] * 0.9, Math.max(chord[1], 0.5) * 1.1, chord[2] * 0.9]
+    const T0: Vec3 = [chord[0] * er, Math.max(chord[1], 0.5) * 1.1, chord[2] * er]
     for (let j = 0; j < jc; j++) {
       const t = j / jc
       const t2 = t * t
