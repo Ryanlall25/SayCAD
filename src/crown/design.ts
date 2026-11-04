@@ -668,6 +668,77 @@ export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centr
 
 const AXIAL_SPREAD = 3
 
+const ANTERIOR = new Set<ToothClass>(['upperAnterior', 'lowerAnterior', 'upperCanine', 'lowerCanine'])
+
+/**
+ * Front teeth meet the opposing teeth face to face (overbite, overjet), not
+ * cusp to fossa: a lower incisor's labial face runs up behind the upper
+ * incisors, so lowering it (the bite step) can't clear it. Each vertex still
+ * into the opposing teeth moves in toward the axis, horizontally, in 0.05 mm
+ * steps until it clears or reaches the wall minimum; the field is spread to
+ * neighbours so the face stays fair. On the lab's two lower incisors (case037)
+ * the library crowns sat 0.24–0.51 mm into the upper incisors.
+ */
+function relieveOverlap(grid: CrownGrid, ant: SurfaceIndex, clearance: number, intaglio: SurfaceIndex, minAxialMm: number, log: string[]): void {
+  const { nu, nv } = grid
+  const move = new Float64Array(nu * nv)
+  const j0 = Math.round(nv * 0.25)
+  for (let j = j0; j < nv; j++) {
+    for (let i = 0; i < nu; i++) {
+      const p = getP(grid, i, j)
+      if (ant.gapUp(p, 2) >= clearance) continue
+      const r = Math.hypot(p[0], p[2])
+      if (r < 0.3) continue
+      const inn: Vec3 = [-p[0] / r, 0, -p[2] / r]
+      let d = 0
+      for (let s = 0.05; s <= 1.2 + 1e-9; s += 0.05) {
+        const q: Vec3 = [p[0] + inn[0] * s, p[1], p[2] + inn[2] * s]
+        if ((intaglio.closest(q, minAxialMm + 1)?.distance ?? Infinity) < minAxialMm) break
+        d = s
+        if (ant.gapUp(q, 2) >= clearance) break
+      }
+      move[j * nu + i] = d
+    }
+  }
+  let any = 0
+  for (let k = 0; k < move.length; k++) any = Math.max(any, move[k])
+  if (any <= 0) return
+  // Spread (max with a 3×3 mean, 3 passes): a single vertex pulled in alone dents the face.
+  let f = move
+  for (let pass = 0; pass < 3; pass++) {
+    const g2 = new Float64Array(nu * nv)
+    for (let j = j0; j < nv; j++) {
+      for (let i = 0; i < nu; i++) {
+        let sum = 0
+        let c = 0
+        for (let dj = -1; dj <= 1; dj++) {
+          const jj = j + dj
+          if (jj < j0 || jj >= nv) continue
+          for (let di = -1; di <= 1; di++) {
+            sum += f[jj * nu + ((i + di + nu) % nu)]
+            c++
+          }
+        }
+        g2[j * nu + i] = Math.max(move[j * nu + i], (sum / c) * 0.9)
+      }
+    }
+    f = g2
+  }
+  for (let j = j0; j < nv; j++) {
+    for (let i = 0; i < nu; i++) {
+      let m = f[j * nu + i]
+      if (m < 1e-3) continue
+      const p = getP(grid, i, j)
+      const r = Math.hypot(p[0], p[2])
+      if (r < 0.3) continue
+      // Never thinner than the wall minimum for the spread part either.
+      while (m > 0 && (intaglio.closest([p[0] - (p[0] / r) * m, p[1], p[2] - (p[2] / r) * m], minAxialMm + 1)?.distance ?? Infinity) < minAxialMm) m -= 0.05
+      if (m > 0) setP(grid, i, j, [p[0] - (p[0] / r) * m, p[1], p[2] - (p[2] / r) * m])
+    }
+  }
+  log.push(`front-tooth overlap relieved toward the axis, up to ${any.toFixed(2)} mm`)
+}
+
 /** Pushes the outer surface out until it clears the intaglio by the material minimum. */
 export function enforceThickness(
   grid: CrownGrid,
@@ -1082,6 +1153,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   if (mesial) enforceContact(g, mesial, 1, params.contactMesialMm, [], wall)
   if (distal) enforceContact(g, distal, -1, params.contactDistalMm, [], wall)
   if (env.antagonist) enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, false, [], occlusalFloor(env.intaglioIndex, mat.minOcclusalMm))
+  if (env.antagonist && ANTERIOR.has(env.toothClass)) relieveOverlap(g, env.antagonist, params.occlusalClearanceMm, env.intaglioIndex, mat.minAxialMm, steps)
   raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, undefined, bite)
   enforceThickness(g, env.intaglioIndex, centre, mat, 14)
   steps.push(`minimum thickness enforced (${mat.minAxialMm} axial / ${mat.minOcclusalMm} occlusal mm)`)
