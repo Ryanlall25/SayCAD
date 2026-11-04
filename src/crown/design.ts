@@ -818,6 +818,22 @@ function relieveOverlap(grid: CrownGrid, ant: SurfaceIndex, clearance: number, i
   log.push(`front-tooth overlap relieved toward the axis, up to ${any.toFixed(2)} mm`)
 }
 
+/**
+ * Laplacian fairing of what the design changed (the displacement from the
+ * placed donor), not of the surface itself. Smoothing positions blurred the
+ * donor's grooves, a few grid steps wide, on every crown (lab review:
+ * soft, shallow fossae beside the technicians' crisp ones).
+ */
+function smoothChange(g: CrownGrid, ref: Float64Array, passes: number, lambda: number, fromRow: number): void {
+  if ((globalThis as any).process?.env?.SMOOTH_POS) return smoothGrid(g, passes, lambda, fromRow)
+  const d = Float64Array.from(g.pts, (v, k) => v - ref[k])
+  const pole = g.pole
+  const D: CrownGrid = { ...g, pts: d, pole: [0, 0, 0] }
+  smoothGrid(D, passes, lambda, fromRow)
+  for (let k = 0; k < g.pts.length; k++) g.pts[k] = ref[k] + D.pts[k]
+  g.pole = pole
+}
+
 /** Pushes the outer surface out until it clears the intaglio by the material minimum. */
 export function enforceThickness(
   grid: CrownGrid,
@@ -1116,6 +1132,9 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   for (let j = 0; j < g.nv; j++) for (let i = 0; i < nu; i++) setP(g, i, j, placed(getP(tpl.grid, i, j)))
   g.pole = placed(tpl.grid.pole)
   env.onStage?.('placed', g)
+  // The donor as placed: the fairing passes below smooth what the design
+  // changed, not the donor's own grooves and ridges.
+  const donorRef = Float64Array.from(g.pts)
   if (params.heightOffsetMm) {
     for (let j = 0; j < g.nv; j++) {
       const w = smoothstep(0.3, 0.7, j / g.nv) * params.heightOffsetMm
@@ -1183,7 +1202,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
       ])
     }
   }
-  smoothGrid(g, 3, 0.3, 1)
+  smoothChange(g, donorRef, 3, 0.3, 1)
   steps.push('emergence profile from the margin to the height of contour')
   env.onStage?.('emergence', g)
 
@@ -1236,7 +1255,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   const bite = env.antagonist ? { antagonist: env.antagonist, clearanceMm: params.occlusalClearanceMm } : undefined
   raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, steps, bite)
   enforceThickness(g, env.intaglioIndex, centre, mat)
-  smoothGrid(g, 2, 0.25, 2)
+  smoothChange(g, donorRef, 2, 0.25, 2)
   env.onStage?.('thickness1', g)
   if (mesial) enforceContact(g, mesial, 1, params.contactMesialMm, [], wall)
   if (distal) enforceContact(g, distal, -1, params.contactDistalMm, [], wall)
