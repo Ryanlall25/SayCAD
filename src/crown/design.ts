@@ -1134,7 +1134,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   // technicians' crowns and no new failures; upper molars lost a passing
   // donor on a tall prep (case012) and their match on the technician's margin,
   // so they keep 0.9.
-  const er = env.toothClass === 'upperMolar' ? 0.9 : 2.2
+  const er = env.toothClass === 'upperMolar' ? Number((globalThis as any).process?.env?.EMERG_UM ?? 0.9) : 2.2
   for (let i = 0; i < nu; i++) {
     const m = env.marginRow[i]
     let jc = 2
