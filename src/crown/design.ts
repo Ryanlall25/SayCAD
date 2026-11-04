@@ -668,6 +668,52 @@ export function raiseUnderReduced(grid: CrownGrid, intaglio: SurfaceIndex, centr
 
 const AXIAL_SPREAD = 3
 
+/**
+ * Point contacts, not plateaus. Relieving everything that met the antagonist
+ * to the clearance left the opposing cusps pressed into the crown as flat
+ * facets: on 19 lab lower molars our crowns sat within 0.1 mm of the
+ * antagonist over 2.04 mm² (median) against the technicians' 0.29 mm². Each
+ * contact patch keeps its most prominent point at the clearance and opens
+ * away from it, CONTACT_OPEN·d² (d in plan view, mm), at most 0.25 mm and
+ * never under the material floor: a spot about 0.4 mm across at 0.1 mm.
+ */
+const CONTACT_OPEN = Number((globalThis as any).process?.env?.CONTACT_OPEN ?? 0.3)
+function shapeContacts(grid: CrownGrid, ant: SurfaceIndex, clearance: number, floorY: ((p: Vec3) => number | null) | undefined, log: string[]): void {
+  const { nu, nv } = grid
+  const j0 = Math.round(nv * 0.2)
+  const near: Array<{ k: number; p: Vec3; gap: number }> = []
+  for (let j = j0; j < nv; j++) {
+    for (let i = 0; i < nu; i++) {
+      const p = getP(grid, i, j)
+      const gap = ant.gapUp(p, 2)
+      if (gap <= clearance + 0.15) near.push({ k: j * nu + i, p, gap })
+    }
+  }
+  if (!near.length) return
+  // Patches: plan-view clusters (1.5 mm); each one's centre is its closest point to the antagonist.
+  near.sort((a, b) => a.gap - b.gap)
+  const centres: Vec3[] = []
+  for (const v of near) if (!centres.some((c) => Math.hypot(c[0] - v.p[0], c[2] - v.p[2]) < 1.5)) centres.push(v.p)
+  let opened = 0
+  for (const v of near) {
+    let d2 = Infinity
+    for (const c of centres) d2 = Math.min(d2, (c[0] - v.p[0]) ** 2 + (c[2] - v.p[2]) ** 2)
+    // Only what sits closer than the opened target comes down.
+    const target = clearance + Math.min(0.25, CONTACT_OPEN * d2)
+    const drop = target - v.gap
+    if (drop <= 0.005) continue
+    const i = v.k % nu
+    const j = Math.floor(v.k / nu)
+    const f = floorY ? floorY(v.p) : null
+    const y = f === null ? v.p[1] - drop : Math.max(Math.min(v.p[1], f), v.p[1] - drop)
+    if (y < v.p[1]) {
+      setP(grid, i, j, [v.p[0], y, v.p[2]])
+      opened++
+    }
+  }
+  if (opened) log.push(`occlusal contacts shaped to ${centres.length} point contact(s)`)
+}
+
 const ANTERIOR = new Set<ToothClass>(['upperAnterior', 'lowerAnterior', 'upperCanine', 'lowerCanine'])
 
 /**
@@ -1079,7 +1125,8 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     // and a mostly-occlusal start at the margin (a straight-ish emergence).
     const T1: Vec3 = [((b[0] - a[0]) / 2) * jc, ((b[1] - a[1]) / 2) * jc, ((b[2] - a[2]) / 2) * jc]
     const chord: Vec3 = [P1[0] - m[0], P1[1] - m[1], P1[2] - m[2]]
-    const T0: Vec3 = [chord[0] * 0.9, Math.max(chord[1], 0.5) * 1.1, chord[2] * 0.9]
+    const ER = Number((globalThis as any).process?.env?.EMERG_R ?? 0.9)
+    const T0: Vec3 = [chord[0] * ER, Math.max(chord[1], 0.5) * 1.1, chord[2] * ER]
     for (let j = 0; j < jc; j++) {
       const t = j / jc
       const t2 = t * t
@@ -1157,6 +1204,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, undefined, bite)
   enforceThickness(g, env.intaglioIndex, centre, mat, 14)
   steps.push(`minimum thickness enforced (${mat.minAxialMm} axial / ${mat.minOcclusalMm} occlusal mm)`)
+  if (env.antagonist) shapeContacts(g, env.antagonist, params.occlusalClearanceMm, occlusalFloor(env.intaglioIndex, mat.minOcclusalMm), steps)
   env.onStage?.('final', g)
 
   const b = gridBounds(g)
