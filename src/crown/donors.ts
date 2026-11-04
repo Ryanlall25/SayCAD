@@ -78,7 +78,17 @@ export function occlusalRelief(g: CrownGrid): number {
 // Premolars weren't flat (lower 1.34 vs 1.42 mm) and lost 0.005–0.007 mm.
 const FLAT_WEIGHT = (cls: string): number => (cls.endsWith('Molar') ? 0.6 : 0)
 
-const CONSENSUS_WEIGHT = Number((globalThis as any).process?.env?.DONOR_CONSENSUS ?? 0)
+// Weight of the consensus term (mm of reshaping per mm of mean distance to
+// the other passing designs), per class, from leave-one-out runs against the
+// lab's crowns (mean deviation auto / on the technician's margin, mm):
+// lower molars 0 → 1: 0.171/0.182 → 0.160/0.168 (2: 0.166/0.173);
+// upper molars 0 → 2: 0.212/0.221 → 0.209/0.211 (1: 0.215/0.209);
+// premolars at 1 came out no better (lower 0.156/0.162 → 0.160/0.170).
+const CONSENSUS_WEIGHT = (cls: string): number => {
+  const env = (globalThis as any).process?.env?.DONOR_CONSENSUS
+  if (env !== undefined) return Number(env)
+  return cls === 'lowerMolar' ? 1 : cls === 'upperMolar' ? 2 : 0
+}
 
 /** Mean distance between corresponding vertices of two grids on one margin (mm). */
 function gridDistance(a: CrownGrid, b: CrownGrid): number {
@@ -147,11 +157,12 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
   // least-reshaped alone flipped between near-equal donors on small pipeline
   // changes, 0.07–0.1 mm from the technician's crown each time (054, 012).
   const pool = cands.filter((c) => c.passes)
-  if (CONSENSUS_WEIGHT > 0 && pool.length >= 3) {
+  const cw = CONSENSUS_WEIGHT(set.cls)
+  if (cw > 0 && pool.length >= 3) {
     for (const c of pool) {
       let sum = 0
       for (const o of pool) if (o !== c) sum += gridDistance(c.final, o.final)
-      c.score += CONSENSUS_WEIGHT * (sum / (pool.length - 1))
+      c.score += cw * (sum / (pool.length - 1))
     }
   }
   let best: Cand | null = null
