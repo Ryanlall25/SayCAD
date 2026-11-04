@@ -2,12 +2,12 @@ import * as THREE from 'three'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { toothClassOf, type ToothClass } from './anatomy'
 import { designFromDonors, donorTemplate, type DonorSet } from './donors'
-import { toothSide } from './findPrep'
+import { bestMargin, findPrep, findPrepDeep, marginScoreOf, scorePreps, toothSide } from './findPrep'
 import { SurfaceIndex, add, cross, dot, normalize, scale, sub, toLocal, toWorld, type ToothFrame, type Vec3 } from './geom'
 import type { CrownGrid } from './grid'
 import { commonAxis } from './insertion'
 import { fdiToUniversal } from './library'
-import { marginFromTaps } from './margin'
+import { marginFromTaps, type MarginResult } from './margin'
 import { prepareCase, type DesignResult } from './pipeline'
 
 /**
@@ -68,6 +68,8 @@ export interface BridgeResult {
   abutments: Array<{ fdi: number; result: DesignResult; donor: string }>
   pontic: { fdi: number; donor: string; frame: ToothFrame; gapMm: number }
   connectors: ConnectorReport[]
+  /** What stops this bridge going to the mill as is (empty: ready for approval). */
+  blockers: string[]
   notes: string[]
 }
 
@@ -127,10 +129,94 @@ const CAVITY_GROW_MM = 0.015
 const smoothstep = (a: number, b: number, x: number): number => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
 const CONNECTOR_OVERSIZE = 1.06
 const CONNECTOR_MIN_MM2 = 6
+// As for single crowns (choosePrep): the pair's span is a further check.
+const AUTO_ABUTMENT_SCORE = 0.45
+const AUTO_MAX_MISSING = 0.25
 const EMBRASURE_MM = 1.5
 const CONNECTOR_HALF_LENGTH_MM = 2.6
 
 const rowOf = (g: CrownGrid, j: number): Vec3[] => Array.from({ length: g.nu }, (_, i) => [g.pts[(j * g.nu + i) * 3], g.pts[(j * g.nu + i) * 3 + 1], g.pts[(j * g.nu + i) * 3 + 2]] as Vec3)
+
+/**
+ * The two abutment preps of a bridge, found from the bite: every out-of-contact
+ * candidate (usual and deep clearance bands) is scored by how clearly its
+ * finish line reads; the best-scoring pair 12–30 mm apart wins. Assigned by
+ * margin size — the larger loop to the tooth further back in the arch (a
+ * molar's margin is larger than a premolar's); equal classes the same way.
+ */
+export function findAbutments(index: SurfaceIndex, antagonist: SurfaceIndex, teeth: number[]): MarginResult[] {
+  const usual = findPrep(index, antagonist)
+  const deep = findPrepDeep(index, antagonist)
+  const far = (a: { point: Vec3 }, list: Array<{ point: Vec3 }>) => list.every((c) => Math.hypot(...sub(c.point, a.point)) > 3)
+  const cands = [...(usual.candidates ?? [])]
+  for (const c of deep.candidates ?? []) if (far(c, cands)) cands.push(c)
+  const all = scorePreps(index, { ...usual, point: null, candidates: cands }, 16)
+  const scored = all.filter((c) => c.score >= AUTO_ABUTMENT_SCORE)
+  const centre = (m: MarginResult): Vec3 => scale(m.points.reduce((s, p) => add(s, p), [0, 0, 0] as Vec3), 1 / m.points.length)
+  let best: [{ margin: MarginResult; score: number; point: Vec3 }, { margin: MarginResult; score: number; point: Vec3 }] | null = null
+  let bestS = -Infinity
+  for (let i = 0; i < scored.length; i++) {
+    for (let j = i + 1; j < scored.length; j++) {
+      const d = Math.hypot(...sub(centre(scored[i].margin), centre(scored[j].margin)))
+      if (d < 12 || d > 30) continue
+      const s = scored[i].score + scored[j].score
+      if (s > bestS) {
+        bestS = s
+        best = [scored[i], scored[j]]
+      }
+    }
+  }
+  // One found, the other not out of contact (no opposing tooth over it —
+  // case086's #16): the tooth tops 12–30 mm from the first, each judged by its margin.
+  if (!best && scored.length) {
+    const first = scored[0]
+    const c0 = centre(first.margin)
+    const up = normalize(usual.ups?.[0] ?? first.margin.axis.up)
+    const pos = index.geometry.getAttribute('position')
+    const cells = new Map<string, Vec3>()
+    let topH = -Infinity
+    for (let i = 0; i < pos.count; i += 3) topH = Math.max(topH, dot([pos.getX(i), pos.getY(i), pos.getZ(i)], up))
+    for (let i = 0; i < pos.count; i += 3) {
+      const p: Vec3 = [pos.getX(i), pos.getY(i), pos.getZ(i)]
+      const d = Math.hypot(...sub(p, c0))
+      if (d < 12 || d > 30 || dot(p, up) < topH - 8) continue
+      const key = p.map((x) => Math.round(x / 2.5)).join(',')
+      const q = cells.get(key)
+      if (!q || dot(p, up) > dot(q, up)) cells.set(key, p)
+    }
+    // Highest cell per 2.5 mm column: a stump's top, not its walls.
+    let second: { margin: MarginResult; score: number } | null = null
+    for (const seed of cells.values()) {
+      if (dot(seed, up) < topH - 6) continue
+      const m = bestMargin(index, seed, usual.ups ?? [])
+      const sc = marginScoreOf(m)
+      const d = m.points.length ? Math.hypot(...sub(centre(m), c0)) : 0
+      if (sc >= AUTO_ABUTMENT_SCORE && d >= 12 && d <= 30 && (!second || sc > second.score)) second = { margin: m, score: sc }
+    }
+    if (second) best = [first, { point: c0, ...second }]
+  }
+  if (!best) throw new Error('Could not find two abutment preps a bridge span apart — tap both margins.')
+  // Each re-traced along the other's direction too: abutments share a path of
+  // insertion, and one loop read along a direction 40° off came back 37 %
+  // interpolated (case029's #45).
+  const pair = best.map((b, k) => {
+    const other = best![1 - k].margin.axis.up
+    const again = bestMargin(index, b.point, [other, ...(usual.ups ?? [])])
+    return marginScoreOf(again) > b.score ? again : b.margin
+  })
+  best = [{ ...best[0], margin: pair[0] }, { ...best[1], margin: pair[1] }]
+  // A loop traced only in part can't carry a crown (case029's #45, 37 %
+  // interpolated, came out partly inside out): ask, as for a single crown.
+  for (const b of best) if (b.margin.missingFraction > AUTO_MAX_MISSING) throw new Error(`An abutment's finish line is only partly visible (${Math.round(b.margin.missingFraction * 100)} % filled in) — tap its margin.`)
+  const size = (m: MarginResult): number => {
+    const c = centre(m)
+    return m.points.reduce((s, p) => s + Math.hypot(...sub(p, c)), 0) / m.points.length
+  }
+  const [a, b] = size(best[0].margin) >= size(best[1].margin) ? [best[0].margin, best[1].margin] : [best[1].margin, best[0].margin]
+  // a: the larger loop, to the tooth further back.
+  const back = toothSide(teeth[0]).pos >= toothSide(teeth[1]).pos ? 0 : 1
+  return back === 0 ? [a, b] : [b, a]
+}
 
 export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   const notes: string[] = []
@@ -138,7 +224,6 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   const abut = req.units.filter((u) => u.role === 'abutment')
   const pons = req.units.filter((u) => u.role === 'pontic')
   if (abut.length !== 2 || pons.length !== 1) throw new Error('Bridges: two abutments and one pontic for now.')
-  for (const a of abut) if (!a.margin || a.margin.length < 4) throw new Error(`#${a.fdi}: margin needed`)
   const pon = pons[0]
   const uni = (fdi: number): number => {
     const u = fdiToUniversal(fdi)
@@ -148,9 +233,17 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   const ant = req.antagonist
   const antIndex = ant ? new SurfaceIndex(ant) : null
 
-  // 1. Margins, and one path of insertion both preps share.
+  // 1. Margins (given, or found: the two clearest finish lines a span apart),
+  // and one path of insertion both preps share.
   const pcs = abut.map((a) => prepareCase({ toothNumber: uni(a.fdi), prep: req.prep, antagonist: ant }))
-  const margins = abut.map((a, k) => marginFromTaps(pcs[k].prepIndex, a.margin!, 180, antIndex ? { antagonist: antIndex } : undefined))
+  let margins: MarginResult[]
+  if (abut.every((a) => a.margin && a.margin.length >= 4)) {
+    margins = abut.map((a, k) => marginFromTaps(pcs[k].prepIndex, a.margin!, 180, antIndex ? { antagonist: antIndex } : undefined))
+  } else {
+    if (!antIndex) throw new Error('No opposing scan: tap both abutment margins.')
+    margins = findAbutments(pcs[0].prepIndex, antIndex, abut.map((a) => uni(a.fdi)))
+    notes.push('abutment margins found automatically')
+  }
   const ax = commonAxis(pcs[0].prepWelded, margins.map((m) => m.points), margins[0].axis.up)
   notes.push(`common path of insertion: ${ax.tiltDeg.toFixed(0)}° from the mean margin normal, blockout ${ax.perAbutmentMm3.map((v) => v.toFixed(1)).join(' + ')} mm³`)
 
@@ -187,6 +280,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   }
   let pm = crownPts(mesialAb.result)
   let pd = crownPts(distalAb.result)
+  for (const [ab, pts] of [[mesialAb, pm], [distalAb, pd]] as const) if (!pts.every((p) => p.every(Number.isFinite))) throw new Error(`#${ab.fdi}: the abutment design came out invalid — check its margin`)
   // An abutment with no opposing tooth and no neighbour to read its height
   // from (lab case086's #16: no lower molar on the scan) takes the lab's usual
   // crown height over the margin centre (the donors' median for its position).
@@ -272,7 +366,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   })()
   const ridgeAt = (x: number, z: number): number | null => jawLocal.raycast([x, targetTop + 15, z], [0, -1, 0], 0, 40)?.point[1] ?? null
   const ridgeC = ridgeAt(xc0, zc)
-  if (ridgeC === null) throw new Error('no ridge found under the pontic')
+  if (ridgeC === null) throw new Error(`no ridge found under the pontic (span ${xD0.toFixed(1)}..${xM0.toFixed(1)} mm, z ${zc.toFixed(1)}, top ${targetTop.toFixed(1)})`)
   // The space at contact height (2 mm over the ridge to 1 mm under the crowns'
   // tops): a crown's widest point can sit low, and measuring from it left a
   // pontic short of a premolar abutment (lab case086: a 1.4 mm² neck).
@@ -448,6 +542,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   const target = req.connectorMm2 ?? (anyMolar ? 12 : 9)
   const connectors: ConnectorReport[] = []
   const connectorSolids: Array<InstanceType<Wasm['Manifold']>> = []
+  const connectorBoxes: Array<{ x: number; y: number; h: number; wdt: number }> = []
   for (const [xPlane, ab] of [[xM, mesialAb], [xD, distalAb]] as const) {
     // Vertical room at this plane: ridge + 1.5 mm (cleansable embrasure) up to 1 mm under the marginal ridge.
     // The gum read 1.5 mm in on the pontic side: straight down from the crown's
@@ -517,6 +612,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
     // Through toSolid: the pontic frame is mirrored when buccal flips (case086),
     // which turned the ellipsoids inside out (−28 mm³) and left the units apart.
     connectorSolids.push(toSolid(w, v, m.triVerts))
+    connectorBoxes.push({ x: xPlane, y: yc, h: Hfin, wdt: W })
     connectors.push({ between: [ab.fdi, pon.fdi], targetMm2: target, widthMm: W, heightMm: Hfin, gumClearanceMm: Number.isFinite(gum) ? gum : null, biteClearanceMm: bite })
   }
 
@@ -556,19 +652,55 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   const cavities = w.Manifold.union([cavity(mesialAb.result), cavity(distalAb.result)])
   const added = w.Manifold.union([toSolid(w, ponticWorld, ponticLocal.indices), ...connectorSolids]).subtract(cavities)
   let solid = w.Manifold.union([crownSolid(mesialAb.result), crownSolid(distalAb.result), added])
+  // A tunnel left at a joint (where pontic and crown touch above and below
+  // the connector — case018 on found margins): each joint filled with the
+  // convex hull of what the bridge has there, within a slab the connector's
+  // size. A hull has no holes; the cavities come out of it again.
+  if (solid.genus() > 0) {
+    const fills = connectorBoxes.map((b) => {
+      // Up to 1.5 mm over the connector and 1 mm under it: the loop ran between
+      // the connector and the contact above it.
+      const box = w.Manifold.cube([2 * CONNECTOR_HALF_LENGTH_MM, b.h + 2.5, b.wdt], true).translate([0, 0.25, 0])
+      const m = box.getMesh()
+      const v = Array.from(m.vertProperties)
+      const pts: Vec3[] = []
+      for (let k = 0; k < v.length; k += 3) pts.push([v[k] + b.x, v[k + 1] + b.y, v[k + 2] + zc])
+      const slab = toSolid(w, pts.flatMap((q) => toWorld(provisional, q)), m.triVerts)
+      return solid.intersect(slab).hull().subtract(cavities)
+    })
+    const filled = w.Manifold.union([solid, ...fills])
+    if (filled.genus() < solid.genus()) {
+      notes.push(`joint tunnel closed (genus ${solid.genus()} → ${filled.genus()})`)
+      solid = filled
+    }
+  }
   // Slivers of connector left in the cement space float free: keep the bridge itself.
   const bodies = solid.decompose().sort((a, b) => b.volume() - a.volume())
+  let looseMm3 = 0
   if (bodies.length > 1) {
-    const loose = bodies.slice(1).reduce((v, b) => v + b.volume(), 0)
-    notes.push(`${bodies.length - 1} loose fragment(s) dropped (${loose.toFixed(3)} mm³)`)
+    looseMm3 = bodies.slice(1).reduce((v, b) => v + b.volume(), 0)
+    notes.push(`${bodies.length - 1} loose fragment(s) dropped (${looseMm3.toFixed(3)} mm³)`)
     solid = bodies[0]
   }
   const out = solid.getMesh()
   const status = solid.status()
+  const manifoldOk = String(status) === 'NoError' || (status as unknown as { value?: number })?.value === 0
+  const blockers: string[] = []
+  if (!manifoldOk) blockers.push('the solid is not watertight')
+  if (solid.genus() !== 0) blockers.push(`the solid has ${solid.genus() > 0 ? `${solid.genus()} tunnel(s)` : 'separate pieces'} through it`)
+  if (looseMm3 > 0.5) blockers.push(`part of the bridge came apart (${looseMm3.toFixed(1)} mm³) — a unit is not joined`)
+  for (const k of connectors) {
+    const area = (Math.PI / 4) * k.widthMm * k.heightMm / CONNECTOR_OVERSIZE
+    if (area < CONNECTOR_MIN_MM2 - 0.05) blockers.push(`connector #${k.between[0]}–#${k.between[1]} only ${area.toFixed(1)} mm²`)
+    if (k.biteClearanceMm !== null && k.biteClearanceMm < clearance - 0.05) blockers.push(`connector #${k.between[0]}–#${k.between[1]} ${(clearance - k.biteClearanceMm).toFixed(2)} mm into the bite`)
+  }
+  for (const a of abutments) {
+    for (const x of a.result.report.results) if (x.verdict === 'fail' && !x.id.startsWith('contact')) blockers.push(`#${a.fdi}: ${x.label} ${x.measured}`)
+  }
   return {
     positions: Float32Array.from(out.vertProperties),
     indices: Uint32Array.from(out.triVerts),
-    manifoldOk: String(status) === 'NoError' || (status as unknown as { value?: number })?.value === 0,
+    manifoldOk,
     genus: solid.genus(),
     volumeMm3: solid.volume(),
     axis: ax.axis,
@@ -576,6 +708,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
     abutments,
     pontic: { fdi: pon.fdi, donor: donor.d.id, frame: { ...provisional, origin: toWorld(provisional, [xc, ridge0, zc]) }, gapMm: gap },
     connectors,
+    blockers,
     notes
   }
 }

@@ -114,13 +114,18 @@ export function runCritics(c: CriticInputs): CriticReport {
   forEachVertex(g, (i, j, p) => {
     if (j === 0) return
     const nIn = gridNormal(g, i, j)
-    const sd = capSignedDistance(c.intaglioIndex, p, centre, 6)
+    let sd = capSignedDistance(c.intaglioIndex, p, centre, 6)
     // Axial wall: inside the prep when a ray straight out from the axis still
     // meets the fitting surface (the ray toward the centre misreads points
     // just above the margin). Occlusal table: the centre ray.
     if (j < g.nv * 0.4) {
       const r = Math.hypot(p[0], p[2])
-      if (r > 1e-6 && c.intaglioIndex.raycast(p, [p[0] / r, 0, p[2] / r], 0.01, 6)) negative++
+      const inside = r > 1e-6 && !!c.intaglioIndex.raycast(p, [p[0] / r, 0, p[2] / r], 0.01, 6)
+      if (inside) negative++
+      // The wall's sign from the same test: under a blocked-out undercut the
+      // centre ray read a sound 0.5 mm wall as −0.72 mm (a bridge abutment on
+      // its common path, lab case018 #45; verified by a 5-ray parity vote).
+      sd = inside ? -Math.abs(sd) : Math.abs(sd)
     } else if (sd < -0.01) negative++
     if (s[j * g.nu + i] < 1.0) return
     thickness[j * g.nu + i] = sd
