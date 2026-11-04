@@ -78,6 +78,17 @@ export function occlusalRelief(g: CrownGrid): number {
 // Premolars weren't flat (lower 1.34 vs 1.42 mm) and lost 0.005–0.007 mm.
 const FLAT_WEIGHT = (cls: string): number => (cls.endsWith('Molar') ? 0.6 : 0)
 
+const CONSENSUS_WEIGHT = Number((globalThis as any).process?.env?.DONOR_CONSENSUS ?? 0)
+
+/** Mean distance between corresponding vertices of two grids on one margin (mm). */
+function gridDistance(a: CrownGrid, b: CrownGrid): number {
+  if (a.pts.length !== b.pts.length) return Infinity
+  let sum = 0
+  const n = a.pts.length / 3
+  for (let k = 0; k < a.pts.length; k += 3) sum += Math.hypot(a.pts[k] - b.pts[k], a.pts[k + 1] - b.pts[k + 1], a.pts[k + 2] - b.pts[k + 2])
+  return sum / n
+}
+
 export interface DonorChoice {
   result: DesignResult
   donor: string
@@ -104,7 +115,8 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
   const usual = reliefs[Math.floor(reliefs.length / 2)] ?? 0
   const w = FLAT_WEIGHT(set.cls)
   const score = (r: number, g: CrownGrid): number => r + w * Math.max(0, usual - occlusalRelief(g))
-  let best: (DonorChoice & { passes: boolean; stages: Array<[string, CrownGrid]>; score: number }) | null = null
+  type Cand = DonorChoice & { passes: boolean; stages: Array<[string, CrownGrid]>; score: number; final: CrownGrid }
+  const cands: Cand[] = []
   let margin = req.margin
   let tap = req.tap
   for (const d of donors) {
@@ -128,9 +140,22 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
     if (!fitted || !final) continue
     const passes = !r.report.results.some((x) => x.verdict === 'fail')
     const rs = reshaping(fitted, final)
-    const c = { result: r, donor: d.id, reshapingMm: rs, tried: donors.length, passes, stages, score: score(rs, final) }
-    if (!best || (c.passes && !best.passes) || (c.passes === best.passes && c.score < best.score)) best = c
+    const fin = final as CrownGrid
+    cands.push({ result: r, donor: d.id, reshapingMm: rs, tried: donors.length, passes, stages, score: score(rs, fin), final: { ...fin, pts: fin.pts.slice() } })
   }
+  // Consensus: each design's mean distance to the other passing designs. The
+  // least-reshaped alone flipped between near-equal donors on small pipeline
+  // changes, 0.07–0.1 mm from the technician's crown each time (054, 012).
+  const pool = cands.filter((c) => c.passes)
+  if (CONSENSUS_WEIGHT > 0 && pool.length >= 3) {
+    for (const c of pool) {
+      let sum = 0
+      for (const o of pool) if (o !== c) sum += gridDistance(c.final, o.final)
+      c.score += CONSENSUS_WEIGHT * (sum / (pool.length - 1))
+    }
+  }
+  let best: Cand | null = null
+  for (const c of cands) if (!best || (c.passes && !best.passes) || (c.passes === best.passes && c.score < best.score)) best = c
   // The caller's stage hook sees the chosen design only.
   if (best && req.onStage) for (const [s, g] of best.stages) req.onStage(s, g)
   return best
