@@ -220,7 +220,7 @@ export function findAbutments(index: SurfaceIndex, antagonist: SurfaceIndex, tee
 
 export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   const notes: string[] = []
-  const clearance = req.occlusalClearanceMm ?? 0.05
+  const clearance = req.occlusalClearanceMm ?? 0.08
   const abut = req.units.filter((u) => u.role === 'abutment')
   const pons = req.units.filter((u) => u.role === 'pontic')
   if (abut.length !== 2 || pons.length !== 1) throw new Error('Bridges: two abutments and one pontic for now.')

@@ -91,7 +91,9 @@ export const DEFAULT_PARAMS: DesignParams = {
   marginGapMm: 0.01,
   contactMesialMm: -0.03,
   contactDistalMm: -0.03,
-  occlusalClearanceMm: 0.05,
+  // The lab's crowns stand 0.08–0.09 mm off the antagonist at their closest
+  // (median, 35 molars) — exocad's usual 0.1 mm antagonist distance.
+  occlusalClearanceMm: 0.08,
   // Off: lifting every cusp tip into contact made crowns taller than the lab's
   // (technicians leave 0.06–0.13 mm at the closest point, 9 lower molars).
   occlusalContacts: false,
@@ -675,9 +677,10 @@ const AXIAL_SPREAD = 3
  * antagonist over 2.04 mm² (median) against the technicians' 0.29 mm². Each
  * contact patch keeps its most prominent point at the clearance and opens
  * away from it, CONTACT_OPEN·d² (d in plan view, mm), at most 0.25 mm and
- * never under the material floor: a spot about 0.4 mm across at 0.1 mm.
+ * never under the material floor. At 0.8 the lower molars' contact area came
+ * to 0.39 mm² (technicians' 0.29; 0.3 gave 0.89).
  */
-const CONTACT_OPEN = Number((globalThis as any).process?.env?.CONTACT_OPEN ?? 0.3)
+const CONTACT_OPEN = 0.8
 function shapeContacts(grid: CrownGrid, ant: SurfaceIndex, clearance: number, floorY: ((p: Vec3) => number | null) | undefined, log: string[]): void {
   const { nu, nv } = grid
   const j0 = Math.round(nv * 0.2)
@@ -1125,8 +1128,7 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     // and a mostly-occlusal start at the margin (a straight-ish emergence).
     const T1: Vec3 = [((b[0] - a[0]) / 2) * jc, ((b[1] - a[1]) / 2) * jc, ((b[2] - a[2]) / 2) * jc]
     const chord: Vec3 = [P1[0] - m[0], P1[1] - m[1], P1[2] - m[2]]
-    const ER = Number((globalThis as any).process?.env?.EMERG_R ?? 0.9)
-    const T0: Vec3 = [chord[0] * ER, Math.max(chord[1], 0.5) * 1.1, chord[2] * ER]
+    const T0: Vec3 = [chord[0] * 0.9, Math.max(chord[1], 0.5) * 1.1, chord[2] * 0.9]
     for (let j = 0; j < jc; j++) {
       const t = j / jc
       const t2 = t * t
