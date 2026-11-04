@@ -1278,6 +1278,9 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     // check runs toward the centre, and on cusp slopes the two differ
     // (upper molars 054, 085 came out under the occlusal minimum).
     enforceThickness(g, env.intaglioIndex, centre, mat, 4)
+    // That last outward push can reach the antagonist on a tight prep (lower
+    // premolar 074: 0.01 mm into it); relieve what it pushed in, above the floor.
+    enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, false, [], occlusalFloor(env.intaglioIndex, mat.minOcclusalMm))
   }
   env.onStage?.('final', g)
 
