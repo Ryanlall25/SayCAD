@@ -1281,6 +1281,10 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     // That last outward push can reach the antagonist on a tight prep (lower
     // premolar 074: 0.01 mm into it); relieve what it pushed in, above the floor.
     enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, false, [], occlusalFloor(env.intaglioIndex, mat.minOcclusalMm))
+    // Thickness has the last word: the floor above is vertical and slopes can
+    // still come out thin; where the two truly conflict the prep is
+    // under-reduced and the bite check reports it.
+    enforceThickness(g, env.intaglioIndex, centre, mat, 4)
   }
   env.onStage?.('final', g)
 
