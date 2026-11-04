@@ -149,10 +149,28 @@ for (const id of ids) {
     return m
   }
   const midS = (aEnd + bStart) / 2
+  // Gum clearance under each connector: at the narrowest section, lowest point to the jaw below.
+  const jawIdx = new SurfaceIndex(prep)
+  const upv = r.pontic.frame.occlusal
+  const gumAt = (g: THREE.BufferGeometry, lo: number, hi: number): number => {
+    const P = g.getAttribute('position') as THREE.BufferAttribute
+    let best = { s: lo, a: Infinity }
+    for (let s = lo; s <= hi; s += 0.1) { const a = section(P, A, u, s); if (a < best.a) best = { s, a } }
+    let g0 = Infinity
+    for (let i = 0; i < P.count; i++) {
+      const p = [P.getX(i), P.getY(i), P.getZ(i)]
+      if (Math.abs(dot([p[0] - A[0], p[1] - A[1], p[2] - A[2]], u) - best.s) > 0.25) continue
+      const h = jawIdx.raycast(p as Vec3, [-upv[0], -upv[1], -upv[2]], 0, 10)
+      if (h) g0 = Math.min(g0, h.distance)
+    }
+    return g0
+  }
   const oc = [conn(ours, aEnd, midS), conn(ours, midS, bStart)]
   const tc = [conn(tech, aEnd, midS), conn(tech, midS, bStart)]
   const fails = [...r.abutments.flatMap((a) => a.result.report.results.filter((x) => x.verdict === 'fail' && !x.id.startsWith('contact')).map((x) => `#${a.fdi} ${x.id}`))]
   console.log(`${id} ${units.map((x) => x.fdi + (x.role === 'pontic' ? 'p' : '')).join('-')} · ${secs} s · manifold ${r.manifoldOk ? 'ok' : 'BROKEN'} genus ${r.genus} · vs technician: ours→tech ${mean(dOT).toFixed(3)} mm (p90 ${dOT[Math.floor(dOT.length * 0.9)].toFixed(2)}), tech→ours ${mean(dTO).toFixed(3)} mm (p90 ${dTO[Math.floor(dTO.length * 0.9)].toFixed(2)})`)
+  console.log(`    gum under narrowest section: ours ${[gumAt(ours, aEnd, midS), gumAt(ours, midS, bStart)].map((x) => x.toFixed(2)).join(' / ')} · technician ${[gumAt(tech, aEnd, midS), gumAt(tech, midS, bStart)].map((x) => x.toFixed(2)).join(' / ')}`)
+  console.log(`    connector clearance: ${r.connectors.map((k) => `#${k.between[0]} gum ${k.gumClearanceMm?.toFixed(2)} bite ${k.biteClearanceMm?.toFixed(2)}`).join(' · ')}`)
   console.log(`    connectors ours ${oc.map((x) => x.toFixed(1)).join(' / ')} mm² · technician ${tc.map((x) => x.toFixed(1)).join(' / ')} mm² · pontic donor ${r.pontic.donor}, gap ${r.pontic.gapMm.toFixed(1)} mm · abutment donors ${r.abutments.map((a) => `#${a.fdi} ${a.donor}`).join(', ')}`)
   if (fails.length) console.log(`    abutment fails: ${fails.join(', ')}`)
   for (const n of r.notes) console.log(`    ${n}`)

@@ -50,6 +50,10 @@ export interface ConnectorReport {
   targetMm2: number
   widthMm: number
   heightMm: number
+  /** Closest approach of the connector to the gum below it (mm): room to clean under it. */
+  gumClearanceMm: number | null
+  /** Closest approach to the opposing teeth (mm, negative = into them). */
+  biteClearanceMm: number | null
 }
 
 export interface BridgeResult {
@@ -120,6 +124,11 @@ function ringsToMesh(bottom: Vec3, rings: Vec3[][], top: Vec3): { positions: num
 }
 
 const CAVITY_GROW_MM = 0.015
+const smoothstep = (a: number, b: number, x: number): number => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
+const CONNECTOR_OVERSIZE = 1.06
+const CONNECTOR_MIN_MM2 = 6
+const EMBRASURE_MM = 1.5
+const CONNECTOR_HALF_LENGTH_MM = 2.6
 
 const rowOf = (g: CrownGrid, j: number): Vec3[] => Array.from({ length: g.nu }, (_, i) => [g.pts[(j * g.nu + i) * 3], g.pts[(j * g.nu + i) * 3 + 1], g.pts[(j * g.nu + i) * 3 + 2]] as Vec3)
 
@@ -300,8 +309,11 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   const donor = cands[0]
   const tg = donor.t.grid
   const Wt = widthOf(tg)
-  const sx = (gap + 0.4) / Wt // 0.2 mm into each abutment, so the units fuse
-  const sz = sx * 0.9 // a little narrower buccolingually: cleansable
+  // 0.2 mm into each abutment at the contact: held short, the connectors
+  // showed as bare stubs between the units. The connectors are long enough to
+  // cover the whole overlap, so it can't enclose a tunnel (case066).
+  const sx = (gap + 0.4) / Wt
+  const sz = sx * 0.97 // the technician's pontics cover the ridge buccally
   // Height of contour: the widest row in the lower 60 %.
   const radius = (j: number): number => rowOf(tg, j).reduce((s, p) => s + Math.hypot(p[0], p[2]), 0) / tg.nu
   let jh = 1
@@ -375,7 +387,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   // then a convex transition up to the contour row, clearing toward the embrasures.
   const contour = upper[0]
   const patchRings = 4
-  const transRows = 7
+  const transRows = 14
   const rings: Vec3[][] = []
   const FP = 0.5 // contact patch: half the contour
   for (let k = 1; k <= patchRings; k++) {
@@ -401,6 +413,25 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
       return [x, Math.min(y, p[1] - 0.05 * (1 - t)), z] as Vec3
     }))
   }
+  // Open embrasures under the connectors: the gum rises toward each abutment
+  // (the papilla) and the pontic's proximal thirds sank into it (lab case018:
+  // 0.0 mm under ours, 1.7 under the technician's). Lifted to ≥ 1.5 mm over
+  // the gum there, fading out toward the contact patch; never above the row over it.
+  {
+    const all = [...rings, ...upper]
+    for (let k = 0; k < all.length; k++) {
+      for (let i = 0; i < all[k].length; i++) {
+        const p = all[k][i]
+        const px = Math.abs(p[0] - xc) / (gap / 2)
+        const want = EMBRASURE_MM * smoothstep(0.55, 0.9, px)
+        if (want <= 0) continue
+        const r = ridgeAt(p[0], p[2])
+        if (r === null || p[1] >= r + want) continue
+        const cap = k + 1 < all.length ? all[k + 1][i][1] - 0.05 : p[1]
+        all[k][i] = [p[0], Math.min(r + want, Math.max(p[1], cap)), p[2]]
+      }
+    }
+  }
   const bottom: Vec3 = [xc, ridgeAt(xc, zc) ?? ridge0, zc]
   const ponticLocal = ringsToMesh(bottom, [...rings, ...upper], topPole)
   const ponticWorld = ponticLocal.positions.slice()
@@ -424,27 +455,69 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
     const inward = xPlane > xc ? -1.5 : 1.5
     const lo = Math.min(ridgeAt(xPlane + inward, zc) ?? ridge0, ridge0 + 1) + 1.5
     const hi = targetTop - 1.8
-    let H = Math.sqrt((4 * target * 1.2) / Math.PI) // height:width = 1.2
-    let W = (4 * target) / (Math.PI * H)
+    // Sized 6 % over: with the pontic short of the crowns the ellipse alone is the
+    // narrowest section, and the mesh's facets cut a little off its area.
+    const sized = target * CONNECTOR_OVERSIZE
+    let H = Math.sqrt((4 * sized * 1.2) / Math.PI) // height:width = 1.2
+    let W = (4 * sized) / (Math.PI * H)
     if (H > hi - lo) {
       H = Math.max(2, hi - lo)
-      W = (4 * target) / (Math.PI * H)
+      W = (4 * sized) / (Math.PI * H)
       notes.push(`connector #${ab.fdi}–#${pon.fdi}: ${H.toFixed(1)} mm of height available, widened to ${W.toFixed(1)} mm`)
     }
-    const yc = Math.min(hi - H / 2, Math.max(lo + H / 2, (lo + hi) / 2 + 0.3))
-    const e = w.Manifold.sphere(1, 40).scale([1.8, H / 2, W / 2])
+    let yc = Math.min(hi - H / 2, Math.max(lo + H / 2, (lo + hi) / 2 + 0.3))
+    const e = w.Manifold.sphere(1, 48).scale([CONNECTOR_HALF_LENGTH_MM, H / 2, W / 2])
     const m = e.getMesh()
-    const v = Array.from(m.vertProperties)
-    for (let k = 0; k < v.length; k += 3) {
-      const q = toWorld(provisional, [v[k] + xPlane, v[k + 1] + yc, v[k + 2] + zc])
-      v[k] = q[0]
-      v[k + 1] = q[1]
-      v[k + 2] = q[2]
+    // The exposed half: the one over the pontic side (the other runs inside the crown).
+    const towardPontic = xPlane > xc ? -1 : 1
+    let sH = 1
+    const local = (): Vec3[] => {
+      const out: Vec3[] = []
+      for (let k = 0; k < m.vertProperties.length; k += 3) out.push([m.vertProperties[k] + xPlane, m.vertProperties[k + 1] * sH + yc, m.vertProperties[k + 2] + zc])
+      return out
     }
+    const exposed = (p: Vec3): boolean => (p[0] - xPlane) * towardPontic >= 0
+    const biteGap = (): number | null => {
+      if (!antLocalIdx) return null
+      let g = Infinity
+      for (const p of local()) if (p[1] > yc && exposed(p)) g = Math.min(g, antLocalIdx.gapUp(p, 3))
+      return Number.isFinite(g) ? g : null
+    }
+    // Clear of the opposing teeth: down into the room below if there is any,
+    // then shorter — the technician's 6–8 mm² connectors where the bite left
+    // ~2 mm of height (case066) — but not under 6 mm².
+    const b0 = biteGap()
+    if (b0 !== null && b0 < clearance) {
+      const down = Math.min(clearance - b0, Math.max(0, yc - (H * sH) / 2 - lo))
+      if (down > 0) yc -= down
+      const Hmin = (4 * CONNECTOR_MIN_MM2 * CONNECTOR_OVERSIZE) / (Math.PI * W)
+      for (let it = 0; it < 3; it++) {
+        const b1 = biteGap()
+        if (b1 === null || b1 >= clearance - 0.02) break
+        const Hc = H * sH
+        const Hn = Math.max(Hmin, Hc - (clearance - b1))
+        if (Hn >= Hc - 1e-3) break
+        yc -= (Hc - Hn) / 2
+        sH = Hn / H
+      }
+    }
+    const Hfin = H * sH
+    let gum = Infinity
+    for (const p of local()) {
+      if (p[1] > yc || !exposed(p)) continue
+      const r = ridgeAt(p[0], p[2])
+      if (r !== null) gum = Math.min(gum, p[1] - r)
+    }
+    const bite = biteGap()
+    const area = ((Math.PI / 4) * W * Hfin) / CONNECTOR_OVERSIZE
+    if (bite !== null && bite < clearance - 0.02) notes.push(`connector #${ab.fdi}–#${pon.fdi} is ${(clearance - bite).toFixed(2)} mm into the bite${area <= CONNECTOR_MIN_MM2 + 0.1 ? ` at its ${CONNECTOR_MIN_MM2} mm² floor — the bite needs adjusting` : ''}`)
+    if (area < 9 - 0.05) notes.push(`connector #${ab.fdi}–#${pon.fdi} reduced to ${area.toFixed(1)} mm² to clear the bite — under the 9 mm² zirconia guideline (the lab's own run 6–8 mm² in such spaces)`)
+    if (Number.isFinite(gum) && gum < 1) notes.push(`connector #${ab.fdi}–#${pon.fdi} only ${gum.toFixed(1)} mm over the gum — tight to clean under`)
+    const v = local().flatMap((p) => toWorld(provisional, p))
     // Through toSolid: the pontic frame is mirrored when buccal flips (case086),
     // which turned the ellipsoids inside out (−28 mm³) and left the units apart.
     connectorSolids.push(toSolid(w, v, m.triVerts))
-    connectors.push({ between: [ab.fdi, pon.fdi], targetMm2: target, widthMm: W, heightMm: H })
+    connectors.push({ between: [ab.fdi, pon.fdi], targetMm2: target, widthMm: W, heightMm: Hfin, gumClearanceMm: Number.isFinite(gum) ? gum : null, biteClearanceMm: bite })
   }
 
   // 7. Union, then the prep cavities cut back out.
