@@ -12,6 +12,8 @@ import { MATERIALS } from './materials'
 import { weld } from './slice'
 import { checkWatertight, gridTriangles, solidToWorld, stitchSolid, type WatertightReport } from './solid'
 
+const PREMOLAR_CLEARANCE_MM = 0.05
+
 /**
  * Auto-design, end to end: one tap on the prep → a finished, checked,
  * exportable crown. Each stage's output is kept on the result so the UI can
@@ -241,7 +243,11 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
   }
   const nu = req.nu ?? 128
   const nv = req.nv ?? 56
-  const params: DesignParams = { ...DEFAULT_PARAMS, ...req.params, sculpt: req.params?.sculpt ?? [] }
+  // Occlusal clearance by class, from the lab's crowns at their closest to the
+  // antagonist: molars 0.08–0.09 mm (median, 35), premolars spread 0.01–0.14
+  // (25) — 0.08 there thinned tight premolar preps under the minimum (case074).
+  const classClearance = toothClassOf(pc.toothNumber).endsWith('Molar') ? DEFAULT_PARAMS.occlusalClearanceMm : PREMOLAR_CLEARANCE_MM
+  const params: DesignParams = { ...DEFAULT_PARAMS, occlusalClearanceMm: classClearance, ...req.params, sculpt: req.params?.sculpt ?? [] }
   const mat = resolvedMaterial(params)
 
   let margin = req.margin
