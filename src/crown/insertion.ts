@@ -24,6 +24,25 @@ export function marginNormal(margin: Vec3[], up: Vec3): Vec3 {
 
 export function insertionAxis(prep: THREE.BufferGeometry, margin: Vec3[], up0: Vec3, maxTiltDeg = 25): { axis: Vec3; blockoutMm3: number; tiltDeg: number } {
   const u0 = marginNormal(margin, up0)
+  return searchCone(u0, [blockoutAlong(prep, margin)], maxTiltDeg)
+}
+
+/**
+ * One path of insertion for several preps (a bridge's abutments): the
+ * direction, near the mean of their margin normals, with the least blockout
+ * summed over all of them. Each abutment alone may prefer another tilt; the
+ * bridge seats only along a direction they share.
+ */
+export function commonAxis(prep: THREE.BufferGeometry, margins: Vec3[][], up0: Vec3, maxTiltDeg = 25): { axis: Vec3; blockoutMm3: number; tiltDeg: number; perAbutmentMm3: number[] } {
+  const normals = margins.map((m) => marginNormal(m, up0))
+  const u0 = normalize(normals.reduce((a, n) => add(a, n), [0, 0, 0] as Vec3))
+  const fns = margins.map((m) => blockoutAlong(prep, m))
+  const r = searchCone(u0, fns, maxTiltDeg)
+  return { ...r, perAbutmentMm3: fns.map((f) => f(r.axis)) }
+}
+
+/** Blockout volume (mm³) of one prep's walls if seated along an axis. */
+function blockoutAlong(prep: THREE.BufferGeometry, margin: Vec3[]): (axis: Vec3) => number {
   const c = margin.reduce((a, p) => add(a, scale(p, 1 / margin.length)), [0, 0, 0] as Vec3)
   const reach = Math.max(...margin.map((p) => Math.hypot(...sub(p, c)))) + 6
   // Only the stump's neighbourhood matters: crop once.
@@ -45,10 +64,7 @@ export function insertionAxis(prep: THREE.BufferGeometry, margin: Vec3[], up0: V
   const crop = weld(soup)
   const cropPos = crop.getAttribute('position') as THREE.BufferAttribute
   const cropIdx = crop.index!
-  const e1 = normalize(Math.abs(u0[0]) < 0.9 ? sub([1, 0, 0], scale(u0, u0[0])) : sub([0, 0, 1], scale(u0, u0[2])))
-  const e2 = cross(u0, e1)
-  const tilt = (a: number, b: number): Vec3 => normalize(add(add(u0, scale(e1, Math.tan((a * Math.PI) / 180))), scale(e2, Math.tan((b * Math.PI) / 180))))
-  const blockout = (axis: Vec3): number => {
+  return (axis: Vec3): number => {
     const bx = normalize(Math.abs(axis[0]) < 0.9 ? sub([1, 0, 0], scale(axis, axis[0])) : sub([0, 0, 1], scale(axis, axis[2])))
     const f: ToothFrame = { origin: c, occlusal: axis, buccal: bx, mesial: cross(axis, bx) }
     const toL = (p: Vec3): Vec3 => {
@@ -73,6 +89,13 @@ export function insertionAxis(prep: THREE.BufferGeometry, margin: Vec3[], up0: V
     }
     return res.blockoutVolumeMm3 + overhang
   }
+}
+
+function searchCone(u0: Vec3, blockouts: Array<(axis: Vec3) => number>, maxTiltDeg: number): { axis: Vec3; blockoutMm3: number; tiltDeg: number } {
+  const e1 = normalize(Math.abs(u0[0]) < 0.9 ? sub([1, 0, 0], scale(u0, u0[0])) : sub([0, 0, 1], scale(u0, u0[2])))
+  const e2 = cross(u0, e1)
+  const tilt = (a: number, b: number): Vec3 => normalize(add(add(u0, scale(e1, Math.tan((a * Math.PI) / 180))), scale(e2, Math.tan((b * Math.PI) / 180))))
+  const blockout = (axis: Vec3): number => blockouts.reduce((s, f) => s + f(axis), 0)
   const score = (a: number, b: number): number => blockout(tilt(a, b)) + 0.15 * Math.hypot(a, b)
   // A coarse sweep of the whole cone first: the local search alone landed on
   // different minima from starting directions a few degrees apart.
