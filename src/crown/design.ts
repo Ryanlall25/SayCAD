@@ -1206,7 +1206,13 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, undefined, bite)
   enforceThickness(g, env.intaglioIndex, centre, mat, 14)
   steps.push(`minimum thickness enforced (${mat.minAxialMm} axial / ${mat.minOcclusalMm} occlusal mm)`)
-  if (env.antagonist) shapeContacts(g, env.antagonist, params.occlusalClearanceMm, occlusalFloor(env.intaglioIndex, mat.minOcclusalMm), steps)
+  if (env.antagonist) {
+    shapeContacts(g, env.antagonist, params.occlusalClearanceMm, occlusalFloor(env.intaglioIndex, mat.minOcclusalMm), steps)
+    // Thickness wins over the contact shape: the floor above is vertical, the
+    // check runs toward the centre, and on cusp slopes the two differ
+    // (upper molars 054, 085 came out under the occlusal minimum).
+    enforceThickness(g, env.intaglioIndex, centre, mat, 4)
+  }
   env.onStage?.('final', g)
 
   const b = gridBounds(g)
