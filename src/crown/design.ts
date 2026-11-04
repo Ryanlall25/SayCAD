@@ -690,21 +690,31 @@ function shapeContacts(grid: CrownGrid, ant: SurfaceIndex, clearance: number, fl
     for (let i = 0; i < nu; i++) {
       const p = getP(grid, i, j)
       const gap = ant.gapUp(p, 2)
-      if (gap <= clearance + 0.15) near.push({ k: j * nu + i, p, gap })
+      // Out to the cap (0.25) and past it: at a 0.15 mm band the drop stepped
+      // from 0.1 mm to nothing at the band's edge (a ragged rim on 054).
+      if (gap <= clearance + 0.3) near.push({ k: j * nu + i, p, gap })
     }
   }
   if (!near.length) return
+  // The smoothed floor (as the bite step uses): clamped at the raw one, the
+  // relief took the scanned prep's roughness where it reached it (054).
+  const floorOf = smoothFloors(grid, j0, floorY)
   // Patches: plan-view clusters (1.5 mm); each one's centre is its closest point to the antagonist.
   near.sort((a, b) => a.gap - b.gap)
   const centres: Vec3[] = []
-  for (const v of near) if (!centres.some((c) => Math.hypot(c[0] - v.p[0], c[2] - v.p[2]) < 1.5)) centres.push(v.p)
+  const centreK: number[] = []
+  for (const v of near) if (v.gap <= clearance + 0.15 && !centres.some((c) => Math.hypot(c[0] - v.p[0], c[2] - v.p[2]) < 1.5)) { centres.push(v.p); centreK.push(v.k) }
   // The drop as a field, smoothed before it is applied: per vertex it copied
   // the opposing scan's roughness into the crown (torn, dented fossae).
   const drop = new Float64Array(nu * nv)
   const centreD2 = new Float64Array(nu * nv).fill(Infinity)
+  const nearestC = new Int32Array(nu * nv).fill(-1)
   for (const v of near) {
     let d2 = Infinity
-    for (const c of centres) d2 = Math.min(d2, (c[0] - v.p[0]) ** 2 + (c[2] - v.p[2]) ** 2)
+    centres.forEach((c, ci) => {
+      const e = (c[0] - v.p[0]) ** 2 + (c[2] - v.p[2]) ** 2
+      if (e < d2) { d2 = e; nearestC[v.k] = ci }
+    })
     centreD2[v.k] = d2
     // Only what sits closer than the opened target comes down.
     const target = clearance + Math.min(0.25, CONTACT_OPEN * d2)
@@ -717,13 +727,16 @@ function shapeContacts(grid: CrownGrid, ant: SurfaceIndex, clearance: number, fl
       const k = j * nu + i
       // The smoothing spread the surrounding drop onto the contact points
       // themselves and lowered them off the antagonist (lower molars: 0.02 mm²
-      // in contact, technicians 0.61). Near a centre the drop fades back to
-      // the vertex's own (σ CONTACT_HOLD_MM), so each point stays at the clearance.
-      const hold = Number.isFinite(centreD2[k]) ? Math.exp(-centreD2[k] / (2 * CONTACT_HOLD_MM * CONTACT_HOLD_MM)) : 0
-      const d = Math.max(drop[k], smooth[k] * (1 - hold))
+      // in contact, technicians 0.61). Each centre's smoothed drop comes back
+      // off as a smooth bump (σ CONTACT_HOLD_MM), so the point stays at the
+      // clearance. Blending in the raw drop there instead copied the opposing
+      // scan's roughness back into the fossae (upper molar 054).
+      const ci = nearestC[k]
+      const hold = ci >= 0 ? Math.exp(-centreD2[k] / (2 * CONTACT_HOLD_MM * CONTACT_HOLD_MM)) : 0
+      const d = smooth[k] - (ci >= 0 ? hold * smooth[centreK[ci]] : 0)
       if (d <= 0.005) continue
       const p = getP(grid, i, j)
-      const f = floorY ? floorY(p) : null
+      const f = floorOf(k, p)
       const y = f === null ? p[1] - d : Math.max(Math.min(p[1], f), p[1] - d)
       if (y < p[1]) {
         setP(grid, i, j, [p[0], y, p[2]])
@@ -1228,12 +1241,20 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   if (mesial) enforceContact(g, mesial, 1, params.contactMesialMm, [], wall)
   if (distal) enforceContact(g, distal, -1, params.contactDistalMm, [], wall)
   if (env.antagonist) enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, false, [], occlusalFloor(env.intaglioIndex, mat.minOcclusalMm))
+  env.onStage?.('final-occlusion', g)
   if (env.antagonist && ANTERIOR.has(env.toothClass)) relieveOverlap(g, env.antagonist, params.occlusalClearanceMm, env.intaglioIndex, mat.minAxialMm, steps)
   raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, undefined, bite)
+  env.onStage?.('final-raise', g)
   enforceThickness(g, env.intaglioIndex, centre, mat, 14)
+  env.onStage?.('final-thickness', g)
   steps.push(`minimum thickness enforced (${mat.minAxialMm} axial / ${mat.minOcclusalMm} occlusal mm)`)
   if (env.antagonist) {
     shapeContacts(g, env.antagonist, params.occlusalClearanceMm, occlusalFloor(env.intaglioIndex, mat.minOcclusalMm), steps)
+    env.onStage?.('final-shape', g)
+    // What the smoothed floor let dip under the material minimum comes back
+    // up as one smooth lift; re-seated vertex by vertex it took the prep's
+    // shape (dents on 054's mesial fossa).
+    raiseUnderReduced(g, env.intaglioIndex, centre, mat.minOcclusalMm, mat.minAxialMm, undefined, bite)
     // Thickness wins over the contact shape: the floor above is vertical, the
     // check runs toward the centre, and on cusp slopes the two differ
     // (upper molars 054, 085 came out under the occlusal minimum).
