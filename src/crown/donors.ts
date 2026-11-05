@@ -90,6 +90,8 @@ const CONSENSUS_WEIGHT = (cls: string): number => {
   return cls === 'lowerMolar' ? 1 : cls === 'upperMolar' ? 2 : 0
 }
 
+const blendK = (cls: string): number => Number((globalThis as any).process?.env?.DONOR_BLEND ?? 0) || (cls ? 0 : 0)
+
 /** Mean distance between corresponding vertices of two grids on one margin (mm). */
 function gridDistance(a: CrownGrid, b: CrownGrid): number {
   if (a.pts.length !== b.pts.length) return Infinity
@@ -180,6 +182,37 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
   }
   let best: Cand | null = null
   for (const c of cands) if (!best || (c.passes && !best.passes) || (c.passes === best.passes && c.score < best.score)) best = c
+  // Blend: the mean of the k best-scoring passing donors, designed like any
+  // other donor, kept only if it passes. No single donor predicted the
+  // technician's crown (oracle on 19 lower / 15 upper molars: the best donor
+  // 0.15 / 0.17 mm against the chosen 0.17 / 0.20, and no design-time feature
+  // ranked them better than chance); the mean of plausible shapes sits
+  // closest to an unknown one.
+  const k = blendK(set.cls)
+  const ranked = pool.slice().sort((a, b) => a.score - b.score).slice(0, k)
+  if (best && k > 1 && ranked.length === k) {
+    const ts = ranked.map((c) => donorTemplate(set.donors.find((d) => d.id === c.donor)!))
+    if (ts.every((t) => t.grid.pts.length === ts[0].grid.pts.length)) {
+      const pts = new Float64Array(ts[0].grid.pts.length)
+      for (const t of ts) for (let q = 0; q < pts.length; q++) pts[q] += t.grid.pts[q] / k
+      const pole: Vec3 = [0, 0, 0]
+      for (const t of ts) for (let q = 0; q < 3; q++) pole[q] += t.grid.pole[q] / k
+      const top = ts[ranked.indexOf(ranked.find((c) => c.donor === best!.donor) ?? ranked[0])] ?? ts[0]
+      const blended = { ...top, grid: { ...ts[0].grid, pts, pole } }
+      const stages: Array<[string, CrownGrid]> = []
+      let fitted: CrownGrid | null = null
+      let final: CrownGrid | null = null
+      const r = autoDesign(pc, { ...req, tap: margin ? undefined : tap, margin, template: blended, onStage: (s, g) => {
+        if (req.onStage) stages.push([s, { ...g, pts: g.pts.slice(), pole: [...g.pole] as CrownGrid['pole'] }])
+        if (s === 'emergence') fitted = { ...g, pts: g.pts.slice() }
+        if (s === 'final') final = g
+      } })
+      if (fitted && final && !r.report.results.some((x) => x.verdict === 'fail')) {
+        const rs = reshaping(fitted, final)
+        best = { result: r, donor: `blend of ${ranked.map((c) => c.donor).join(' + ')}`, reshapingMm: rs, tried: donors.length, passes: true, stages, score: best.score, final: final as CrownGrid }
+      }
+    }
+  }
   // The caller's stage hook sees the chosen design only.
   if (best && req.onStage) for (const [s, g] of best.stages) req.onStage(s, g)
   return best
