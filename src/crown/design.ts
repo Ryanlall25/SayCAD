@@ -1369,7 +1369,13 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     // to the allowance (the lab's call: allow thinner locally rather than
     // leave the crown high), the critic flags each spot under the full
     // minimum as a warning, and only below the allowance does it fail.
-    if (mat.localMinMm !== undefined && mat.localMinMm < Math.min(mat.minOcclusalMm, mat.minAxialMm)) {
+    // Only where the crown would otherwise be high (what the bite check
+    // fails: more than 0.05 mm inside the clearance); applied everywhere it
+    // thinned crowns that already passed (lower premolar 020, upper 024, 053).
+    let minGap = Infinity
+    for (let j = Math.round(g.nv * 0.3); j < g.nv; j++) for (let i = 0; i < g.nu; i++) minGap = Math.min(minGap, env.antagonist.gapUp(getP(g, i, j), 2))
+    const high = minGap < params.occlusalClearanceMm - 0.05
+    if (high && mat.localMinMm !== undefined && mat.localMinMm < Math.min(mat.minOcclusalMm, mat.minAxialMm)) {
       const local = { ...mat, minOcclusalMm: mat.localMinMm, minAxialMm: Math.min(mat.minAxialMm, mat.localMinMm) }
       enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, false, [], occlusalFloor(env.intaglioIndex, local.minOcclusalMm))
       enforceThickness(g, env.intaglioIndex, centre, local, 4)
