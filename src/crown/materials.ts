@@ -18,6 +18,12 @@ export interface MaterialPreset {
   cementGapMm: number
   /** Thickness right at the margin before the ramp to full thickness, mm. */
   marginThicknessMm: number
+  /**
+   * Where the bite leaves no room for the full minimum (an under-reduced
+   * prep), the crown may go down to this locally, flagged as a warning with
+   * where and how much; below it the design fails. Undefined: no allowance.
+   */
+  localMinMm?: number
   note: string
 }
 
@@ -31,7 +37,10 @@ export const MATERIALS: Record<MaterialId, MaterialPreset> = {
     minOcclusalMm: 0.5,
     cementGapMm: 0.06,
     marginThicknessMm: 0.1,
-    note: 'Lab minimum 0.5 mm axial and occlusal for monolithic 3Y/4Y; confirm against the puck IFU.'
+    // The lab's own crowns over under-reduced preps reach 0.42 mm; the lab
+    // chose to allow thinner locally rather than block such cases.
+    localMinMm: 0.4,
+    note: 'Lab minimum 0.5 mm axial and occlusal for monolithic 3Y/4Y (0.4 mm locally over an under-reduced prep, flagged); confirm against the puck IFU.'
   },
   'zirconia-ht': {
     id: 'zirconia-ht',
