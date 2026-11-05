@@ -415,6 +415,78 @@ function enforceContact(
   return { gap: Math.abs(lastE) < 0.02 ? null : lastE + target }
 }
 
+/**
+ * Widens a point contact into a patch. enforceContact stops when the closest
+ * approach reaches the target, which leaves one touching point (~1.5 mm² in
+ * 0.1 mm); the lab's crowns meet their neighbours over 3–5.6 mm² (median,
+ * mesial), as adult natural contacts do (1.5 mm² at 20–40 years, 4.5 mm² over
+ * 40). Around the contact the wall is brought out to `target + PATCH_GAP_MM`
+ * over an ellipse wider buccolingually than occlusocervically, falling off
+ * smoothly, never past the neighbour. Only outward moves, so no wall thins.
+ */
+// Patch half-axes (buccolingual × occlusocervical, mm) per class, from
+// leave-one-out runs against the lab's crowns (mesial / distal area in
+// 0.1 mm, mm²; mean deviation auto / on the technician's margin, mm):
+// lower molars 1.51/1.61 → 2.36/2.39 (tech 3.53/0.45), 0.160/0.168 unchanged;
+// upper molars mesial 1.38 → 2.38 (tech 5.59), 0.209/0.211 → 0.208/0.211;
+// upper premolars 1.61/1.75 → 2.32/2.98 (tech 2.99/3.00), 0.151/0.175 → 0.149/0.174;
+// lower premolars at 1.5 × 0.9 lost 0.01 on the technician's margin, so
+// 1.0 × 0.6: 1.78/1.52 → 1.98/1.94 (tech 2.31/3.56), 0.156/0.162 unchanged.
+const PATCH_ENV = (globalThis as any).process?.env ?? {}
+function patchAxes(cls: ToothClass): [number, number] {
+  if (PATCH_ENV.PATCH_BL !== undefined) return [Number(PATCH_ENV.PATCH_BL), Number(PATCH_ENV.PATCH_OC ?? 0.9)]
+  if (cls === 'lowerPremolar') return [1.0, 0.6]
+  if (cls === 'lowerMolar' || cls === 'upperMolar' || cls === 'upperPremolar') return [1.5, 0.9]
+  return [0, 0]
+}
+const PATCH_GAP_MM = 0.03
+function widenContact(grid: CrownGrid, n: SurfaceIndex, sign: 1 | -1, target: number, cls: ToothClass): number {
+  const [PATCH_BL_MM, PATCH_OC_MM] = patchAxes(cls)
+  if (PATCH_BL_MM <= 0) return 0
+  const { nu, nv } = grid
+  const sideTheta = sign > 0 ? Math.PI / 2 : (3 * Math.PI) / 2
+  const cand: Array<{ k: number; p: Vec3; sd: number }> = []
+  let at: Vec3 | null = null
+  let min = Infinity
+  for (let j = 2; j < Math.round(nv * 0.85); j++) {
+    for (let i = 0; i < nu; i++) {
+      if (angleDiff(thetaOf(grid, i), sideTheta) > (75 * Math.PI) / 180) continue
+      const p = getP(grid, i, j)
+      const sd = n.signedDistance(p, [sign, 0, 0], 3)
+      cand.push({ k: j * nu + i, p, sd })
+      if (sd < min) { min = sd; at = p }
+    }
+  }
+  // No contact to widen: the neighbour is out of reach.
+  if (!at || min > target + 0.1) return 0
+  const want = new Float64Array(nu * nv)
+  const cap = new Float64Array(nu * nv).fill(0)
+  for (const c of cand) {
+    const room = c.sd - target
+    if (!(room > 0) || room > 1.0) continue
+    // Only where the neighbour lies squarely ahead: off to the side the
+    // inside/outside test is a guess, and a misjudged vertex was pushed into
+    // the neighbour (lower molars 021, 027: contacts −0.5 to −1.7 mm).
+    const h = n.closest(c.p, room + target + 0.5)
+    if (!h) continue
+    const ahead = ((h.point[0] - c.p[0]) * sign) / Math.max(1e-9, Math.hypot(h.point[0] - c.p[0], h.point[1] - c.p[1], h.point[2] - c.p[2]))
+    if (ahead < 0.7) continue
+    cap[c.k] = Math.min(0.3, Math.max(0, room - 0.005))
+    const r = Math.hypot((c.p[2] - at[2]) / PATCH_BL_MM, (c.p[1] - at[1]) / PATCH_OC_MM)
+    const w = 1 - smoothstep(0.6, 1.0, r)
+    if (w > 0) want[c.k] = Math.max(0, room - PATCH_GAP_MM) * w
+  }
+  const sm = smoothField(grid, want, 2)
+  let moved = 0
+  for (const c of cand) {
+    const d = Math.min(sm[c.k], cap[c.k])
+    if (d < 0.002) continue
+    setP(grid, c.k % nu, Math.floor(c.k / nu), [c.p[0] + sign * d, c.p[1], c.p[2]])
+    moved = Math.max(moved, d)
+  }
+  return moved
+}
+
 /** Lowers anything closer than `clearance` to the antagonist; optionally first
  *  raises cusp tips into contact. */
 /**
@@ -1286,6 +1358,11 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     // under-reduced and the bite check reports it.
     enforceThickness(g, env.intaglioIndex, centre, mat, 4)
   }
+  // Outward only, after every thinning step: widens each touching contact.
+  let widened = 0
+  if (mesial) widened = Math.max(widened, widenContact(g, mesial, 1, params.contactMesialMm, env.toothClass))
+  if (distal) widened = Math.max(widened, widenContact(g, distal, -1, params.contactDistalMm, env.toothClass))
+  if (widened > 0) steps.push(`proximal contacts widened to a patch (up to ${widened.toFixed(2)} mm)`)
   env.onStage?.('final', g)
 
   const b = gridBounds(g)
