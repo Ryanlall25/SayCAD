@@ -165,6 +165,19 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
       c.score += cw * (sum / (pool.length - 1))
     }
   }
+  // Dev: per-candidate features for studying selection (DONOR_LOG=<file>).
+  const logFile = (globalThis as any).process?.env?.DONOR_LOG
+  if (logFile) {
+    const fs = (globalThis as any).process?.getBuiltinModule?.('node:fs')
+    for (const c of cands) {
+      const m = (c.result as any).outer?.measures ?? {}
+      const tb = gridBounds(donorTemplate(set.donors.find((d) => d.id === c.donor)!).grid)
+      let cons = 0
+      for (const o of pool) if (o !== c) cons += gridDistance(c.final, o.final)
+      fs?.appendFileSync(logFile, JSON.stringify({ job: (globalThis as any).process?.env?.DONOR_LOG_JOB ?? '', donor: c.donor, passes: c.passes, reshaping: c.reshapingMm, relief: occlusalRelief(c.final), usual, consensus: pool.length > 1 ? cons / (pool.length - 1) : null,
+        md: m.mdWidthMm, bl: m.blWidthMm, h: m.heightMm, vs: m.verticalScale, dmd: tb.max[0] - tb.min[0], dbl: tb.max[2] - tb.min[2], dh: tb.max[1] - tb.min[1] }) + '\n')
+    }
+  }
   let best: Cand | null = null
   for (const c of cands) if (!best || (c.passes && !best.passes) || (c.passes === best.passes && c.score < best.score)) best = c
   // The caller's stage hook sees the chosen design only.
