@@ -13,6 +13,7 @@ import { weld } from './slice'
 import { checkWatertight, gridTriangles, solidToWorld, stitchSolid, type WatertightReport } from './solid'
 
 const PREMOLAR_CLEARANCE_MM = 0.05
+const LOWER_MOLAR_DISTAL_MM = 0.04
 
 /**
  * Auto-design, end to end: one tap on the prep → a finished, checked,
@@ -247,7 +248,12 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
   // antagonist: molars 0.08–0.09 mm (median, 35), premolars spread 0.01–0.14
   // (25) — 0.08 there thinned tight premolar preps under the minimum (case074).
   const classClearance = toothClassOf(pc.toothNumber).endsWith('Molar') ? DEFAULT_PARAMS.occlusalClearanceMm : PREMOLAR_CLEARANCE_MM
-  const params: DesignParams = { ...DEFAULT_PARAMS, occlusalClearanceMm: classClearance, ...req.params, sculpt: req.params?.sculpt ?? [] }
+  // The lab leaves a lower molar's distal contact just open (closest 0.04 mm,
+  // 0.45 mm² within 0.1 mm, median of 19): at the usual −0.03 ours met over
+  // 2.88 mm²; at +0.04, 1.00 mm² and 0.02 mm, deviation unchanged (0.160/0.168).
+  const lmDistal = (globalThis as any).process?.env?.LM_DISTAL ?? LOWER_MOLAR_DISTAL_MM
+  const classDistal = toothClassOf(pc.toothNumber) === 'lowerMolar' ? Number(lmDistal) : DEFAULT_PARAMS.contactDistalMm
+  const params: DesignParams = { ...DEFAULT_PARAMS, occlusalClearanceMm: classClearance, contactDistalMm: classDistal, ...req.params, sculpt: req.params?.sculpt ?? [] }
   const mat = resolvedMaterial(params)
 
   let margin = req.margin
