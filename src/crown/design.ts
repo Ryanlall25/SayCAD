@@ -436,7 +436,9 @@ const PATCH_ENV = (globalThis as any).process?.env ?? {}
 function patchAxes(cls: ToothClass): [number, number] {
   if (PATCH_ENV.PATCH_BL !== undefined) return [Number(PATCH_ENV.PATCH_BL), Number(PATCH_ENV.PATCH_OC ?? 0.9)]
   if (cls === 'lowerPremolar') return [1.0, 0.6]
-  if (cls === 'lowerMolar' || cls === 'upperMolar' || cls === 'upperPremolar') return [1.5, 0.9]
+  // Upper molars at 2.0 × 1.2: mesial 2.38 → 3.34 mm² (tech 5.59), deviation 0.208/0.211 unchanged.
+  if (cls === 'upperMolar') return [2.0, 1.2]
+  if (cls === 'lowerMolar' || cls === 'upperPremolar') return [1.5, 0.9]
   return [0, 0]
 }
 const PATCH_GAP_MM = 0.03
