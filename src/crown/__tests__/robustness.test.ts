@@ -58,8 +58,10 @@ describe('robustness: arbitrary scanner coordinates + scanner noise', () => {
     const r = autoDesign(prepareCase({ toothNumber: 19, prep: tight.prep, antagonist: tight.antagonist }), { tap: tight.tapPoint })
     const occ = r.report.results.find((x) => x.id === 'occlusion')!
     const thick = r.report.results.find((x) => x.id === 'thickness-occlusal')!
-    // Thickness wins; the conflict shows up as a high crown, flagged as a failure.
-    expect(thick.verdict).toBe('pass')
+    // The bite wins down to the material's local allowance (0.4 mm for
+    // high-strength zirconia, flagged as a warning); 0.35 mm of room is below
+    // even that, so the conflict still shows up as a high crown, a failure.
+    expect(thick.verdict).not.toBe('fail')
     expect(occ.verdict).toBe('fail')
     expect(r.report.exportable).toBe(false)
   })

@@ -115,13 +115,15 @@ export function resolvedMaterial(p: DesignParams): {
   minAxialMm: number
   minOcclusalMm: number
   marginThicknessMm: number
+  localMinMm?: number
 } {
   const m = MATERIALS[p.material] ?? MATERIALS['zirconia-hs']
   return {
     cementGapMm: p.cementGapMm ?? m.cementGapMm,
     minAxialMm: p.minAxialMm ?? m.minAxialMm,
     minOcclusalMm: p.minOcclusalMm ?? m.minOcclusalMm,
-    marginThicknessMm: p.marginThicknessMm ?? m.marginThicknessMm
+    marginThicknessMm: p.marginThicknessMm ?? m.marginThicknessMm,
+    localMinMm: m.localMinMm
   }
 }
 
@@ -1363,6 +1365,15 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
     // still come out thin; where the two truly conflict the prep is
     // under-reduced and the bite check reports it.
     enforceThickness(g, env.intaglioIndex, centre, mat, 4)
+    // Under-reduced prep, material with a local allowance: the bite wins down
+    // to the allowance (the lab's call: allow thinner locally rather than
+    // leave the crown high), the critic flags each spot under the full
+    // minimum as a warning, and only below the allowance does it fail.
+    if (mat.localMinMm !== undefined && mat.localMinMm < Math.min(mat.minOcclusalMm, mat.minAxialMm)) {
+      const local = { ...mat, minOcclusalMm: mat.localMinMm, minAxialMm: Math.min(mat.minAxialMm, mat.localMinMm) }
+      enforceOcclusion(g, env.antagonist, params.occlusalClearanceMm, tpl.cuspTips, false, [], occlusalFloor(env.intaglioIndex, local.minOcclusalMm))
+      enforceThickness(g, env.intaglioIndex, centre, local, 4)
+    }
   }
   // Outward only, after every thinning step: widens each touching contact.
   let widened = 0

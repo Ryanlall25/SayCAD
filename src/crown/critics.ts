@@ -30,7 +30,7 @@ export interface CriticInputs {
   distal: SurfaceIndex | null
   antagonist: SurfaceIndex | null
   watertight: WatertightReport
-  material: { minAxialMm: number; minOcclusalMm: number; marginThicknessMm: number; label: string }
+  material: { minAxialMm: number; minOcclusalMm: number; marginThicknessMm: number; label: string; localMinMm?: number }
   targets: { contactMesialMm: number; contactDistalMm: number; occlusalClearanceMm: number }
   marginConfidenceLowFraction: number
   marginMissingFraction: number
@@ -111,6 +111,8 @@ export function runCritics(c: CriticInputs): CriticReport {
   let thinAx = 0
   let thinOcc = 0
   let negative = 0
+  let tooThinAx = 0
+  let tooThinOcc = 0
   forEachVertex(g, (i, j, p) => {
     if (j === 0) return
     const nIn = gridNormal(g, i, j)
@@ -130,31 +132,41 @@ export function runCritics(c: CriticInputs): CriticReport {
     if (s[j * g.nu + i] < 1.0) return
     thickness[j * g.nu + i] = sd
     const occ = nIn[1] > 0.55 || j > g.nv * 0.6
+    const local = c.material.localMinMm
     if (occ) {
       minOcc = Math.min(minOcc, sd)
       if (sd < c.material.minOcclusalMm - 0.02) thinOcc++
+      if (local !== undefined && sd < local - 0.02) tooThinOcc++
     } else {
       minAx = Math.min(minAx, sd)
       if (sd < c.material.minAxialMm - 0.02) thinAx++
+      if (local !== undefined && sd < local - 0.02) tooThinAx++
     }
   })
+  // With a local allowance, spots between it and the full minimum are a
+  // warning (an under-reduced prep, designed to the bite); only spots under
+  // the allowance fail.
+  const local = c.material.localMinMm
+  const verdictOf = (thin: number, tooThin: number): CriticResult['verdict'] => (thin === 0 ? 'pass' : local !== undefined && tooThin === 0 ? 'warn' : 'fail')
+  const axV = verdictOf(thinAx, tooThinAx)
+  const occV = verdictOf(thinOcc, tooThinOcc)
   results.push({
     id: 'thickness-axial',
     label: 'Axial wall thickness',
-    verdict: thinAx === 0 ? 'pass' : 'fail',
+    verdict: axV,
     measured: fmt(minAx),
-    required: `≥ ${c.material.minAxialMm} mm (${c.material.label})`,
-    message: thinAx === 0 ? 'Axial walls meet the material minimum.' : `${thinAx} spot(s) thinner than the minimum.`,
-    fix: thinAx ? 'Increase contour on the thin wall, or choose a material with a lower minimum.' : undefined
+    required: `≥ ${c.material.minAxialMm} mm (${c.material.label})${local !== undefined ? `, ${local} mm locally` : ''}`,
+    message: thinAx === 0 ? 'Axial walls meet the material minimum.' : axV === 'warn' ? `${thinAx} spot(s) under ${c.material.minAxialMm} mm (thinnest ${fmt(minAx)}), within the ${local} mm local allowance — under-reduced prep.` : `${thinAx} spot(s) thinner than the minimum.`,
+    fix: thinAx ? (axV === 'warn' ? 'Confirm the thin spots are acceptable for this case, or ask the doctor for more reduction.' : 'Increase contour on the thin wall, or choose a material with a lower minimum.') : undefined
   })
   results.push({
     id: 'thickness-occlusal',
     label: 'Occlusal thickness',
-    verdict: thinOcc === 0 ? 'pass' : 'fail',
+    verdict: occV,
     measured: fmt(minOcc),
-    required: `≥ ${c.material.minOcclusalMm} mm`,
-    message: thinOcc === 0 ? 'Occlusal table meets the material minimum.' : `${thinOcc} spot(s) under the minimum.`,
-    fix: thinOcc ? 'Not enough occlusal reduction for this material: ask the doctor for more reduction, or switch material.' : undefined
+    required: `≥ ${c.material.minOcclusalMm} mm${local !== undefined ? `, ${local} mm locally` : ''}`,
+    message: thinOcc === 0 ? 'Occlusal table meets the material minimum.' : occV === 'warn' ? `${thinOcc} spot(s) under ${c.material.minOcclusalMm} mm (thinnest ${fmt(minOcc)}), within the ${local} mm local allowance — under-reduced prep, designed to the bite.` : `${thinOcc} spot(s) under the minimum.`,
+    fix: thinOcc ? (occV === 'warn' ? 'Confirm the thin spots are acceptable for this case, or ask the doctor for more reduction.' : 'Not enough occlusal reduction for this material: ask the doctor for more reduction, or switch material.') : undefined
   })
   if (negative > 0) {
     results.push({
