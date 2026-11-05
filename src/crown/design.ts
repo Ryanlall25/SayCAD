@@ -424,10 +424,24 @@ function enforceContact(
  * over an ellipse wider buccolingually than occlusocervically, falling off
  * smoothly, never past the neighbour. Only outward moves, so no wall thins.
  */
-const PATCH_BL_MM = Number((globalThis as any).process?.env?.PATCH_BL ?? 0)
-const PATCH_OC_MM = Number((globalThis as any).process?.env?.PATCH_OC ?? 0.9)
+// Patch half-axes (buccolingual × occlusocervical, mm) per class, from
+// leave-one-out runs against the lab's crowns (mesial / distal area in
+// 0.1 mm, mm²; mean deviation auto / on the technician's margin, mm):
+// lower molars 1.51/1.61 → 2.36/2.39 (tech 3.53/0.45), 0.160/0.168 unchanged;
+// upper molars mesial 1.38 → 2.38 (tech 5.59), 0.209/0.211 → 0.208/0.211;
+// upper premolars 1.61/1.75 → 2.32/2.98 (tech 2.99/3.00), 0.151/0.175 → 0.149/0.174;
+// lower premolars at 1.5 × 0.9 lost 0.01 on the technician's margin, so
+// 1.0 × 0.6: 1.78/1.52 → 1.98/1.94 (tech 2.31/3.56), 0.156/0.162 unchanged.
+const PATCH_ENV = (globalThis as any).process?.env ?? {}
+function patchAxes(cls: ToothClass): [number, number] {
+  if (PATCH_ENV.PATCH_BL !== undefined) return [Number(PATCH_ENV.PATCH_BL), Number(PATCH_ENV.PATCH_OC ?? 0.9)]
+  if (cls === 'lowerPremolar') return [1.0, 0.6]
+  if (cls === 'lowerMolar' || cls === 'upperMolar' || cls === 'upperPremolar') return [1.5, 0.9]
+  return [0, 0]
+}
 const PATCH_GAP_MM = 0.03
-function widenContact(grid: CrownGrid, n: SurfaceIndex, sign: 1 | -1, target: number): number {
+function widenContact(grid: CrownGrid, n: SurfaceIndex, sign: 1 | -1, target: number, cls: ToothClass): number {
+  const [PATCH_BL_MM, PATCH_OC_MM] = patchAxes(cls)
   if (PATCH_BL_MM <= 0) return 0
   const { nu, nv } = grid
   const sideTheta = sign > 0 ? Math.PI / 2 : (3 * Math.PI) / 2
@@ -1346,8 +1360,8 @@ export function designOuter(env: DesignEnv, params: DesignParams): OuterResult {
   }
   // Outward only, after every thinning step: widens each touching contact.
   let widened = 0
-  if (mesial) widened = Math.max(widened, widenContact(g, mesial, 1, params.contactMesialMm))
-  if (distal) widened = Math.max(widened, widenContact(g, distal, -1, params.contactDistalMm))
+  if (mesial) widened = Math.max(widened, widenContact(g, mesial, 1, params.contactMesialMm, env.toothClass))
+  if (distal) widened = Math.max(widened, widenContact(g, distal, -1, params.contactDistalMm, env.toothClass))
   if (widened > 0) steps.push(`proximal contacts widened to a patch (up to ${widened.toFixed(2)} mm)`)
   env.onStage?.('final', g)
 
