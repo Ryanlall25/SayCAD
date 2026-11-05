@@ -247,7 +247,9 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
   // antagonist: molars 0.08–0.09 mm (median, 35), premolars spread 0.01–0.14
   // (25) — 0.08 there thinned tight premolar preps under the minimum (case074).
   const classClearance = toothClassOf(pc.toothNumber).endsWith('Molar') ? DEFAULT_PARAMS.occlusalClearanceMm : PREMOLAR_CLEARANCE_MM
-  const params: DesignParams = { ...DEFAULT_PARAMS, occlusalClearanceMm: classClearance, ...req.params, sculpt: req.params?.sculpt ?? [] }
+  const lmDistal = (globalThis as any).process?.env?.LM_DISTAL
+  const classDistal = lmDistal !== undefined && toothClassOf(pc.toothNumber) === 'lowerMolar' ? Number(lmDistal) : DEFAULT_PARAMS.contactDistalMm
+  const params: DesignParams = { ...DEFAULT_PARAMS, occlusalClearanceMm: classClearance, contactDistalMm: classDistal, ...req.params, sculpt: req.params?.sculpt ?? [] }
   const mat = resolvedMaterial(params)
 
   let margin = req.margin

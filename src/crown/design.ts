@@ -445,7 +445,8 @@ function patchAxes(cls: ToothClass): [number, number] {
 const PATCH_GAP_MM = 0.03
 function widenContact(grid: CrownGrid, n: SurfaceIndex, sign: 1 | -1, target: number, cls: ToothClass): number {
   const [PATCH_BL_MM, PATCH_OC_MM] = patchAxes(cls)
-  if (PATCH_BL_MM <= 0) return 0
+  // An open contact by design (target > 0) stays a point.
+  if (PATCH_BL_MM <= 0 || target > 0) return 0
   const { nu, nv } = grid
   const sideTheta = sign > 0 ? Math.PI / 2 : (3 * Math.PI) / 2
   const cand: Array<{ k: number; p: Vec3; sd: number }> = []
