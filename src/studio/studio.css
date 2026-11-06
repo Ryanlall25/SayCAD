@@ -432,3 +432,5 @@
 /* The case title gives way to the status pills instead of running under them. */
 .st-nav-title { min-width: 0; flex: 0 1 auto; overflow: hidden; }
 .st-nav-case, .st-nav-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.st-brush-note { margin: 8px 2px 0; font-size: 13px; line-height: 1.35; color: var(--st-text, inherit); }

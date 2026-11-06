@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import { toothClassOf, type Template } from './anatomy'
 import { runCritics, type CriticReport } from './critics'
-import { DEFAULT_PARAMS, designOuter, resolvedMaterial, type DesignParams, type OuterResult } from './design'
+import { DEFAULT_PARAMS, designOuter, enforceThickness, resolvedMaterial, type DesignParams, type OuterResult } from './design'
 import { estimateFrame } from './frame'
 import { add, geometryFrom, geometryToLocal, normalize, scale, SurfaceIndex, toLocal, type ToothFrame, type Vec3 } from './geom'
 import { angleDiff, type CrownGrid } from './grid'
@@ -68,6 +68,13 @@ export interface DesignResult {
   watertight: WatertightReport
   report: CriticReport
   timingsMs: Record<string, number>
+  /**
+   * Manual editing: rebuild the solid and re-run every check on an edited
+   * outer surface (tooth-local grid points, same topology), without
+   * redesigning. `keepMinThickness` pushes thin spots back out to the
+   * material minimum, as exocad's "keep minimal thickness" does.
+   */
+  rebuild?: (outerLocal: { pts: Float64Array; pole: Vec3 }, opts?: { keepMinThickness?: boolean }) => DesignResult
 }
 
 export function prepareCase(c: CrownCase): PreparedCase {
@@ -317,14 +324,16 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
   )
   lap('outer')
 
-  const solidLocal = stitchSolid(outer.grid, intaglio.grid)
-  const watertight = checkWatertight(solidLocal.positions, solidLocal.indices)
-  const crown = solidToWorld(solidLocal, frame)
-  lap('solid')
-
   const lowConf = margin.confidence.length ? margin.confidence.filter((c) => c < 0.35).length / margin.confidence.length : 1
-  const report = runCritics({
-    outer: outer.grid,
+  const assemble = (outerGrid: CrownGrid) => {
+    const solidLocal = stitchSolid(outerGrid, intaglio.grid)
+    const watertight = checkWatertight(solidLocal.positions, solidLocal.indices)
+    const crown = solidToWorld(solidLocal, frame)
+    const report = critique(outerGrid, watertight)
+    return { solidLocal, watertight, crown, report }
+  }
+  const critique = (outerGrid: CrownGrid, watertight: WatertightReport): CriticReport => runCritics({
+    outer: outerGrid,
     intaglioIndex,
     intaglioPoleY: intaglio.grid.pole[1],
     mesial: outer.neighbours.mesial,
@@ -341,9 +350,11 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
     blockoutVolumeMm3: intaglio.blockoutVolumeMm3,
     openContacts: outer.measures.openContacts
   })
+  const { solidLocal, watertight, crown, report } = assemble(outer.grid)
+  lap('solid')
   lap('critics')
 
-  return {
+  const result: DesignResult = {
     toothNumber: pc.toothNumber,
     margin,
     frame,
@@ -355,6 +366,16 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
     solidLocal,
     watertight,
     report,
-    timingsMs: t
+    timingsMs: t,
+    rebuild: function rebuild(this: void, outerLocal, opts) {
+      const grid: CrownGrid = { nu: outer.grid.nu, nv: outer.grid.nv, pts: new Float64Array(outerLocal.pts), pole: [...outerLocal.pole] as Vec3 }
+      // The margin row is the intaglio's too: edits never move it.
+      grid.pts.set(outer.grid.pts.subarray(0, grid.nu * 3), 0)
+      if (opts?.keepMinThickness) enforceThickness(grid, intaglioIndex, [0, intaglio.grid.pole[1] * 0.45, 0], mat, 4)
+      const a = assemble(grid)
+      const edited: DesignResult = { ...result, outer: { ...outer, grid }, crown: a.crown, solidLocal: a.solidLocal, watertight: a.watertight, report: a.report }
+      return edited
+    }
   }
+  return result
 }

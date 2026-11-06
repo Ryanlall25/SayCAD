@@ -12,7 +12,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type Anthropic from '@anthropic-ai/sdk'
-import { StudioViewport, type Pick } from './viewport'
+import { StudioViewport, type BrushSettings, type Pick } from './viewport'
+import type { BrushMode } from '../crown/brush'
 import { CrownEngine } from '../crown/engineClient'
 import type { DesignData, MeshData } from '../crown/protocol'
 import { DEFAULT_PARAMS, type DesignParams } from '../crown/design'
@@ -183,6 +184,15 @@ export default function CrownStudio(): React.JSX.Element {
   const [editMargin, setEditMargin] = useState(false)
   const [sculptAt, setSculptAt] = useState<{ i: number; j: number; point: [number, number, number] } | null>(null)
   const [sculptRadius, setSculptRadius] = useState(1.5)
+  // Free-form brush (manual design): drag on the crown to sculpt.
+  const [brushOn, setBrushOn] = useState(false)
+  const [brushMode, setBrushMode] = useState<BrushMode>('add')
+  const [brushRadius, setBrushRadius] = useState(1.5)
+  const [brushStrength, setBrushStrength] = useState(0.03)
+  const [keepMin, setKeepMin] = useState(true)
+  const [brushNote, setBrushNote] = useState('')
+  /** Outer surfaces before each stroke (undo), starting from the design as it was when brushing began. */
+  const strokes = useRef<Array<{ outer: Float32Array; pole: [number, number, number] }>>([])
   const [chat, setChat] = useState<ChatLine[]>([])
   const [input, setInput] = useState('')
   const [listening, setListening] = useState(false)
@@ -435,6 +445,8 @@ export default function CrownStudio(): React.JSX.Element {
           engineRef.current!
             .design(m, p, f, quality, modelJson)
             .then((d) => {
+              // A redesign replaces any free-form edits.
+              strokes.current = []
               setDesign(d)
               const mat = MATERIALS[d.params.material]
               viewRef.current?.setCrown(d, d.params.minAxialMm ?? mat.minAxialMm, d.params.minOcclusalMm ?? mat.minOcclusalMm)
@@ -467,6 +479,62 @@ export default function CrownStudio(): React.JSX.Element {
     },
     []
   )
+
+  const showDesign = (d: DesignData): void => {
+    setDesign(d)
+    const mat = MATERIALS[d.params.material]
+    viewRef.current?.setCrown(d, d.params.minAxialMm ?? mat.minAxialMm, d.params.minOcclusalMm ?? mat.minOcclusalMm)
+  }
+
+  const outerOf = (d: DesignData): { outer: Float32Array; pole: [number, number, number] } => {
+    const n = d.nu * d.nv
+    const p = d.crown.positions
+    return { outer: p.slice(0, n * 3), pole: [p[3 * n], p[3 * n + 1], p[3 * n + 2]] }
+  }
+
+  async function onStroke(outer: Float32Array, pole: [number, number, number]): Promise<void> {
+    // The design in state is the surface before this stroke (the viewport
+    // sculpts its own copy), so it is the undo point.
+    const before = state.current.design
+    try {
+      const d = await engineRef.current!.reshape(outer, pole, keepMin)
+      if (before) strokes.current.push(outerOf(before))
+      showDesign(d)
+      setBrushNote(strokeNote(d, 'Edited'))
+    } catch (e) {
+      setBrushNote((e as Error).message)
+    }
+  }
+
+  const strokeNote = (d: DesignData, what: string): string => {
+    const fails = d.results.filter((r) => r.verdict === 'fail')
+    const thin = Math.min(d.summary.minOcclusalThicknessMm, d.summary.minAxialThicknessMm)
+    return `${what} — ${fails.length ? `${fails.length} check(s) failing (${fails.map((f) => f.label).join(', ')})` : 'all checks pass'} · thinnest ${thin.toFixed(2)} mm · ${d.volumeMm3.toFixed(1)} mm³`
+  }
+
+  useEffect(() => {
+    const v = viewRef.current
+    if (!v) return
+    if (!brushOn || !design) {
+      v.setBrush(null)
+      return
+    }
+    const settings: BrushSettings = { mode: brushMode, radiusMm: brushRadius, strength: brushMode === 'add' || brushMode === 'remove' ? brushStrength : Math.min(1, brushStrength * 10) }
+    v.setBrush(settings, (outer, pole) => void onStroke(outer, pole as [number, number, number]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brushOn, brushMode, brushRadius, brushStrength, keepMin, design])
+
+  async function undoStroke(): Promise<void> {
+    const prev = strokes.current.pop()
+    if (!prev) return
+    try {
+      const d = await engineRef.current!.reshape(prev.outer, prev.pole, false)
+      showDesign(d)
+      setBrushNote(strokeNote(d, 'Stroke undone'))
+    } catch (e) {
+      setBrushNote((e as Error).message)
+    }
+  }
 
   const pushHistory = (): void => {
     const s = state.current
@@ -1633,7 +1701,38 @@ export default function CrownStudio(): React.JSX.Element {
                   <>
                     <div className="st-group">
                       <div className="st-group-head">Free-form</div>
-                      {sculptAt ? (
+                      <div className="st-row-item">
+                        <span className="st-row-main"><b>Brush</b><span>Drag on the crown to sculpt; drag elsewhere to turn the view.</span></span>
+                        <label className="st-switch">
+                          <input type="checkbox" checked={brushOn} onChange={(e) => { setBrushOn(e.target.checked); if (e.target.checked) { setSculptAt(null); viewRef.current?.setMarker(null) } }} aria-label="Brush" />
+                          <span />
+                        </label>
+                      </div>
+                      {brushOn && (
+                        <>
+                          <div className="st-segmented" role="group" aria-label="Brush mode">
+                            {(['add', 'remove', 'smooth', 'flatten'] as BrushMode[]).map((m) => (
+                              <button key={m} className={brushMode === m ? 'on' : ''} onClick={() => setBrushMode(m)}>{m[0].toUpperCase() + m.slice(1)}</button>
+                            ))}
+                          </div>
+                          <Slider label="Size" unit="mm" min={0.5} max={4} step={0.1} value={brushRadius} onChange={setBrushRadius} />
+                          <Slider label="Strength" unit={brushMode === 'add' || brushMode === 'remove' ? 'mm' : ''} min={0.01} max={0.1} step={0.01} value={brushStrength} onChange={setBrushStrength} hint={brushMode === 'add' || brushMode === 'remove' ? 'per dab' : undefined} />
+                          <div className="st-row-item">
+                            <span className="st-row-main">Keep minimal thickness</span>
+                            <label className="st-switch">
+                              <input type="checkbox" checked={keepMin} onChange={(e) => setKeepMin(e.target.checked)} aria-label="Keep minimal thickness" />
+                              <span />
+                            </label>
+                          </div>
+                          <div className="st-actions">
+                            <button className="st-btn tinted" onClick={() => void undoStroke()} disabled={!strokes.current.length}>Undo Stroke</button>
+                            <button className="st-btn tinted" onClick={() => setLayerState('heatmap')}>Thickness Map</button>
+                          </div>
+                          {brushNote && <p className="st-brush-note" role="status">{brushNote}</p>}
+                          <p className="st-foot">Every stroke is re-checked (thickness, contacts, occlusion, closed solid). Changing a design setting redesigns and discards brush edits — sculpt last.</p>
+                        </>
+                      )}
+                      {brushOn ? null : sculptAt ? (
                         <div className="st-actions">
                           <button className="st-btn tinted" onClick={() => void sculptHere(-0.1)}>− 0.1</button>
                           <button className="st-btn tinted" onClick={() => void sculptHere(-0.05)}>− 0.05</button>
@@ -1669,7 +1768,7 @@ export default function CrownStudio(): React.JSX.Element {
                       <button className="st-btn tinted" onClick={() => void redesignWith({ params: { ...DEFAULT_PARAMS, material: params.material } }, 'Reset to defaults')}>Reset</button>
                     </div>
                     <p className="st-foot">
-                      Space M {fmt(d.measures.spaceMesialMm)} / D {fmt(d.measures.spaceDistalMm)} mm · crown {fmt(d.measures.mdWidthMm, 1)} × {fmt(d.measures.blWidthMm, 1)} mm · {fmt(d.volumeMm3, 0)} mm³ · {Object.values(d.timingsMs).reduce((a, b) => a + b, 0)} ms
+                      Space M {fmt(d.measures.spaceMesialMm)} / D {fmt(d.measures.spaceDistalMm)} mm · crown {fmt(d.measures.mdWidthMm, 1)} × {fmt(d.measures.blWidthMm, 1)} mm · {fmt(d.volumeMm3, 1)} mm³ · {Object.values(d.timingsMs).reduce((a, b) => a + b, 0)} ms
                     </p>
                     <button className="st-btn primary block" onClick={next}>Continue</button>
                   </>
@@ -1765,7 +1864,7 @@ export default function CrownStudio(): React.JSX.Element {
                       <div className="st-row-item">
                         <span className="st-row-main">
                           <b>{baseName()}.stl</b>
-                          <span>Closed single solid · {fmt(d.volumeMm3, 0)} mm³ · {MATERIALS[params.material].label}</span>
+                          <span>Closed single solid · {fmt(d.volumeMm3, 1)} mm³ · {MATERIALS[params.material].label}</span>
                         </span>
                       </div>
                       <div className="st-row-item">
