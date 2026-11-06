@@ -2,7 +2,7 @@ import type { PrepGuess } from './findPrep'
 import type { DesignParams } from './design'
 import type { Vec3 } from './geom'
 import type { MarginResult } from './margin'
-import type { DesignData, EngineRequest, MeshData } from './protocol'
+import type { DesignData, EngineRequest, MeshData, BridgeData, BridgeUnitData } from './protocol'
 
 /**
  * Promise API over the engine worker. Falls back to running the engine on
@@ -46,10 +46,10 @@ export class CrownEngine {
     if (!this.worker) {
       const { handleEngineRequest } = await import('./engineCore')
       if (this.workerFailed && this.lastLoad && req.type !== 'load') {
-        handleEngineRequest(this.lastLoad)
+        await handleEngineRequest(this.lastLoad)
         this.workerFailed = false
       }
-      return handleEngineRequest(req).result as T
+      return (await handleEngineRequest(req)).result as T
     }
     const id = ++this.seq
     return new Promise<T>((resolve, reject) => {
@@ -90,6 +90,11 @@ export class CrownEngine {
 
   editMargin(points: Vec3[], tapped: Vec3): Promise<Vec3[]> {
     return this.call({ type: 'editMargin', points, tapped })
+  }
+
+  /** A three-unit bridge on the loaded scans (two abutments, one pontic). */
+  bridge(units: BridgeUnitData[], connectorMm2: number | undefined, donors: Record<string, string>): Promise<BridgeData> {
+    return this.call({ type: 'bridge', units, connectorMm2, donors })
   }
 
   /** Re-check (and rebuild) the last design after a manual edit of its outer surface. */

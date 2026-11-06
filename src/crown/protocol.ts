@@ -40,6 +40,23 @@ export interface DesignData {
   volumeMm3: number
 }
 
+export interface BridgeUnitData {
+  fdi: number
+  role: 'abutment' | 'pontic'
+  /** Abutments: margin points (world). */
+  margin?: Vec3[]
+}
+
+export interface BridgeData {
+  mesh: MeshData
+  manifoldOk: boolean
+  volumeMm3: number
+  connectors: Array<{ between: [number, number]; targetMm2: number; widthMm: number; heightMm: number; gumClearanceMm: number | null; biteClearanceMm: number | null }>
+  blockers: string[]
+  notes: string[]
+  donors: string[]
+}
+
 export type EngineRequest =
   | { type: 'load'; toothNumber: number; prep: MeshData; antagonist: MeshData | null }
   | { type: 'setTooth'; toothNumber: number }
@@ -49,4 +66,5 @@ export type EngineRequest =
   | { type: 'importLibrary'; files: Array<{ name: string; mesh: MeshData }>; numbering: 'auto' | 'universal' | 'fdi'; source: string; jaw?: 'upper' | 'lower' }
   /** Manual edit: outer-surface vertices (the crown's first nu·nv, world coords) and pole, from the last design. */
   | { type: 'reshape'; outer: Float32Array; pole: Vec3; keepMinThickness: boolean }
+  | { type: 'bridge'; units: BridgeUnitData[]; connectorMm2?: number; donors: Record<string, string> }
   | { type: 'design'; margin: MarginResult; params: Partial<DesignParams>; flipBuccal: boolean; quality: 'preview' | 'final'; model: string | null }

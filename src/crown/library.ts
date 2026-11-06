@@ -71,6 +71,12 @@ export function fdiToUniversal(fdi: number): number | null {
   return null
 }
 
+/** Universal (1–32) to FDI. */
+export function universalToFdi(u: number): number | null {
+  for (const q of [1, 2, 3, 4]) for (let t = 1; t <= 8; t++) if (fdiToUniversal(q * 10 + t) === u) return q * 10 + t
+  return null
+}
+
 function centroid(g: THREE.BufferGeometry): Vec3 {
   const p = g.getAttribute('position') as THREE.BufferAttribute
   const c: Vec3 = [0, 0, 0]

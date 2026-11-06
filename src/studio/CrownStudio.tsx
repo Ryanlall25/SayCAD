@@ -51,7 +51,8 @@ import ReviewDeck, { type AdjustTarget } from './ReviewDeck'
 import { CONTRACT, validateJob, type CrownJob, type CrownOutcome, type QcDecision } from '../module/contract'
 import { assembleOutcome } from '../module/designCase'
 import { embedHost, toHost } from '../module/embed'
-import { fdiToUniversal } from '../crown/library'
+import { fdiToUniversal, universalToFdi } from '../crown/library'
+import type { BridgeData } from '../crown/protocol'
 import './studio.css'
 
 /**
@@ -193,6 +194,15 @@ export default function CrownStudio(): React.JSX.Element {
   const [keepMin, setKeepMin] = useState(true)
   const [brushNote, setBrushNote] = useState('')
   const [mapMode, setMapMode] = useState<CrownMap>('none')
+  // Bridge (two abutments, one pontic): the current tooth is the first abutment.
+  const [bridgeSide, setBridgeSide] = useState<'mesial' | 'distal' | null>(null)
+  const [bridgePicking, setBridgePicking] = useState(false)
+  const bridgePickRef = useRef(false)
+  bridgePickRef.current = bridgePicking
+  const [abutment2, setAbutment2] = useState<MarginResult | null>(null)
+  const [connectorMm2, setConnectorMm2] = useState(12)
+  const [bridge, setBridge] = useState<BridgeData | null>(null)
+  const [bridgeNote, setBridgeNote] = useState('')
   /** Outer surfaces before each stroke (undo), starting from the design as it was when brushing began. */
   const strokes = useRef<Array<{ outer: Float32Array; pole: [number, number, number] }>>([])
   /** The latest automatic surface (outer grid + pole, world) and the brush edits as offsets from it (tooth frame). */
@@ -726,6 +736,7 @@ export default function CrownStudio(): React.JSX.Element {
             onTap: () => {
               viewRef.current?.setPins([])
               if (jobRef.current) jobRef.current.prepFoundBy = 'host'
+              say('app', `Designing #${state.current.tooth} from the tapped prep.`)
               void tapPrep(c.point, guess.ups)
             }
           }))
@@ -1017,6 +1028,61 @@ export default function CrownStudio(): React.JSX.Element {
     }
   }
 
+  /** FDI numbers of the bridge's units, from the current tooth and the pontic's side. */
+  const bridgeTeeth = (side: 'mesial' | 'distal'): { a1: number; pontic: number; a2: number } | null => {
+    const a1 = universalToFdi(state.current.tooth)
+    if (!a1) return null
+    const step = side === 'distal' ? 1 : -1
+    const pontic = a1 + step
+    const a2 = a1 + 2 * step
+    if (pontic % 10 < 1 || pontic % 10 > 8 || a2 % 10 < 1 || a2 % 10 > 8) return null
+    return { a1, pontic, a2 }
+  }
+
+  async function designBridgeNow(size = connectorMm2): Promise<void> {
+    const s = state.current
+    const t = bridgeSide ? bridgeTeeth(bridgeSide) : null
+    if (!s.margin || !abutment2 || !t) return
+    setBusy('Designing the bridge…')
+    setBridgeNote('')
+    try {
+      const b = await engineRef.current!.bridge(
+        [
+          { fdi: t.a1, role: 'abutment', margin: s.margin.points },
+          { fdi: t.pontic, role: 'pontic' },
+          { fdi: t.a2, role: 'abutment', margin: abutment2.points }
+        ],
+        size,
+        {}
+      )
+      setBridge(b)
+      viewRef.current?.setBridge(b.mesh)
+      setBridgeNote(b.blockers.length ? `Not ready: ${b.blockers.join('; ')}` : 'Bridge ready for approval.')
+    } catch (e) {
+      setBridgeNote((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  function exportBridge(): void {
+    const t = bridgeSide ? bridgeTeeth(bridgeSide) : null
+    if (!bridge || !t) return
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.BufferAttribute(bridge.mesh.positions.slice(), 3))
+    if (bridge.mesh.indices) g.setIndex(new THREE.BufferAttribute(bridge.mesh.indices.slice(), 1))
+    download(exportSTL(g), `bridge_${Math.min(t.a1, t.a2)}-${Math.max(t.a1, t.a2)}_${params.material}.stl`)
+  }
+
+  function clearBridge(): void {
+    setBridge(null)
+    setAbutment2(null)
+    setBridgeSide(null)
+    setBridgePicking(false)
+    setBridgeNote('')
+    viewRef.current?.setBridge(null)
+  }
+
   /** Moves the margin section nearest `to` onto it (tap or drag), snapped to the scan, then redesigns. */
   async function moveMarginTo(from: [number, number, number][], to: [number, number, number]): Promise<void> {
     const s = state.current
@@ -1051,12 +1117,31 @@ export default function CrownStudio(): React.JSX.Element {
   async function onTap(p: Pick | null): Promise<void> {
     const s = state.current
     if (!p || !s.loaded) return
+    if (bridgePickRef.current && p.target === 'scan') {
+      setBusy('Finding the second abutment…')
+      try {
+        const m = await engineRef.current!.margin(p.point)
+        setAbutment2(m)
+        setBridgePicking(false)
+        viewRef.current?.setMarker(p.point, 1)
+        setBridgeNote(`Second abutment found (${m.points.length} margin points). Design the bridge.`)
+      } catch (e) {
+        setBridgeNote((e as Error).message)
+      } finally {
+        setBusy(null)
+      }
+      return
+    }
     if (p.target === 'scan' && (s.step === 'margin' || !s.margin)) {
       if (s.margin && editMargin) {
         await moveMarginTo(s.margin.points, p.point)
         return
       }
-      if (!s.margin) await tapPrep(p.point)
+      if (!s.margin) {
+        // Replaces a standing "tap the tooth" prompt.
+        say('app', `Designing #${s.tooth} from the tapped prep.`)
+        await tapPrep(p.point)
+      }
       return
     }
     if (p.target === 'crown' && s.design && p.vertex !== undefined && p.vertex < s.design.nu * s.design.nv) {
@@ -1761,6 +1846,42 @@ export default function CrownStudio(): React.JSX.Element {
                 {!d && <p className="st-lead">{margin ? 'Designing…' : 'Tap the prepared tooth first.'}</p>}
                 {d && (
                   <>
+                    <div className="st-group">
+                      <div className="st-group-head">Bridge</div>
+                      <p className="st-foot">This tooth is the first abutment. Choose where the pontic is, tap the second prep, then design.</p>
+                      <div className="st-segmented" role="group" aria-label="Pontic side">
+                        {(['mesial', 'distal'] as const).map((side) => {
+                          const t = bridgeTeeth(side)
+                          return (
+                            <button key={side} disabled={!t} className={bridgeSide === side ? 'on' : ''} onClick={() => { setBridgeSide(side); setAbutment2(null); setBridge(null); viewRef.current?.setBridge(null); setBridgePicking(true); setBridgeNote(t ? `Tap the prep of #${t.a2} (second abutment).` : '') }}>
+                              {t ? `Pontic ${t.pontic}, abutment ${t.a2}` : side}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      {bridgeSide && (
+                        <>
+                          <Slider label="Connector size" unit="mm²" min={6} max={20} step={0.5} value={connectorMm2} onChange={setConnectorMm2} hint="cross-section" />
+                          <div className="st-actions">
+                            <button className="st-btn primary" disabled={!abutment2} onClick={() => void designBridgeNow()}>Design Bridge</button>
+                            {bridge && <button className="st-btn tinted" onClick={exportBridge}>Download Bridge STL</button>}
+                            <button className="st-btn tinted" onClick={clearBridge}>Cancel Bridge</button>
+                          </div>
+                          {bridgePicking && <p className="st-brush-note" role="status">Tap the second abutment's prep on the scan.</p>}
+                          {bridgeNote && <p className="st-brush-note st-bridge-note" role="status">{bridgeNote}</p>}
+                          {bridge && (
+                            <div className="st-bridge-report">
+                              {bridge.connectors.map((k) => (
+                                <p key={k.between.join('-')}>
+                                  <b>Connector {k.between.join('–')}</b>: {((Math.PI / 4) * k.widthMm * k.heightMm).toFixed(1)} mm² ({k.widthMm.toFixed(1)} × {k.heightMm.toFixed(1)} mm) · gum {k.gumClearanceMm === null ? '—' : `${k.gumClearanceMm.toFixed(2)} mm`} · bite {k.biteClearanceMm === null ? '—' : `${k.biteClearanceMm.toFixed(2)} mm`}
+                                </p>
+                              ))}
+                              <p className="st-foot">{bridge.manifoldOk ? 'One closed solid' : 'NOT a closed solid'} · {bridge.volumeMm3.toFixed(0)} mm³ · {bridge.donors.join(', ')}</p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
                     <div className="st-group">
                       <div className="st-group-head">Distance map</div>
                       <div className="st-segmented" role="group" aria-label="Distance map">

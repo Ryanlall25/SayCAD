@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { toothClassOf, type ToothClass } from './anatomy'
+import { buildTemplate, toothClassOf, type ToothClass } from './anatomy'
 import { designFromDonors, donorTemplate, occlusalRelief, type DonorSet } from './donors'
 import { bestMargin, findPrep, findPrepDeep, marginScoreOf, scorePreps, toothSide } from './findPrep'
 import { SurfaceIndex, add, cross, dot, normalize, scale, sub, toLocal, toWorld, type ToothFrame, type Vec3 } from './geom'
@@ -9,6 +9,7 @@ import { commonAxis } from './insertion'
 import { fdiToUniversal } from './library'
 import { marginFromTaps, type MarginResult } from './margin'
 import { prepareCase, type DesignResult } from './pipeline'
+import { normaliseToReference, trainShapeModel } from './ssm'
 
 /**
  * Three-unit posterior bridges: two abutment crowns and a pontic, joined by
@@ -218,6 +219,18 @@ export function findAbutments(index: SurfaceIndex, antagonist: SurfaceIndex, tee
   return back === 0 ? [a, b] : [b, a]
 }
 
+/**
+ * The donor set for a class, or the textbook tooth as a one-donor set when the
+ * lab has none for it (an app without the lab's crowns can still design bridges).
+ */
+function donorsFor(req: BridgeRequest, cls: ToothClass, notes: string[]): DonorSet {
+  const set = req.donors[cls]
+  if (set?.donors.length) return set
+  notes.push(`no lab crowns for ${cls}: textbook anatomy`)
+  const t = buildTemplate(cls)
+  return { version: 1, cls, donors: [{ id: `textbook-${cls}`, model: trainShapeModel(cls, [normaliseToReference(t.grid, cls)], { source: 'textbook' }) }] }
+}
+
 export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   const notes: string[] = []
   const clearance = req.occlusalClearanceMm ?? 0.08
@@ -249,8 +262,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
 
   // 2. Abutment crowns along it.
   const abutments = abut.map((a, k) => {
-    const set = req.donors[toothClassOf(uni(a.fdi))]
-    if (!set) throw new Error(`no donor set for #${a.fdi}`)
+    const set = donorsFor(req, toothClassOf(uni(a.fdi)), notes)
     const c = designFromDonors(pcs[k], { margin: margins[k], insertionAxis: ax.axis, params: { occlusalClearanceMm: clearance } }, set)
     if (!c) throw new Error(`#${a.fdi}: abutment design failed`)
     return { fdi: a.fdi, result: c.result, donor: c.donor }
@@ -304,7 +316,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
       const ab = k === 0 ? mesialAb : distalAb
       if (!blind(ab.result)) continue
       const ai = abut.findIndex((a) => a.fdi === ab.fdi)
-      const set = req.donors[toothClassOf(uni(ab.fdi))]!
+      const set = donorsFor(req, toothClassOf(uni(ab.fdi)), [])
       const posA = toothSide(uni(ab.fdi)).pos
       const same = set.donors.filter((d) => d.tooth !== undefined && toothSide(d.tooth).pos === posA)
       const hs = (same.length ? same : set.donors).map((d) => {
@@ -385,8 +397,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
 
   // Donor for the pontic: its own position first, closest in length to the gap.
   const pUni = uni(pon.fdi)
-  const pset = req.donors[toothClassOf(pUni)]
-  if (!pset) throw new Error(`no donor set for pontic #${pon.fdi}`)
+  const pset = donorsFor(req, toothClassOf(pUni), notes)
   const pos = toothSide(pUni).pos
   const pool = pset.donors.filter((d) => d.tooth !== undefined && toothSide(d.tooth).pos === pos)
   const cands = (pool.length ? pool : pset.donors).map((d) => ({ d, t: donorTemplate(d) }))
@@ -606,8 +617,10 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
     }
     const Hfin = H * sH
     let gum = Infinity
+    // Over the gap only: within 1.5 mm of the proximal plane the ray down meets
+    // the abutment's prep, not the gum (read −5 mm over a bare ridge).
     for (const p of local()) {
-      if (p[1] > yc || !exposed(p)) continue
+      if (p[1] > yc || (p[0] - xPlane) * towardPontic < 1.5) continue
       const r = ridgeAt(p[0], p[2])
       if (r !== null) gum = Math.min(gum, p[1] - r)
     }
@@ -701,6 +714,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
     const area = (Math.PI / 4) * k.widthMm * k.heightMm / CONNECTOR_OVERSIZE
     if (area < CONNECTOR_MIN_MM2 - 0.05) blockers.push(`connector #${k.between[0]}–#${k.between[1]} only ${area.toFixed(1)} mm²`)
     if (k.biteClearanceMm !== null && k.biteClearanceMm < clearance - 0.05) blockers.push(`connector #${k.between[0]}–#${k.between[1]} ${(clearance - k.biteClearanceMm).toFixed(2)} mm into the bite`)
+    if (k.gumClearanceMm !== null && k.gumClearanceMm < 0) blockers.push(`connector #${k.between[0]}–#${k.between[1]} ${(-k.gumClearanceMm).toFixed(1)} mm into the gum`)
   }
   for (const a of abutments) {
     for (const x of a.result.report.results) if (x.verdict === 'fail' && !x.id.startsWith('contact')) blockers.push(`#${a.fdi}: ${x.label} ${x.measured}`)
