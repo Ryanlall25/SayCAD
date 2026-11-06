@@ -14,6 +14,7 @@ import * as THREE from 'three'
 import type Anthropic from '@anthropic-ai/sdk'
 import { CONTACT_BANDS, OCCLUSION_BANDS, StudioViewport, type BrushSettings, type CrownMap, type Pick } from './viewport'
 import type { BrushMode } from '../crown/brush'
+import { applyOffsets, editOffsets, maxOffset } from '../crown/manualEdits'
 import { CrownEngine } from '../crown/engineClient'
 import type { DesignData, MeshData } from '../crown/protocol'
 import { DEFAULT_PARAMS, type DesignParams } from '../crown/design'
@@ -194,6 +195,12 @@ export default function CrownStudio(): React.JSX.Element {
   const [mapMode, setMapMode] = useState<CrownMap>('none')
   /** Outer surfaces before each stroke (undo), starting from the design as it was when brushing began. */
   const strokes = useRef<Array<{ outer: Float32Array; pole: [number, number, number] }>>([])
+  /** The latest automatic surface (outer grid + pole, world) and the brush edits as offsets from it (tooth frame). */
+  const autoSurface = useRef<Float32Array | null>(null)
+  const manualEdits = useRef<Float32Array | null>(null)
+  const keepMinRef = useRef(true)
+  keepMinRef.current = keepMin
+  const [editsKept, setEditsKept] = useState(false)
   const [chat, setChat] = useState<ChatLine[]>([])
   const [input, setInput] = useState('')
   const [listening, setListening] = useState(false)
@@ -445,8 +452,21 @@ export default function CrownStudio(): React.JSX.Element {
           const modelJson = s.useLearned && s.model ? s.model.json : null
           engineRef.current!
             .design(m, p, f, quality, modelJson)
-            .then((d) => {
-              // A redesign replaces any free-form edits.
+            .then(async (auto) => {
+              let d = auto
+              const n = auto.nu * auto.nv + 1
+              autoSurface.current = auto.crown.positions.slice(0, n * 3)
+              // Brush edits survive a final redesign: re-applied in the tooth frame, then re-checked.
+              const edits = manualEdits.current
+              if (edits && quality === 'final') {
+                if (edits.length === n * 3) {
+                  const w = applyOffsets(autoSurface.current, edits, auto.frame)
+                  d = await engineRef.current!.reshape(w.slice(0, (n - 1) * 3), [w[3 * (n - 1)], w[3 * (n - 1) + 1], w[3 * (n - 1) + 2]], keepMinRef.current)
+                } else {
+                  manualEdits.current = null
+                  setEditsKept(false)
+                }
+              }
               strokes.current = []
               setDesign(d)
               const mat = MATERIALS[d.params.material]
@@ -459,7 +479,7 @@ export default function CrownStudio(): React.JSX.Element {
                 void updateCase(state.current.caseId, { params: p, flip: f, margin: m, tooth: state.current.tooth, status: fails ? `${fails} fail` : warns ? `${warns} to check` : 'QC ✓' }).then(() => listCases().then(setRecent))
               }
               if (quality === 'final')
-                setStatus(fails ? `${fails} check(s) failing — see Check.` : warns ? `Designed. ${warns} item(s) to look at.` : 'Designed — all checks pass.')
+                setStatus(`${fails ? `${fails} check(s) failing — see Check.` : warns ? `Designed. ${warns} item(s) to look at.` : 'Designed — all checks pass.'}${d !== auto ? ' Brush edits kept.' : ''}`)
               resolve(d)
             })
             .catch((e: Error) => {
@@ -500,11 +520,27 @@ export default function CrownStudio(): React.JSX.Element {
     try {
       const d = await engineRef.current!.reshape(outer, pole, keepMin)
       if (before) strokes.current.push(outerOf(before))
+      recordEdits(d)
       showDesign(d)
       setBrushNote(strokeNote(d, 'Edited'))
     } catch (e) {
       setBrushNote((e as Error).message)
     }
+  }
+
+  const recordEdits = (d: DesignData): void => {
+    const a = autoSurface.current
+    const n = d.nu * d.nv + 1
+    if (!a || a.length !== n * 3) return
+    const off = editOffsets(a, d.crown.positions.slice(0, n * 3), d.frame)
+    manualEdits.current = maxOffset(off) > 1e-4 ? off : null
+    setEditsKept(Boolean(manualEdits.current))
+  }
+
+  const discardEdits = (): void => {
+    manualEdits.current = null
+    setEditsKept(false)
+    void runDesign('final')
   }
 
   const strokeNote = (d: DesignData, what: string): string => {
@@ -531,6 +567,7 @@ export default function CrownStudio(): React.JSX.Element {
     if (!prev) return
     try {
       const d = await engineRef.current!.reshape(prev.outer, prev.pole, false)
+      recordEdits(d)
       showDesign(d)
       setBrushNote(strokeNote(d, 'Stroke undone'))
     } catch (e) {
@@ -553,6 +590,8 @@ export default function CrownStudio(): React.JSX.Element {
   }
 
   async function commitScans(list: ScanFile[], t: number, restore?: CaseMeta, info?: { name: string; order?: CaseMeta['order'] }): Promise<void> {
+    manualEdits.current = null
+    setEditsKept(false)
     const prep = list.find((f) => f.role === 'prep')
     const ant = list.find((f) => f.role === 'antagonist')
     const v = viewRef.current
@@ -983,6 +1022,9 @@ export default function CrownStudio(): React.JSX.Element {
     const s = state.current
     if (!s.margin) return
     setBusy('Moving the margin…')
+    // A new margin is a new crown: brush edits start over.
+    manualEdits.current = null
+    setEditsKept(false)
     try {
       const pts = await engineRef.current!.editMargin(from, to)
       pushHistory()
@@ -1761,7 +1803,12 @@ export default function CrownStudio(): React.JSX.Element {
                             <button className="st-btn tinted" onClick={() => void undoStroke()} disabled={!strokes.current.length}>Undo Stroke</button>
                           </div>
                           {brushNote && <p className="st-brush-note" role="status">{brushNote}</p>}
-                          <p className="st-foot">Every stroke is re-checked (thickness, contacts, occlusion, closed solid). Changing a design setting redesigns and discards brush edits — sculpt last.</p>
+                          {editsKept && (
+                            <div className="st-actions">
+                              <button className="st-btn tinted" onClick={discardEdits}>Discard Brush Edits</button>
+                            </div>
+                          )}
+                          <p className="st-foot">Every stroke is re-checked (thickness, contacts, occlusion, closed solid). Brush edits are kept when you change a design setting: they are re-applied to the new design and re-checked. A new margin starts over.</p>
                         </>
                       )}
                       {brushOn ? null : sculptAt ? (

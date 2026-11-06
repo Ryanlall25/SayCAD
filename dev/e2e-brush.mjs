@@ -83,6 +83,35 @@ console.log('after grab:', await page.locator('.st-brush-note').innerText())
 await page.screenshot({ path: `${out}/brush-3-grab.png` })
 if (Math.abs((await volume()) - g0) < 0.05) fail('grab did not change the crown')
 
+// Brush edits survive a design-setting change: add a bump, change the occlusal clearance, the bump stays.
+await page.getByRole('button', { name: 'Add', exact: true }).click()
+const kBefore = await page.evaluate(() => window.__saycadViewport.strokesDone)
+await page.mouse.move(cx - 30, cy); await page.mouse.down()
+for (let k = 0; k <= 20; k++) await page.mouse.move(cx - 30 + k * 3, cy)
+await page.mouse.up()
+await page.waitForFunction((k0) => window.__saycadViewport.strokesDone > k0, kBefore, { timeout: 30000 })
+await page.waitForFunction(() => document.querySelector('.st-brush-note')?.textContent?.startsWith('Edited'), null, { timeout: 30000 })
+await page.waitForTimeout(500)
+const vEdited = await volume()
+await page.getByRole('button', { name: 'Discard Brush Edits' }).waitFor({ timeout: 10000 })
+const clearance = page.locator('.st-slider', { hasText: 'Occlusal clearance' }).locator('input')
+await clearance.fill('0.12')
+await page.waitForFunction(() => document.querySelector('.st-status')?.textContent?.includes('Brush edits kept') || !!document.querySelector('.st-status'), null, { timeout: 60000 })
+await page.waitForTimeout(4000)
+await page.waitForFunction(() => !document.querySelector('.st-hud'), null, { timeout: 120000 })
+const vAfter = await volume()
+console.log(`edit kept across redesign: volume edited ${vEdited} → after clearance change ${vAfter}`)
+await page.getByRole('button', { name: 'Discard Brush Edits' }).click()
+await page.waitForFunction(() => !document.querySelector('.st-hud'), null, { timeout: 120000 })
+await page.waitForTimeout(4000)
+const vPlain = await volume()
+console.log(`after discarding edits: volume ${vPlain}`)
+// The saved edits (grab + add) changed the volume by vEdited − v0 on the original design;
+// re-applied after the redesign they should change it by about as much.
+const want = vEdited - v0, got = vAfter - vPlain
+console.log(`edits' volume effect: ${want.toFixed(1)} before the redesign, ${got.toFixed(1)} after`)
+if (Math.abs(got - want) > 0.3 || Math.abs(got) < 0.2) fail(`brush edits were not kept across the redesign (${want.toFixed(2)} vs ${got.toFixed(2)})`)
+
 // Distance maps.
 for (const m of ['Occlusion', 'Contacts']) {
   await page.getByRole('group', { name: 'Distance map' }).getByRole('button', { name: m }).click()
