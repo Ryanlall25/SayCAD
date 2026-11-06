@@ -138,3 +138,27 @@ describe('grab', () => {
     expect(Math.min(...Array.from(r.maps.occlusalGap).filter(Number.isFinite))).toBeLessThan(Math.min(...Array.from(base.maps.occlusalGap).filter(Number.isFinite)))
   })
 })
+
+describe('brush edits across a redesign', () => {
+  it('re-applies the sculpt to a moved and rotated design in the tooth frame', async () => {
+    const { editOffsets, applyOffsets, maxOffset } = await import('../manualEdits')
+    const n = nu * nv + 1
+    const auto = positions().slice(0, n * 3)
+    const edited = auto.slice()
+    applyDab(edited, nu, nv, { mode: 'add', center: at(edited, topVertex(edited)), radiusMm: 1.5, strength: 0.2 })
+    const off = editOffsets(auto, edited, base.frame)
+    expect(maxOffset(off)).toBeCloseTo(0.2, 2)
+    // Same edits on the same surface reproduce the edit exactly.
+    const again = applyOffsets(auto, off, base.frame)
+    for (let q = 0; q < again.length; q++) expect(again[q]).toBeCloseTo(edited[q], 4)
+    // A frame turned 90° about the occlusal axis: the bump follows the tooth, not the world.
+    const f = base.frame
+    const turned = { ...f, mesial: f.buccal, buccal: [-f.mesial[0], -f.mesial[1], -f.mesial[2]] as [number, number, number] }
+    const moved = applyOffsets(auto, off, turned)
+    const k = topVertex(auto)
+    const d = [moved[3 * k] - auto[3 * k], moved[3 * k + 1] - auto[3 * k + 1], moved[3 * k + 2] - auto[3 * k + 2]]
+    const occ = d[0] * f.occlusal[0] + d[1] * f.occlusal[1] + d[2] * f.occlusal[2]
+    const editOcc = off[3 * k + 1]
+    expect(occ).toBeCloseTo(editOcc, 4)
+  })
+})
