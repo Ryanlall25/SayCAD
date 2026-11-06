@@ -98,3 +98,26 @@ describe('reshape (manual edit re-check)', () => {
     expect(kept.watertight.watertight).toBe(true)
   })
 })
+
+describe('distance maps', () => {
+  it('give the occlusal gap and contact gap per outer vertex, agreeing with the checks', () => {
+    const { occlusalGap, proximalGap } = base.maps
+    expect(occlusalGap.length).toBe(nu * nv)
+    const occ = Array.from(occlusalGap).filter(Number.isFinite)
+    expect(occ.length).toBeGreaterThan(10)
+    // The map's closest point is the occlusion check's measurement.
+    const minOcc = Math.min(...occ)
+    expect(Math.abs(minOcc - base.report.summary.occlusalMinMm!)).toBeLessThan(0.02)
+    const prox = Array.from(proximalGap).filter(Number.isFinite)
+    expect(prox.length).toBeGreaterThan(10)
+  })
+
+  it('are recomputed for an edited surface', () => {
+    const p = positions()
+    applyDab(p, nu, nv, { mode: 'add', center: at(p, topVertex(p)), radiusMm: 1.5, strength: 0.15 })
+    const r = reshape(p, false)
+    const before = Math.min(...Array.from(base.maps.occlusalGap).filter(Number.isFinite))
+    const after = Math.min(...Array.from(r.maps.occlusalGap).filter(Number.isFinite))
+    expect(after).toBeLessThan(before)
+  })
+})

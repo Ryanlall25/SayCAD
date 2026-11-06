@@ -14,6 +14,10 @@ export interface DesignData {
   crown: MeshData
   /** Wall thickness per crown vertex (NaN where not measured). */
   thickness: Float32Array
+  /** Per crown vertex: gap up to the antagonist, mm (NaN beyond 2 mm or off the outer surface). */
+  occlusalGap: Float32Array
+  /** Per crown vertex: signed gap to the nearer neighbour, mm (negative = into it). */
+  proximalGap: Float32Array
   nu: number
   nv: number
   frame: ToothFrame

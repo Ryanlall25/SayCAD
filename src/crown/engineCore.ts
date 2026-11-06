@@ -26,9 +26,15 @@ function designData(r: DesignResult): { result: DesignData; transfer: Transferab
   const nv = r.outer.grid.nv
   const thickness = new Float32Array(positions.length / 3).fill(NaN)
   for (let k = 0; k < nu * nv; k++) thickness[k] = r.report.thickness[k]
+  const occlusalGap = new Float32Array(positions.length / 3).fill(NaN)
+  const proximalGap = new Float32Array(positions.length / 3).fill(NaN)
+  occlusalGap.set(r.maps.occlusalGap)
+  proximalGap.set(r.maps.proximalGap)
   const data: DesignData = {
     crown: { positions, indices },
     thickness,
+    occlusalGap,
+    proximalGap,
     nu,
     nv,
     frame: r.frame,
@@ -45,7 +51,7 @@ function designData(r: DesignResult): { result: DesignData; transfer: Transferab
   }
   // Copies: the cached result keeps its own buffers for the next edit.
   const out = { ...data, crown: { positions: positions.slice(), indices: indices.slice() } }
-  return { result: out, transfer: [out.crown.positions.buffer, out.crown.indices!.buffer, thickness.buffer] }
+  return { result: out, transfer: [out.crown.positions.buffer, out.crown.indices!.buffer, thickness.buffer, occlusalGap.buffer, proximalGap.buffer] }
 }
 
 function toGeometry(m: MeshData): THREE.BufferGeometry {

@@ -434,3 +434,7 @@
 .st-nav-case, .st-nav-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .st-brush-note { margin: 8px 2px 0; font-size: 13px; line-height: 1.35; color: var(--st-text, inherit); }
+.st-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 10px 2px 2px; font-size: 12px; opacity: 0.9; }
+.st-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.st-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.st-legend-unit { opacity: 0.6; }
