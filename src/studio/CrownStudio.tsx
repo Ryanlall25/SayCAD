@@ -516,14 +516,15 @@ export default function CrownStudio(): React.JSX.Element {
   useEffect(() => {
     const v = viewRef.current
     if (!v) return
-    if (!brushOn || !design) {
+    // Only on the Adapt stage: elsewhere a drag on the crown turns the view (or moves the margin).
+    if (!brushOn || !design || step !== 'design') {
       v.setBrush(null)
       return
     }
     const settings: BrushSettings = { mode: brushMode, radiusMm: brushRadius, strength: brushMode === 'add' || brushMode === 'remove' ? brushStrength : Math.min(1, brushStrength * 10) }
     v.setBrush(settings, (outer, pole) => void onStroke(outer, pole as [number, number, number]))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [brushOn, brushMode, brushRadius, brushStrength, keepMin, design])
+  }, [brushOn, brushMode, brushRadius, brushStrength, keepMin, design, step])
 
   async function undoStroke(): Promise<void> {
     const prev = strokes.current.pop()
@@ -977,22 +978,40 @@ export default function CrownStudio(): React.JSX.Element {
     }
   }
 
+  /** Moves the margin section nearest `to` onto it (tap or drag), snapped to the scan, then redesigns. */
+  async function moveMarginTo(from: [number, number, number][], to: [number, number, number]): Promise<void> {
+    const s = state.current
+    if (!s.margin) return
+    setBusy('Moving the margin…')
+    try {
+      const pts = await engineRef.current!.editMargin(from, to)
+      pushHistory()
+      const m: MarginResult = { ...s.margin, points: pts, confidence: s.margin.confidence.map((c, k) => (Math.hypot(...sub(pts[k], s.margin!.points[k])) > 0.02 ? 1 : c)) }
+      setMargin(m)
+      viewRef.current?.setMargin(m.points, m.confidence)
+      await runDesign('final', { margin: m })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Margin edit mode: drag the line itself (taps still work too).
+  useEffect(() => {
+    const v = viewRef.current
+    if (!v) return
+    const adjusting = Boolean(editMargin && margin && step === 'margin')
+    v.setMarginDrag(adjusting ? (orig, to) => void moveMarginTo(orig, to) : null)
+    // While adjusting, the crown is hidden: the line and the prep it runs on must be visible.
+    v.setLayer('crown', !adjusting)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editMargin, margin, step])
+
   async function onTap(p: Pick | null): Promise<void> {
     const s = state.current
     if (!p || !s.loaded) return
     if (p.target === 'scan' && (s.step === 'margin' || !s.margin)) {
       if (s.margin && editMargin) {
-        setBusy('Moving the margin…')
-        try {
-          const pts = await engineRef.current!.editMargin(s.margin.points, p.point)
-          pushHistory()
-          const m: MarginResult = { ...s.margin, points: pts, confidence: s.margin.confidence.map((c, k) => (Math.hypot(...sub(pts[k], s.margin!.points[k])) > 0.02 ? 1 : c)) }
-          setMargin(m)
-          viewRef.current?.setMargin(m.points, m.confidence)
-          await runDesign('final', { margin: m })
-        } finally {
-          setBusy(null)
-        }
+        await moveMarginTo(s.margin.points, p.point)
         return
       }
       if (!s.margin) await tapPrep(p.point)
@@ -1644,9 +1663,9 @@ export default function CrownStudio(): React.JSX.Element {
                     </p>
                     <div className="st-segmented">
                       <button className={!editMargin ? 'on' : ''} onClick={() => setEditMargin(false)}>View</button>
-                      <button className={editMargin ? 'on' : ''} onClick={() => setEditMargin(true)}>Tap to Adjust</button>
+                      <button className={editMargin ? 'on' : ''} onClick={() => setEditMargin(true)}>Adjust</button>
                     </div>
-                    {editMargin && <p className="st-foot">Tap the scan where the margin should run; the nearest stretch moves there and the crown follows.</p>}
+                    {editMargin && <p className="st-foot">Drag the line to where the margin should run, or tap the scan there; the nearby stretch follows smoothly, snaps to the scan, and the crown is redesigned.</p>}
                     <div className="st-actions">
                       <button className="st-btn tinted" onClick={() => { pushHistory(); setMargin(null); setDesign(null); setRun(null); viewRef.current?.setMargin(null); viewRef.current?.setCrown(null) }}>Redetect</button>
                       <button className="st-btn tinted" onClick={() => void execute({ kind: 'flipBuccal' })}>Flip Buccal</button>
@@ -1721,12 +1740,16 @@ export default function CrownStudio(): React.JSX.Element {
                       {brushOn && (
                         <>
                           <div className="st-segmented" role="group" aria-label="Brush mode">
-                            {(['add', 'remove', 'smooth', 'flatten'] as BrushMode[]).map((m) => (
+                            {(['add', 'remove', 'smooth', 'flatten', 'grab'] as BrushMode[]).map((m) => (
                               <button key={m} className={brushMode === m ? 'on' : ''} onClick={() => setBrushMode(m)}>{m[0].toUpperCase() + m.slice(1)}</button>
                             ))}
                           </div>
                           <Slider label="Size" unit="mm" min={0.5} max={4} step={0.1} value={brushRadius} onChange={setBrushRadius} />
-                          <Slider label="Strength" unit={brushMode === 'add' || brushMode === 'remove' ? 'mm' : ''} min={0.01} max={0.1} step={0.01} value={brushStrength} onChange={setBrushStrength} hint={brushMode === 'add' || brushMode === 'remove' ? 'per dab' : undefined} />
+                          {brushMode === 'grab' ? (
+                            <p className="st-foot">Press on the crown and drag: the surface within the brush size follows smoothly (move a cusp, raise a ridge, push out a contour).</p>
+                          ) : (
+                            <Slider label="Strength" unit={brushMode === 'add' || brushMode === 'remove' ? 'mm' : ''} min={0.01} max={0.1} step={0.01} value={brushStrength} onChange={setBrushStrength} hint={brushMode === 'add' || brushMode === 'remove' ? 'per dab' : undefined} />
+                          )}
                           <div className="st-row-item">
                             <span className="st-row-main">Keep minimal thickness</span>
                             <label className="st-switch">

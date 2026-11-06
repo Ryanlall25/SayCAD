@@ -68,6 +68,21 @@ await stroke()
 console.log('after smooth stroke:', await page.locator('.st-brush-note').innerText())
 await page.screenshot({ path: `${out}/brush-2-smoothed.png` })
 
+// Grab: press on the crown and drag up the screen.
+await page.getByRole('button', { name: 'Grab', exact: true }).click()
+const g0 = await volume()
+const note0 = await page.locator('.st-brush-note').innerText()
+const strokes0 = await page.evaluate(() => window.__saycadViewport.strokesDone)
+await page.mouse.move(cx, cy)
+await page.mouse.down()
+for (let k = 1; k <= 10; k++) await page.mouse.move(cx, cy - k * 2)
+await page.mouse.up()
+await page.waitForFunction(([n0, s0]) => window.__saycadViewport.strokesDone > s0 && document.querySelector('.st-brush-note')?.textContent !== n0, [note0, strokes0], { timeout: 30000 })
+await page.waitForTimeout(300)
+console.log('after grab:', await page.locator('.st-brush-note').innerText())
+await page.screenshot({ path: `${out}/brush-3-grab.png` })
+if (Math.abs((await volume()) - g0) < 0.05) fail('grab did not change the crown')
+
 // Distance maps.
 for (const m of ['Occlusion', 'Contacts']) {
   await page.getByRole('group', { name: 'Distance map' }).getByRole('button', { name: m }).click()
@@ -81,6 +96,27 @@ for (const m of ['Occlusion', 'Contacts']) {
   if (!coloured) fail(`${m} map has no values`)
   await page.screenshot({ path: `${out}/map-${m.toLowerCase()}.png` })
 }
+
+// Margin: drag a point of the line on the scan; the crown is redesigned to it.
+await page.locator('.st-rail-item', { hasText: 'Margin' }).click()
+await page.getByRole('button', { name: 'Adjust', exact: true }).click()
+await page.getByRole('button', { name: 'occlusal view' }).click()
+await page.waitForTimeout(800)
+const m0 = await page.evaluate(() => window.__saycadViewport.marginPts.points.map((p) => [...p]))
+const mp = await page.evaluate(() => window.__saycadViewport.marginScreenPoint(0))
+await page.mouse.move(mp.x, mp.y)
+await page.mouse.down()
+for (let k = 1; k <= 8; k++) await page.mouse.move(mp.x + k * 1.5, mp.y + k * 1.5)
+await page.mouse.up()
+await page.waitForFunction(() => !document.querySelector('.st-hud'), null, { timeout: 120000 })
+await page.waitForTimeout(500)
+const moved = await page.evaluate((m0) => {
+  const pts = window.__saycadViewport.marginPts.points
+  return Math.max(...pts.map((p, i) => Math.hypot(p[0] - m0[i][0], p[1] - m0[i][1], p[2] - m0[i][2])))
+}, m0)
+console.log(`margin drag: line moved up to ${moved.toFixed(2)} mm`)
+await page.screenshot({ path: `${out}/margin-drag.png` })
+if (!(moved > 0.05)) fail('margin drag did not move the line')
 
 console.log('E2E BRUSH OK')
 await browser.close()
