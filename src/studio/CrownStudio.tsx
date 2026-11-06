@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type Anthropic from '@anthropic-ai/sdk'
-import { StudioViewport, type BrushSettings, type Pick } from './viewport'
+import { CONTACT_BANDS, OCCLUSION_BANDS, StudioViewport, type BrushSettings, type CrownMap, type Pick } from './viewport'
 import type { BrushMode } from '../crown/brush'
 import { CrownEngine } from '../crown/engineClient'
 import type { DesignData, MeshData } from '../crown/protocol'
@@ -191,6 +191,7 @@ export default function CrownStudio(): React.JSX.Element {
   const [brushStrength, setBrushStrength] = useState(0.03)
   const [keepMin, setKeepMin] = useState(true)
   const [brushNote, setBrushNote] = useState('')
+  const [mapMode, setMapMode] = useState<CrownMap>('none')
   /** Outer surfaces before each stroke (undo), starting from the design as it was when brushing began. */
   const strokes = useRef<Array<{ outer: Float32Array; pole: [number, number, number] }>>([])
   const [chat, setChat] = useState<ChatLine[]>([])
@@ -1700,6 +1701,15 @@ export default function CrownStudio(): React.JSX.Element {
                 {d && (
                   <>
                     <div className="st-group">
+                      <div className="st-group-head">Distance map</div>
+                      <div className="st-segmented" role="group" aria-label="Distance map">
+                        {(['none', 'thickness', 'occlusion', 'contacts'] as CrownMap[]).map((m) => (
+                          <button key={m} className={mapMode === m ? 'on' : ''} onClick={() => { setMapMode(m); viewRef.current?.setMap(m) }}>{m === 'none' ? 'Off' : m[0].toUpperCase() + m.slice(1)}</button>
+                        ))}
+                      </div>
+                      {mapMode !== 'none' && <MapLegend mode={mapMode} minOcclusal={d.params.minOcclusalMm ?? MATERIALS[d.params.material].minOcclusalMm} />}
+                    </div>
+                    <div className="st-group">
                       <div className="st-group-head">Free-form</div>
                       <div className="st-row-item">
                         <span className="st-row-main"><b>Brush</b><span>Drag on the crown to sculpt; drag elsewhere to turn the view.</span></span>
@@ -1726,7 +1736,6 @@ export default function CrownStudio(): React.JSX.Element {
                           </div>
                           <div className="st-actions">
                             <button className="st-btn tinted" onClick={() => void undoStroke()} disabled={!strokes.current.length}>Undo Stroke</button>
-                            <button className="st-btn tinted" onClick={() => setLayerState('heatmap')}>Thickness Map</button>
                           </div>
                           {brushNote && <p className="st-brush-note" role="status">{brushNote}</p>}
                           <p className="st-foot">Every stroke is re-checked (thickness, contacts, occlusion, closed solid). Changing a design setting redesigns and discards brush edits — sculpt last.</p>
@@ -1901,6 +1910,7 @@ export default function CrownStudio(): React.JSX.Element {
 
   function setLayerState(layer: 'antagonist' | 'heatmap'): void {
     viewRef.current?.setLayer(layer, 'toggle')
+    if (layer === 'heatmap') setMapMode(viewRef.current?.currentMap ?? 'none')
     setStatus(`${layer === 'heatmap' ? 'Thickness map' : 'Opposing jaw'} ${viewRef.current?.layerVisible(layer) ? 'on' : 'off'}.`)
     haptic()
   }
@@ -1930,6 +1940,26 @@ function ToothChart(props: { value: number; onPick: (n: number) => void }): Reac
 
 function sub(a: [number, number, number], b: [number, number, number]): [number, number, number] {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+const MAP_SWATCHES = ['#d8344a', '#f07c2a', '#f2c94c', '#4cc38a', '#3f7fbf']
+/** Colour key for the distance maps (the bands viewport.ts paints). */
+function MapLegend(props: { mode: CrownMap; minOcclusal: number }): React.JSX.Element {
+  const f = (x: number): string => (x === 0 ? '0' : x.toFixed(2).replace(/^(-?)0\./, '$1.'))
+  let items: Array<[string, string]>
+  if (props.mode === 'thickness') items = [['#d8344a', `< ${f(props.minOcclusal)} min`], ['#e8b13a', 'near min'], ['#6cc3a5', 'ok'], ['#3f7fbf', 'thick']]
+  else {
+    const b = props.mode === 'occlusion' ? OCCLUSION_BANDS : CONTACT_BANDS
+    items = b.map((hi, k): [string, string] => [MAP_SWATCHES[k], k === 0 ? (props.mode === 'occlusion' ? 'touching' : `< ${f(hi)}`) : `${f(b[k - 1])}–${f(hi)}`])
+  }
+  return (
+    <div className="st-legend" aria-label={`${props.mode} colour key, mm`}>
+      {items.map(([c, t]) => (
+        <span key={t}><i style={{ background: c }} />{t}</span>
+      ))}
+      <span className="st-legend-unit">mm</span>
+    </div>
+  )
 }
 
 function Slider(props: { label: string; unit: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; hint?: string }): React.JSX.Element {

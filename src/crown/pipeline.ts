@@ -69,6 +69,12 @@ export interface DesignResult {
   report: CriticReport
   timingsMs: Record<string, number>
   /**
+   * Per outer-grid vertex (nu·nv), for the viewer's distance maps:
+   * the gap up to the antagonist and the signed gap to the nearer neighbour
+   * (negative = into it), mm; NaN where nothing is within reach.
+   */
+  maps: { occlusalGap: Float32Array; proximalGap: Float32Array }
+  /**
    * Manual editing: rebuild the solid and re-run every check on an edited
    * outer surface (tooth-local grid points, same topology), without
    * redesigning. `keepMinThickness` pushes thin spots back out to the
@@ -330,7 +336,28 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
     const watertight = checkWatertight(solidLocal.positions, solidLocal.indices)
     const crown = solidToWorld(solidLocal, frame)
     const report = critique(outerGrid, watertight)
-    return { solidLocal, watertight, crown, report }
+    return { solidLocal, watertight, crown, report, maps: distanceMaps(outerGrid) }
+  }
+  const distanceMaps = (outerGrid: CrownGrid): DesignResult['maps'] => {
+    const n = outerGrid.nu * outerGrid.nv
+    const occlusalGap = new Float32Array(n).fill(NaN)
+    const proximalGap = new Float32Array(n).fill(NaN)
+    const REACH = 2
+    for (let k = 0; k < n; k++) {
+      const p: Vec3 = [outerGrid.pts[3 * k], outerGrid.pts[3 * k + 1], outerGrid.pts[3 * k + 2]]
+      if (antagonist) {
+        const g = antagonist.gapUp(p, REACH)
+        if (g < REACH) occlusalGap[k] = g
+      }
+      let best = Infinity
+      for (const [nb, sign] of [[outer.neighbours.mesial, 1], [outer.neighbours.distal, -1]] as const) {
+        if (!nb || sign * p[0] <= 0) continue
+        const d = nb.signedDistance(p, [sign, 0, 0], REACH)
+        if (Math.abs(d) < REACH && d < best) best = d
+      }
+      if (Number.isFinite(best)) proximalGap[k] = best
+    }
+    return { occlusalGap, proximalGap }
   }
   const critique = (outerGrid: CrownGrid, watertight: WatertightReport): CriticReport => runCritics({
     outer: outerGrid,
@@ -350,7 +377,7 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
     blockoutVolumeMm3: intaglio.blockoutVolumeMm3,
     openContacts: outer.measures.openContacts
   })
-  const { solidLocal, watertight, crown, report } = assemble(outer.grid)
+  const { solidLocal, watertight, crown, report, maps } = assemble(outer.grid)
   lap('solid')
   lap('critics')
 
@@ -366,6 +393,7 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
     solidLocal,
     watertight,
     report,
+    maps,
     timingsMs: t,
     rebuild: function rebuild(this: void, outerLocal, opts) {
       const grid: CrownGrid = { nu: outer.grid.nu, nv: outer.grid.nv, pts: new Float64Array(outerLocal.pts), pole: [...outerLocal.pole] as Vec3 }
@@ -373,7 +401,7 @@ export function autoDesign(pc: PreparedCase, req: DesignRequest): DesignResult {
       grid.pts.set(outer.grid.pts.subarray(0, grid.nu * 3), 0)
       if (opts?.keepMinThickness) enforceThickness(grid, intaglioIndex, [0, intaglio.grid.pole[1] * 0.45, 0], mat, 4)
       const a = assemble(grid)
-      const edited: DesignResult = { ...result, outer: { ...outer, grid }, crown: a.crown, solidLocal: a.solidLocal, watertight: a.watertight, report: a.report }
+      const edited: DesignResult = { ...result, outer: { ...outer, grid }, crown: a.crown, solidLocal: a.solidLocal, watertight: a.watertight, report: a.report, maps: a.maps }
       return edited
     }
   }

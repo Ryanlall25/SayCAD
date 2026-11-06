@@ -33,6 +33,24 @@ export interface Pick {
 // natural ivory, and full white would clip and hide the anatomy.
 const CROWN_COLOR = 0xc9bea9
 
+export type CrownMap = 'none' | 'thickness' | 'occlusion' | 'contacts'
+
+/**
+ * Gap → colour on the scale technicians read in exocad: red where it touches
+ * or goes in, then orange, yellow, green, blue as the gap opens; the crown's
+ * own colour beyond the last band. `bands` are the upper bounds, mm.
+ */
+const GAP_COLORS = [0xd8344a, 0xf07c2a, 0xf2c94c, 0x4cc38a, 0x3f7fbf]
+function gapColor(g: number, bands: number[], out: THREE.Color): THREE.Color {
+  if (!Number.isFinite(g)) return out.setHex(CROWN_COLOR)
+  for (let b = 0; b < bands.length; b++) if (g < bands[b]) return out.setHex(GAP_COLORS[b])
+  return out.setHex(CROWN_COLOR)
+}
+/** Occlusion: in contact (≤ 0) / 0–0.05 / 0.05–0.1 / 0.1–0.2 / 0.2–0.5 mm. */
+export const OCCLUSION_BANDS = [0, 0.05, 0.1, 0.2, 0.5]
+/** Contacts: tighter than −0.05 / −0.05–0 / 0–0.05 / 0.05–0.15 / 0.15–0.5 mm. */
+export const CONTACT_BANDS = [-0.05, 0, 0.05, 0.15, 0.5]
+
 /** Thickness → colour: red below minimum, amber within 0.3 mm of it, teal above. */
 function thicknessColor(t: number, min: number, out: THREE.Color): THREE.Color {
   if (!Number.isFinite(t)) return out.setHex(CROWN_COLOR)
@@ -61,7 +79,7 @@ export class StudioViewport {
   private antMesh: THREE.Mesh | null = null
   private design: DesignData | null = null
   private frame: ToothFrame | null = null
-  private heatmap = false
+  private map: CrownMap = 'none'
   private minThickness = { axial: 0.5, occlusal: 0.7 }
   private raf = 0
   private readonly ro: ResizeObserver
@@ -395,26 +413,37 @@ export class StudioViewport {
     if (!this.crownMesh || !this.design) return
     const colors = this.crownMesh.geometry.getAttribute('color') as THREE.BufferAttribute
     const c = new THREE.Color()
-    const nOuter = this.design.nu * this.design.nv
+    const d = this.design
+    const nOuter = d.nu * d.nv
     for (let v = 0; v < colors.count; v++) {
-      if (!this.heatmap || v >= nOuter) c.setHex(CROWN_COLOR)
-      else {
-        const j = Math.floor(v / this.design.nu)
-        const occlusal = j > this.design.nv * 0.6
-        thicknessColor(this.design.thickness[v], occlusal ? this.minThickness.occlusal : this.minThickness.axial, c)
-      }
+      if (this.map === 'none' || v >= nOuter) c.setHex(CROWN_COLOR)
+      else if (this.map === 'thickness') {
+        const j = Math.floor(v / d.nu)
+        const occlusal = j > d.nv * 0.6
+        thicknessColor(d.thickness[v], occlusal ? this.minThickness.occlusal : this.minThickness.axial, c)
+      } else if (this.map === 'occlusion') gapColor(d.occlusalGap?.[v] ?? NaN, OCCLUSION_BANDS, c)
+      else gapColor(d.proximalGap?.[v] ?? NaN, CONTACT_BANDS, c)
       colors.setXYZ(v, c.r, c.g, c.b)
     }
     colors.needsUpdate = true
   }
 
-  setHeatmap(on: boolean): void {
-    this.heatmap = on
+  /** Colour the crown by a distance map (or plain). */
+  setMap(m: CrownMap): void {
+    this.map = m
     this.paintCrown()
   }
 
+  get currentMap(): CrownMap {
+    return this.map
+  }
+
+  setHeatmap(on: boolean): void {
+    this.setMap(on ? 'thickness' : 'none')
+  }
+
   get heatmapOn(): boolean {
-    return this.heatmap
+    return this.map === 'thickness'
   }
 
   setMargin(points: Vec3[] | null, confidence?: number[]): void {
@@ -476,7 +505,7 @@ export class StudioViewport {
 
   setLayer(layer: CrownLayer, visible: boolean | 'toggle'): boolean {
     if (layer === 'heatmap') {
-      const on = visible === 'toggle' ? !this.heatmap : visible
+      const on = visible === 'toggle' ? this.map !== 'thickness' : visible
       this.setHeatmap(on)
       return on
     }
@@ -487,7 +516,7 @@ export class StudioViewport {
   }
 
   layerVisible(layer: CrownLayer): boolean {
-    if (layer === 'heatmap') return this.heatmap
+    if (layer === 'heatmap') return this.map === 'thickness'
     return this.groups[layer === 'scan' ? 'scan' : layer].visible
   }
 

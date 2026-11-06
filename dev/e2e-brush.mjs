@@ -68,6 +68,20 @@ await stroke()
 console.log('after smooth stroke:', await page.locator('.st-brush-note').innerText())
 await page.screenshot({ path: `${out}/brush-2-smoothed.png` })
 
+// Distance maps.
+for (const m of ['Occlusion', 'Contacts']) {
+  await page.getByRole('group', { name: 'Distance map' }).getByRole('button', { name: m }).click()
+  await page.waitForTimeout(300)
+  const coloured = await page.evaluate(() => {
+    const v = window.__saycadViewport
+    const g = v.design[v.currentMap === 'occlusion' ? 'occlusalGap' : 'proximalGap']
+    return Array.from(g).filter(Number.isFinite).length
+  })
+  console.log(`${m} map: ${coloured} vertices with a gap value; legend: ${(await page.locator('.st-legend').innerText()).replace(/\s+/g, ' ')}`)
+  if (!coloured) fail(`${m} map has no values`)
+  await page.screenshot({ path: `${out}/map-${m.toLowerCase()}.png` })
+}
+
 console.log('E2E BRUSH OK')
 await browser.close()
 server.kill()
