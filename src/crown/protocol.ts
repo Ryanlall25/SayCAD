@@ -43,4 +43,6 @@ export type EngineRequest =
   | { type: 'findPrep' }
   | { type: 'editMargin'; points: Vec3[]; tapped: Vec3 }
   | { type: 'importLibrary'; files: Array<{ name: string; mesh: MeshData }>; numbering: 'auto' | 'universal' | 'fdi'; source: string; jaw?: 'upper' | 'lower' }
+  /** Manual edit: outer-surface vertices (the crown's first nu·nv, world coords) and pole, from the last design. */
+  | { type: 'reshape'; outer: Float32Array; pole: Vec3; keepMinThickness: boolean }
   | { type: 'design'; margin: MarginResult; params: Partial<DesignParams>; flipBuccal: boolean; quality: 'preview' | 'final'; model: string | null }

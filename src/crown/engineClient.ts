@@ -92,6 +92,11 @@ export class CrownEngine {
     return this.call({ type: 'editMargin', points, tapped })
   }
 
+  /** Re-check (and rebuild) the last design after a manual edit of its outer surface. */
+  reshape(outer: Float32Array, pole: [number, number, number], keepMinThickness: boolean): Promise<DesignData> {
+    return this.call({ type: 'reshape', outer, pole, keepMinThickness })
+  }
+
   design(margin: MarginResult, params: Partial<DesignParams>, flipBuccal: boolean, quality: 'preview' | 'final', model: string | null): Promise<DesignData> {
     return this.call({ type: 'design', margin, params, flipBuccal, quality, model })
   }

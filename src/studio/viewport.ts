@@ -3,6 +3,7 @@ import { addHeadlightRig, createViewerRig, eventNDC, fitDistanceFor, type Viewer
 import { NEUTRAL_COLOR } from '../core/scanLoad'
 import type { ToothFrame, Vec3 } from '../crown/geom'
 import type { DesignData } from '../crown/protocol'
+import { applyDab, type BrushMode } from '../crown/brush'
 import type { CrownLayer, CrownView } from '../speak/crownParser'
 
 /**
@@ -13,6 +14,13 @@ import type { CrownLayer, CrownView } from '../speak/crownParser'
  */
 
 export type PickTarget = 'scan' | 'crown' | 'antagonist'
+
+export interface BrushSettings {
+  mode: BrushMode
+  radiusMm: number
+  /** add/remove: mm per dab at the centre; smooth/flatten: blend per dab (0–1). */
+  strength: number
+}
 
 export interface Pick {
   target: PickTarget
@@ -60,9 +68,19 @@ export class StudioViewport {
   private readonly raycaster = new THREE.Raycaster()
   private tapHandler: ((p: Pick | null) => void) | null = null
   private downAt: { x: number; y: number; t: number } | null = null
+  private brush: { settings: BrushSettings; onStroke: (outer: Float32Array, pole: Vec3) => void } | null = null
+  private stroke: { last: THREE.Vector3; dabs: number } | null = null
+  /** Strokes finished (for browser tests). */
+  strokesDone = 0
 
   constructor(mount: HTMLElement) {
     this.mount = mount
+    // Registered before the camera rig's: a drag that starts on the crown in
+    // brush mode sculpts; anywhere else it still orbits.
+    mount.addEventListener('pointerdown', this.onBrushDown, { capture: true })
+    mount.addEventListener('pointermove', this.onBrushMove, { capture: true })
+    mount.addEventListener('pointerup', this.onBrushUp, { capture: true })
+    mount.addEventListener('pointercancel', this.onBrushUp, { capture: true })
     this.scene.background = new THREE.Color(0x0d1f1b)
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 2000)
     this.camera.position.set(0, 60, 90)
@@ -101,6 +119,9 @@ export class StudioViewport {
     this.ro = new ResizeObserver(resize)
     this.ro.observe(mount)
 
+    // Browser tests (?e2e): expose the viewport to find the crown on screen.
+    if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('e2e')) (window as unknown as { __saycadViewport: StudioViewport }).__saycadViewport = this
+
     const el = this.renderer.domElement
     el.addEventListener('pointerdown', this.onDown)
     el.addEventListener('pointerup', this.onUp)
@@ -112,6 +133,99 @@ export class StudioViewport {
       this.placeOverlays()
     }
     loop()
+  }
+
+  /** Where the crown's centre is drawn, in client pixels (browser tests). */
+  crownScreenPoint(): { x: number; y: number } | null {
+    if (!this.crownMesh) return null
+    const g = this.crownMesh.geometry
+    g.computeBoundingSphere()
+    const v = g.boundingSphere!.center.clone().project(this.camera)
+    const r = this.renderer.domElement.getBoundingClientRect()
+    return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height }
+  }
+
+  /** Brush mode on (settings) or off (null); `onStroke` gets the edited outer surface when a stroke ends. */
+  setBrush(settings: BrushSettings | null, onStroke?: (outer: Float32Array, pole: Vec3) => void): void {
+    this.brush = settings && onStroke ? { settings, onStroke } : null
+    if (!settings) {
+      this.stroke = null
+      this.rig.setEnabled(true)
+      StudioViewport.clear(this.groups.marker)
+    }
+  }
+
+  private crownHit(cx: number, cy: number): THREE.Intersection | null {
+    if (!this.crownMesh || !this.groups.crown.visible) return null
+    this.raycaster.setFromCamera(eventNDC(this.renderer.domElement, cx, cy), this.camera)
+    return this.raycaster.intersectObject(this.crownMesh, false)[0] ?? null
+  }
+
+  private showBrush(p: THREE.Vector3 | null): void {
+    StudioViewport.clear(this.groups.marker)
+    if (!p || !this.brush) return
+    const r = this.brush.settings.radiusMm
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16), new THREE.MeshBasicMaterial({ color: this.brush.settings.mode === 'remove' ? 0xd8344a : 0xc9a24b, transparent: true, opacity: 0.22, depthWrite: false }))
+    ball.position.copy(p)
+    this.groups.marker.add(ball)
+  }
+
+  private dab(p: THREE.Vector3): void {
+    if (!this.brush || !this.crownMesh || !this.design) return
+    const g = this.crownMesh.geometry
+    const pos = g.getAttribute('position') as THREE.BufferAttribute
+    const r = applyDab(pos.array as Float32Array, this.design.nu, this.design.nv, { ...this.brush.settings, center: [p.x, p.y, p.z] })
+    if (!r.moved) return
+    pos.needsUpdate = true
+    g.computeVertexNormals()
+    g.computeBoundingSphere()
+    g.computeBoundsTree?.()
+  }
+
+  private onBrushDown = (e: PointerEvent): void => {
+    if (!this.brush || !e.isPrimary || e.button > 0) return
+    const hit = this.crownHit(e.clientX, e.clientY)
+    if (!hit) return
+    e.stopImmediatePropagation()
+    e.preventDefault()
+    this.rig.setEnabled(false)
+    ;(e.target as Element).setPointerCapture?.(e.pointerId)
+    this.stroke = { last: hit.point.clone(), dabs: 0 }
+    this.dab(hit.point)
+    this.stroke.dabs++
+    this.showBrush(hit.point)
+  }
+
+  private onBrushMove = (e: PointerEvent): void => {
+    if (!this.brush) return
+    const hit = this.crownHit(e.clientX, e.clientY)
+    if (!this.stroke) {
+      // Hover: show where the brush would land.
+      if (e.pointerType === 'mouse') this.showBrush(hit?.point ?? null)
+      return
+    }
+    e.stopImmediatePropagation()
+    if (!hit) return
+    // Dabs spaced at a quarter of the radius along the drag.
+    if (hit.point.distanceTo(this.stroke.last) < this.brush.settings.radiusMm * 0.25) return
+    this.dab(hit.point)
+    this.stroke.last.copy(hit.point)
+    this.stroke.dabs++
+    this.showBrush(hit.point)
+  }
+
+  private onBrushUp = (e: PointerEvent): void => {
+    if (!this.brush || !this.stroke) return
+    e.stopImmediatePropagation()
+    this.stroke = null
+    this.downAt = null
+    this.rig.setEnabled(true)
+    if (e.pointerType !== 'mouse') this.showBrush(null)
+    if (!this.crownMesh || !this.design) return
+    const pos = (this.crownMesh.geometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array
+    const n = this.design.nu * this.design.nv
+    this.strokesDone++
+    this.brush.onStroke(pos.slice(0, n * 3), [pos[3 * n], pos[3 * n + 1], pos[3 * n + 2]])
   }
 
   private onDown = (e: PointerEvent): void => {
@@ -267,7 +381,8 @@ export class StudioViewport {
     this.crownMesh = null
     if (!d) return
     const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.BufferAttribute(d.crown.positions, 3))
+    // A copy: the brush sculpts the view's mesh, the design stays the undo point.
+    g.setAttribute('position', new THREE.BufferAttribute(d.crown.positions.slice(), 3))
     if (d.crown.indices) g.setIndex(new THREE.BufferAttribute(d.crown.indices, 1))
     g.computeVertexNormals()
     g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(d.crown.positions.length), 3))
@@ -527,6 +642,10 @@ export class StudioViewport {
     this.ro.disconnect()
     this.renderer.domElement.removeEventListener('pointerdown', this.onDown)
     this.renderer.domElement.removeEventListener('pointerup', this.onUp)
+    this.mount.removeEventListener('pointerdown', this.onBrushDown, { capture: true })
+    this.mount.removeEventListener('pointermove', this.onBrushMove, { capture: true })
+    this.mount.removeEventListener('pointerup', this.onBrushUp, { capture: true })
+    this.mount.removeEventListener('pointercancel', this.onBrushUp, { capture: true })
     this.rig.dispose()
     for (const g of Object.values(this.groups)) StudioViewport.clear(g)
     this.renderer.dispose()

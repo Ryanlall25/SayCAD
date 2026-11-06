@@ -2,12 +2,12 @@ import * as THREE from 'three'
 import { toothClassOf } from './anatomy'
 import { editMargin } from './margin'
 import { detectMargin } from './margin'
-import { autoDesign, prepareCase, type PreparedCase } from './pipeline'
+import { autoDesign, prepareCase, type DesignResult, type PreparedCase } from './pipeline'
 import type { DesignData, EngineRequest, MeshData } from './protocol'
 import { parseShapeModel, templateFromModel, type ShapeModel } from './ssm'
 import { analyseLibrary, libraryModels, libraryToothNumber } from './library'
 import { bestMargin, findPrep } from './findPrep'
-import { SurfaceIndex } from './geom'
+import { SurfaceIndex, toLocal, type Vec3 } from './geom'
 
 /**
  * Engine request handler — runs inside the worker (or in-thread as a
@@ -16,6 +16,37 @@ import { SurfaceIndex } from './geom'
 
 let prepared: PreparedCase | null = null
 let modelCache: { json: string; model: ShapeModel } | null = null
+/** The last design, kept for manual edits (reshape) without redesigning. */
+let last: DesignResult | null = null
+
+function designData(r: DesignResult): { result: DesignData; transfer: Transferable[] } {
+  const positions = (r.crown.getAttribute('position') as THREE.BufferAttribute).array as Float32Array
+  const indices = (r.crown.index as THREE.BufferAttribute).array as Uint32Array
+  const nu = r.outer.grid.nu
+  const nv = r.outer.grid.nv
+  const thickness = new Float32Array(positions.length / 3).fill(NaN)
+  for (let k = 0; k < nu * nv; k++) thickness[k] = r.report.thickness[k]
+  const data: DesignData = {
+    crown: { positions, indices },
+    thickness,
+    nu,
+    nv,
+    frame: r.frame,
+    buccalConfidence: r.buccalConfidence,
+    margin: r.margin,
+    results: r.report.results,
+    exportable: r.report.exportable,
+    summary: r.report.summary,
+    measures: r.outer.measures,
+    cuspTips: r.outer.cuspTips,
+    params: r.params,
+    timingsMs: r.timingsMs,
+    volumeMm3: r.watertight.volumeMm3
+  }
+  // Copies: the cached result keeps its own buffers for the next edit.
+  const out = { ...data, crown: { positions: positions.slice(), indices: indices.slice() } }
+  return { result: out, transfer: [out.crown.positions.buffer, out.crown.indices!.buffer, thickness.buffer] }
+}
 
 function toGeometry(m: MeshData): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry()
@@ -66,6 +97,23 @@ export function handleEngineRequest(req: EngineRequest): { result: unknown; tran
         transfer: []
       }
     }
+    case 'reshape': {
+      if (!last?.rebuild) throw new Error('Design the crown first.')
+      const f = last.frame
+      const n = last.outer.grid.nu * last.outer.grid.nv
+      if (req.outer.length !== n * 3) throw new Error('Edited surface does not match the design.')
+      const pts = new Float64Array(n * 3)
+      for (let k = 0; k < n; k++) {
+        const q = toLocal(f, [req.outer[3 * k], req.outer[3 * k + 1], req.outer[3 * k + 2]])
+        pts[3 * k] = q[0]
+        pts[3 * k + 1] = q[1]
+        pts[3 * k + 2] = q[2]
+      }
+      const r = last.rebuild({ pts, pole: toLocal(f, req.pole) }, { keepMinThickness: req.keepMinThickness })
+      // Edits stack: the next stroke starts from this one.
+      last = { ...r, rebuild: r.rebuild }
+      return designData(r)
+    }
     case 'design': {
       if (!prepared) throw new Error('Load the scans first.')
       let template
@@ -87,30 +135,8 @@ export function handleEngineRequest(req: EngineRequest): { result: unknown; tran
         nv: template ? undefined : preview ? 42 : 56,
         template
       })
-      const positions = (r.crown.getAttribute('position') as THREE.BufferAttribute).array as Float32Array
-      const indices = (r.crown.index as THREE.BufferAttribute).array as Uint32Array
-      const nu = r.outer.grid.nu
-      const nv = r.outer.grid.nv
-      const thickness = new Float32Array(positions.length / 3).fill(NaN)
-      for (let k = 0; k < nu * nv; k++) thickness[k] = r.report.thickness[k]
-      const data: DesignData = {
-        crown: { positions, indices },
-        thickness,
-        nu,
-        nv,
-        frame: r.frame,
-        buccalConfidence: r.buccalConfidence,
-        margin: r.margin,
-        results: r.report.results,
-        exportable: r.report.exportable,
-        summary: r.report.summary,
-        measures: r.outer.measures,
-        cuspTips: r.outer.cuspTips,
-        params: r.params,
-        timingsMs: r.timingsMs,
-        volumeMm3: r.watertight.volumeMm3
-      }
-      return { result: data, transfer: [positions.buffer, indices.buffer, thickness.buffer] }
+      last = r
+      return designData(r)
     }
   }
 }
