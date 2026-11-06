@@ -32,6 +32,15 @@ describe('starting anatomy from the lab’s own crowns (donors)', () => {
     expect(pick!.result.report.exportable).toBe(true)
   })
 
+  it('blends the best passing designs into one re-checked surface', () => {
+    const pick = designFromDonors(pc, { tap: c.tapPoint }, set)!
+    expect(pick.blend).toBeDefined()
+    expect(pick.blend![0]).toBe(pick.donor)
+    expect(pick.blend!.length).toBeGreaterThan(1)
+    expect(pick.result.report.results.some((x) => x.verdict === 'fail')).toBe(false)
+    expect(pick.result.watertight.watertight).toBe(true)
+  })
+
   it('leaves a donor out when asked (leave-one-out evaluation)', () => {
     const pick = designFromDonors(pc, { tap: c.tapPoint }, set, { exclude: 'syn-0' })
     expect(pick!.tried).toBe(2)
