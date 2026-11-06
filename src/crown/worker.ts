@@ -6,10 +6,10 @@
  */
 import { handleEngineRequest } from './engineCore'
 
-self.onmessage = (e: MessageEvent<{ id: number; req: Parameters<typeof handleEngineRequest>[0] }>) => {
+self.onmessage = async (e: MessageEvent<{ id: number; req: Parameters<typeof handleEngineRequest>[0] }>) => {
   const { id, req } = e.data
   try {
-    const { result, transfer } = handleEngineRequest(req)
+    const { result, transfer } = await handleEngineRequest(req)
     ;(self as unknown as Worker).postMessage({ id, ok: true, result }, transfer)
   } catch (err) {
     ;(self as unknown as Worker).postMessage({ id, ok: false, error: err instanceof Error ? err.message : String(err) })

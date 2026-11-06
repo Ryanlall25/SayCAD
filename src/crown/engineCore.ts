@@ -3,7 +3,10 @@ import { toothClassOf } from './anatomy'
 import { editMargin } from './margin'
 import { detectMargin } from './margin'
 import { autoDesign, prepareCase, type DesignResult, type PreparedCase } from './pipeline'
-import type { DesignData, EngineRequest, MeshData } from './protocol'
+import type { BridgeData, DesignData, EngineRequest, MeshData } from './protocol'
+import { designBridge } from './bridge'
+import { parseDonorSet, type DonorSet } from './donors'
+import type { ToothClass } from './anatomy'
 import { parseShapeModel, templateFromModel, type ShapeModel } from './ssm'
 import { analyseLibrary, libraryModels, libraryToothNumber } from './library'
 import { bestMargin, findPrep } from './findPrep'
@@ -61,7 +64,7 @@ function toGeometry(m: MeshData): THREE.BufferGeometry {
   return g
 }
 
-export function handleEngineRequest(req: EngineRequest): { result: unknown; transfer: Transferable[] } {
+export function handleEngineRequest(req: EngineRequest): { result: unknown; transfer: Transferable[] } | Promise<{ result: unknown; transfer: Transferable[] }> {
   switch (req.type) {
     case 'load': {
       prepared = prepareCase({ toothNumber: req.toothNumber, prep: toGeometry(req.prep), antagonist: req.antagonist ? toGeometry(req.antagonist) : null })
@@ -102,6 +105,27 @@ export function handleEngineRequest(req: EngineRequest): { result: unknown; tran
         },
         transfer: []
       }
+    }
+    case 'bridge': {
+      if (!prepared) throw new Error('Load the scans first.')
+      const pc = prepared
+      const donors: Partial<Record<ToothClass, DonorSet>> = {}
+      for (const json of Object.values(req.donors)) {
+        const d = parseDonorSet(json)
+        if (d) donors[d.cls] = d
+      }
+      return designBridge({ prep: pc.prepWelded, antagonist: pc.antagonist, units: req.units, donors, connectorMm2: req.connectorMm2 }).then((r) => {
+        const data: BridgeData = {
+          mesh: { positions: r.positions, indices: r.indices },
+          manifoldOk: r.manifoldOk,
+          volumeMm3: r.volumeMm3,
+          connectors: r.connectors,
+          blockers: r.blockers,
+          notes: r.notes,
+          donors: [...r.abutments.map((a) => `#${a.fdi} ${a.donor}`), `#${r.pontic.fdi} ${r.pontic.donor} (pontic)`]
+        }
+        return { result: data, transfer: [r.positions.buffer, r.indices.buffer] }
+      })
     }
     case 'reshape': {
       if (!last?.rebuild) throw new Error('Design the crown first.')

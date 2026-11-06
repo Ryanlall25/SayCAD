@@ -72,7 +72,8 @@ export class StudioViewport {
     crown: new THREE.Group(),
     margin: new THREE.Group(),
     frame: new THREE.Group(),
-    marker: new THREE.Group()
+    marker: new THREE.Group(),
+    bridge: new THREE.Group()
   }
   private crownMesh: THREE.Mesh | null = null
   private scanMesh: THREE.Mesh | null = null
@@ -160,6 +161,13 @@ export class StudioViewport {
   marginScreenPoint(i: number): { x: number; y: number } | null {
     const p = this.marginPts?.points[i]
     if (!p) return null
+    const v = new THREE.Vector3(...p).project(this.camera)
+    const r = this.renderer.domElement.getBoundingClientRect()
+    return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height }
+  }
+
+  /** Where world point `p` is drawn, in client pixels (browser tests). */
+  worldToScreen(p: Vec3): { x: number; y: number } {
     const v = new THREE.Vector3(...p).project(this.camera)
     const r = this.renderer.domElement.getBoundingClientRect()
     return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height }
@@ -535,6 +543,18 @@ export class StudioViewport {
       colors.setXYZ(v, c.r, c.g, c.b)
     }
     colors.needsUpdate = true
+  }
+
+  /** Show a bridge solid (world coordinates) in place of the single crown, or clear it. */
+  setBridge(mesh: { positions: Float32Array; indices: Uint32Array | null } | null): void {
+    StudioViewport.clear(this.groups.bridge)
+    this.groups.crown.visible = !mesh
+    if (!mesh) return
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.BufferAttribute(mesh.positions.slice(), 3))
+    if (mesh.indices) g.setIndex(new THREE.BufferAttribute(mesh.indices, 1))
+    g.computeVertexNormals()
+    this.groups.bridge.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: CROWN_COLOR, roughness: 0.42, metalness: 0.02 })))
   }
 
   /** Colour the crown by a distance map (or plain). */

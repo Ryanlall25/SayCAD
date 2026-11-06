@@ -33,7 +33,15 @@ describe('three-unit bridge (synthetic: two molar preps, a pontic between)', () 
     for (const k of Object.keys(m.attributes)) if (k !== 'position') m.deleteAttribute(k)
     return m
   }
-  const prep = mergeGeometries([strip(c.prep), strip(moved(c.prep))])!
+  // #37 is missing: each copy's teeth over the gap are levelled to a bare
+  // ridge (the first copy distal of its prep, the second mesial of its prep).
+  const along = (x: number, y: number, z: number): number => -((x - c.tapPoint[0]) * c.mesial[0] + (y - c.tapPoint[1]) * c.mesial[1] + (z - c.tapPoint[2]) * c.mesial[2])
+  const level = (g: THREE.BufferGeometry, keep: (s: number) => boolean): THREE.BufferGeometry => {
+    const a = g.getAttribute('position')
+    for (let k = 0; k < a.count; k++) if (!keep(along(a.getX(k), a.getY(k), a.getZ(k)))) a.setY(k, Math.min(a.getY(k), 0))
+    return g
+  }
+  const prep = mergeGeometries([level(strip(c.prep), (s) => s < 6), level(strip(moved(c.prep)), (s) => s > 13)])!
   const antagonist = mergeGeometries([strip(c.antagonist), strip(moved(c.antagonist))])!
 
   it('finds one path of insertion that both preps share', () => {
@@ -74,5 +82,22 @@ describe('three-unit bridge (synthetic: two molar preps, a pontic between)', () 
       return v + Math.abs(vol)
     }, 0)
     expect(r.volumeMm3).toBeGreaterThan(crowns + 50)
+  }, 600_000)
+
+  it('designs with textbook anatomy when the lab has no crowns for the class', async () => {
+    const r = await designBridge({
+      prep,
+      antagonist,
+      units: [
+        { fdi: 36, role: 'abutment', margin: c.margin },
+        { fdi: 37, role: 'pontic' },
+        { fdi: 38, role: 'abutment', margin: c.margin.map(shift) }
+      ],
+      donors: {}
+    })
+    expect(r.manifoldOk).toBe(true)
+    expect(r.genus).toBe(0)
+    expect(r.notes.join(' ')).toMatch(/textbook anatomy/)
+    expect(r.connectors).toHaveLength(2)
   }, 600_000)
 })

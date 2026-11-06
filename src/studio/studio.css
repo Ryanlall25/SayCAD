@@ -438,3 +438,4 @@
 .st-legend span { display: inline-flex; align-items: center; gap: 5px; }
 .st-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .st-legend-unit { opacity: 0.6; }
+.st-bridge-report p { margin: 6px 2px; font-size: 13px; line-height: 1.35; }
