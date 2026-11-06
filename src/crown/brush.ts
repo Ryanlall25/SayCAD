@@ -8,7 +8,7 @@
  * above it are eased in so a dab near the margin can't open a ledge there.
  */
 
-export type BrushMode = 'add' | 'remove' | 'smooth' | 'flatten'
+export type BrushMode = 'add' | 'remove' | 'smooth' | 'flatten' | 'grab'
 
 export interface BrushDab {
   mode: BrushMode
@@ -69,6 +69,8 @@ export function gridNormals(pos: ArrayLike<number>, nu: number, nv: number): Flo
  * vertices change). Returns how many vertices moved and the largest move, mm.
  */
 export function applyDab(pos: Float32Array, nu: number, nv: number, dab: BrushDab): { moved: number; maxMoveMm: number } {
+  // Grab is a drag, not a dab: see applyGrab.
+  if (dab.mode === 'grab') return { moved: 0, maxMoveMm: 0 }
   const { center: c, radiusMm: r } = dab
   const normals = gridNormals(pos, nu, nv)
   const w = new Float32Array(nu * nv)
@@ -147,4 +149,27 @@ export function applyDab(pos: Float32Array, nu: number, nv: number, dab: BrushDa
     maxMove = Math.max(maxMove, l)
   }
   return { moved, maxMoveMm: maxMove }
+}
+
+/**
+ * Grab (exocad's free-form "move"): the surface within `radiusMm` of the
+ * anchor follows a translation, weighted by the falloff measured on the
+ * surface as it was when the grab started. `from` is that original surface;
+ * `pos` gets from + t·w. The margin row stays put and the rows above it ease in.
+ */
+export function applyGrab(from: Float32Array, pos: Float32Array, nu: number, nv: number, anchor: [number, number, number], t: [number, number, number], radiusMm: number): { moved: number } {
+  let moved = 0
+  for (let j = 0; j < nv; j++) {
+    const ease = j === 0 ? 0 : j >= MARGIN_EASE_ROWS ? 1 : j / MARGIN_EASE_ROWS
+    for (let i = 0; i < nu; i++) {
+      const k = j * nu + i
+      const d = Math.hypot(from[3 * k] - anchor[0], from[3 * k + 1] - anchor[1], from[3 * k + 2] - anchor[2])
+      const w = falloff(d, radiusMm) * ease
+      pos[3 * k] = from[3 * k] + t[0] * w
+      pos[3 * k + 1] = from[3 * k + 1] + t[1] * w
+      pos[3 * k + 2] = from[3 * k + 2] + t[2] * w
+      if (w > 0) moved++
+    }
+  }
+  return { moved }
 }

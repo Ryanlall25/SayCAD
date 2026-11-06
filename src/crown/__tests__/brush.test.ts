@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyDab, falloff } from '../brush'
+import { applyDab, applyGrab, falloff } from '../brush'
 import { toLocal, type Vec3 } from '../geom'
 import { autoDesign, prepareCase } from '../pipeline'
 import { syntheticMolarCase } from '../synthetic'
@@ -119,5 +119,22 @@ describe('distance maps', () => {
     const before = Math.min(...Array.from(base.maps.occlusalGap).filter(Number.isFinite))
     const after = Math.min(...Array.from(r.maps.occlusalGap).filter(Number.isFinite))
     expect(after).toBeLessThan(before)
+  })
+})
+
+describe('grab', () => {
+  it('moves the grabbed point by the drag and leaves the margin and far surface in place', () => {
+    const from = positions()
+    const p = from.slice()
+    const k = topVertex(from)
+    const t: [number, number, number] = [0.3 * base.frame.occlusal[0], 0.3 * base.frame.occlusal[1], 0.3 * base.frame.occlusal[2]]
+    applyGrab(from, p, nu, nv, at(from, k), t, 2)
+    const moved = Math.hypot(p[3 * k] - from[3 * k], p[3 * k + 1] - from[3 * k + 1], p[3 * k + 2] - from[3 * k + 2])
+    expect(moved).toBeCloseTo(0.3, 3)
+    for (let q = 0; q < nu * 3; q++) expect(p[q]).toBe(from[q])
+    const r = reshape(p, false)
+    expect(r.watertight.watertight).toBe(true)
+    // Raised 0.3 mm into the bite: the occlusion check sees it.
+    expect(Math.min(...Array.from(r.maps.occlusalGap).filter(Number.isFinite))).toBeLessThan(Math.min(...Array.from(base.maps.occlusalGap).filter(Number.isFinite)))
   })
 })

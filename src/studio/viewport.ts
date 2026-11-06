@@ -3,7 +3,7 @@ import { addHeadlightRig, createViewerRig, eventNDC, fitDistanceFor, type Viewer
 import { NEUTRAL_COLOR } from '../core/scanLoad'
 import type { ToothFrame, Vec3 } from '../crown/geom'
 import type { DesignData } from '../crown/protocol'
-import { applyDab, type BrushMode } from '../crown/brush'
+import { applyDab, applyGrab, type BrushMode } from '../crown/brush'
 import type { CrownLayer, CrownView } from '../speak/crownParser'
 
 /**
@@ -87,7 +87,10 @@ export class StudioViewport {
   private tapHandler: ((p: Pick | null) => void) | null = null
   private downAt: { x: number; y: number; t: number } | null = null
   private brush: { settings: BrushSettings; onStroke: (outer: Float32Array, pole: Vec3) => void } | null = null
-  private stroke: { last: THREE.Vector3; dabs: number } | null = null
+  private stroke: { last: THREE.Vector3; dabs: number; grab?: { from: Float32Array; anchor: THREE.Vector3; plane: THREE.Plane } } | null = null
+  private marginDrag: ((original: Vec3[], to: Vec3) => void) | null = null
+  private marginPts: { points: Vec3[]; confidence?: number[] } | null = null
+  private mDrag: { index: number; original: Vec3[]; to: Vec3 | null } | null = null
   /** Strokes finished (for browser tests). */
   strokesDone = 0
 
@@ -153,6 +156,15 @@ export class StudioViewport {
     loop()
   }
 
+  /** Where margin point `i` is drawn, in client pixels (browser tests). */
+  marginScreenPoint(i: number): { x: number; y: number } | null {
+    const p = this.marginPts?.points[i]
+    if (!p) return null
+    const v = new THREE.Vector3(...p).project(this.camera)
+    const r = this.renderer.domElement.getBoundingClientRect()
+    return { x: r.left + ((v.x + 1) / 2) * r.width, y: r.top + ((1 - v.y) / 2) * r.height }
+  }
+
   /** Where the crown's centre is drawn, in client pixels (browser tests). */
   crownScreenPoint(): { x: number; y: number } | null {
     if (!this.crownMesh) return null
@@ -200,7 +212,56 @@ export class StudioViewport {
     g.computeBoundsTree?.()
   }
 
+  /** Margin drag on (handler gets the line before the drag and where it was dropped) or off (null). */
+  setMarginDrag(onDrop: ((original: Vec3[], to: Vec3) => void) | null): void {
+    this.marginDrag = onDrop
+    if (!onDrop) this.mDrag = null
+  }
+
+  /** The margin point drawn nearest the pointer, within `px` screen pixels. */
+  private nearestMarginPoint(cx: number, cy: number, px = 18): number {
+    const pts = this.marginPts?.points
+    if (!pts) return -1
+    const r = this.renderer.domElement.getBoundingClientRect()
+    let best = -1
+    let bd = px
+    const v = new THREE.Vector3()
+    pts.forEach((p, i) => {
+      v.set(...p).project(this.camera)
+      if (v.z > 1) return
+      const d = Math.hypot(r.left + ((v.x + 1) / 2) * r.width - cx, r.top + ((1 - v.y) / 2) * r.height - cy)
+      if (d < bd) {
+        bd = d
+        best = i
+      }
+    })
+    return best
+  }
+
+  /** The margin edit's own blend (margin.ts editMargin), previewed without the snap to the scan. */
+  private static blendMargin(points: Vec3[], index: number, to: Vec3, radius = 6): Vec3[] {
+    const K = points.length
+    const delta = [to[0] - points[index][0], to[1] - points[index][1], to[2] - points[index][2]]
+    return points.map((p, i) => {
+      let k = Math.abs(i - index)
+      k = Math.min(k, K - k)
+      const w = Math.exp(-(k * k) / (2 * (radius / 2) ** 2))
+      return [p[0] + delta[0] * w, p[1] + delta[1] * w, p[2] + delta[2] * w] as Vec3
+    })
+  }
+
   private onBrushDown = (e: PointerEvent): void => {
+    if (this.marginDrag && !this.brush && e.isPrimary && e.button <= 0) {
+      const i = this.nearestMarginPoint(e.clientX, e.clientY)
+      if (i >= 0 && this.marginPts) {
+        e.stopImmediatePropagation()
+        e.preventDefault()
+        this.rig.setEnabled(false)
+        ;(e.target as Element).setPointerCapture?.(e.pointerId)
+        this.mDrag = { index: i, original: this.marginPts.points.map((p) => [...p] as Vec3), to: null }
+        return
+      }
+    }
     if (!this.brush || !e.isPrimary || e.button > 0) return
     const hit = this.crownHit(e.clientX, e.clientY)
     if (!hit) return
@@ -209,12 +270,46 @@ export class StudioViewport {
     this.rig.setEnabled(false)
     ;(e.target as Element).setPointerCapture?.(e.pointerId)
     this.stroke = { last: hit.point.clone(), dabs: 0 }
-    this.dab(hit.point)
-    this.stroke.dabs++
+    if (this.brush.settings.mode === 'grab' && this.crownMesh) {
+      // Drag in the plane through the grabbed point, facing the camera.
+      const pos = (this.crownMesh.geometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array
+      const facing = this.camera.getWorldDirection(new THREE.Vector3()).negate()
+      this.stroke.grab = { from: pos.slice(), anchor: hit.point.clone(), plane: new THREE.Plane().setFromNormalAndCoplanarPoint(facing, hit.point) }
+    } else {
+      this.dab(hit.point)
+      this.stroke.dabs++
+    }
     this.showBrush(hit.point)
   }
 
+  private grabTo(cx: number, cy: number): void {
+    const g = this.stroke?.grab
+    if (!g || !this.brush || !this.crownMesh || !this.design) return
+    this.raycaster.setFromCamera(eventNDC(this.renderer.domElement, cx, cy), this.camera)
+    const q = this.raycaster.ray.intersectPlane(g.plane, new THREE.Vector3())
+    if (!q) return
+    const t = q.clone().sub(g.anchor)
+    const geom = this.crownMesh.geometry
+    const pos = geom.getAttribute('position') as THREE.BufferAttribute
+    applyGrab(g.from, pos.array as Float32Array, this.design.nu, this.design.nv, [g.anchor.x, g.anchor.y, g.anchor.z], [t.x, t.y, t.z], this.brush.settings.radiusMm)
+    pos.needsUpdate = true
+    geom.computeVertexNormals()
+    geom.computeBoundingSphere()
+    this.stroke!.dabs++
+    this.showBrush(q)
+  }
+
   private onBrushMove = (e: PointerEvent): void => {
+    if (this.mDrag) {
+      e.stopImmediatePropagation()
+      if (!this.scanMesh) return
+      this.raycaster.setFromCamera(eventNDC(this.renderer.domElement, e.clientX, e.clientY), this.camera)
+      const hit = this.raycaster.intersectObject(this.scanMesh, false)[0]
+      if (!hit) return
+      this.mDrag.to = [hit.point.x, hit.point.y, hit.point.z]
+      this.setMargin(StudioViewport.blendMargin(this.mDrag.original, this.mDrag.index, this.mDrag.to), this.marginPts?.confidence)
+      return
+    }
     if (!this.brush) return
     const hit = this.crownHit(e.clientX, e.clientY)
     if (!this.stroke) {
@@ -223,6 +318,10 @@ export class StudioViewport {
       return
     }
     e.stopImmediatePropagation()
+    if (this.stroke.grab) {
+      this.grabTo(e.clientX, e.clientY)
+      return
+    }
     if (!hit) return
     // Dabs spaced at a quarter of the radius along the drag.
     if (hit.point.distanceTo(this.stroke.last) < this.brush.settings.radiusMm * 0.25) return
@@ -233,6 +332,16 @@ export class StudioViewport {
   }
 
   private onBrushUp = (e: PointerEvent): void => {
+    if (this.mDrag) {
+      e.stopImmediatePropagation()
+      const d = this.mDrag
+      this.mDrag = null
+      this.downAt = null
+      this.rig.setEnabled(true)
+      if (d.to && this.marginDrag) this.marginDrag(d.original, d.to)
+      else if (this.marginPts) this.setMargin(this.marginPts.points, this.marginPts.confidence)
+      return
+    }
     if (!this.brush || !this.stroke) return
     e.stopImmediatePropagation()
     this.stroke = null
@@ -447,6 +556,7 @@ export class StudioViewport {
   }
 
   setMargin(points: Vec3[] | null, confidence?: number[]): void {
+    if (!this.mDrag) this.marginPts = points ? { points, confidence } : null
     StudioViewport.clear(this.groups.margin)
     if (!points || points.length < 3) return
     const curve = new THREE.CatmullRomCurve3(points.map((p) => new THREE.Vector3(...p)), true)
