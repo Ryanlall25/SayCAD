@@ -180,6 +180,22 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
   }
   let best: Cand | null = null
   for (const c of cands) if (!best || (c.passes && !best.passes) || (c.passes === best.passes && c.score < best.score)) best = c
+  // Experiment (DONOR_BLEND=k): average the k best passing designs, all on one
+  // margin and bite, then rebuild and re-check the blended surface.
+  const blendK = Number((globalThis as any).process?.env?.DONOR_BLEND ?? 0)
+  if (best && best.passes && blendK > 1 && best.result.rebuild) {
+    const top = pool.slice().sort((a, b) => a.score - b.score).slice(0, blendK)
+    if (top.length > 1 && top.every((c) => c.final.pts.length === best!.final.pts.length)) {
+      const pts = new Float64Array(best.final.pts.length)
+      const pole: Vec3 = [0, 0, 0]
+      for (const c of top) {
+        for (let k = 0; k < pts.length; k++) pts[k] += c.final.pts[k] / top.length
+        for (let a = 0; a < 3; a++) pole[a] += c.final.pole[a] / top.length
+      }
+      const r = best.result.rebuild({ pts, pole }, { keepMinThickness: true })
+      if (!r.report.results.some((x) => x.verdict === 'fail')) best = { ...best, result: r, donor: top.map((c) => c.donor).join('+') }
+    }
+  }
   // The caller's stage hook sees the chosen design only.
   if (best && req.onStage) for (const [s, g] of best.stages) req.onStage(s, g)
   return best
