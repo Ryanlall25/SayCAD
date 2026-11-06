@@ -114,7 +114,7 @@ function run(job: CrownJob, base: Pick<CrownOutcome, 'contract' | 'jobId' | 'cas
     const pick = donors && donors.cls === cls ? designFromDonors(pc, req, donors) : null
     if (pick) {
       r = pick.result
-      anatomyUsed = `lab crown ${pick.donor} — least reshaping (${pick.reshapingMm.toFixed(2)} mm) of ${pick.tried}`
+      anatomyUsed = `lab crown ${pick.blend ? `blend of ${pick.blend.join(', ')}` : pick.donor} — least reshaping (${pick.reshapingMm.toFixed(2)} mm) of ${pick.tried}`
     } else r = autoDesign(pc, { ...req, template })
   } catch (e) {
     return { ...base, status: 'needs-input', tooth, intake, prepFoundBy, needs: [{ kind: 'margin', message: e instanceof Error ? e.message : String(e) }] }

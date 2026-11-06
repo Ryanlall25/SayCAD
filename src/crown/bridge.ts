@@ -135,6 +135,9 @@ const AUTO_ABUTMENT_SCORE = 0.45
 const AUTO_MAX_MISSING = 0.25
 const EMBRASURE_MM = 1.5
 const CONNECTOR_HALF_LENGTH_MM = 2.6
+// Abutments from one donor: blending the best few (as single crowns do) took
+// lab bridges further from the technician's (case018 0.27 → 0.33 mm, case086 0.42 → 0.44).
+const BRIDGE_DONOR_OPTS = { blend: 1 }
 
 const rowOf = (g: CrownGrid, j: number): Vec3[] => Array.from({ length: g.nu }, (_, i) => [g.pts[(j * g.nu + i) * 3], g.pts[(j * g.nu + i) * 3 + 1], g.pts[(j * g.nu + i) * 3 + 2]] as Vec3)
 
@@ -263,7 +266,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   // 2. Abutment crowns along it.
   const abutments = abut.map((a, k) => {
     const set = donorsFor(req, toothClassOf(uni(a.fdi)), notes)
-    const c = designFromDonors(pcs[k], { margin: margins[k], insertionAxis: ax.axis, params: { occlusalClearanceMm: clearance } }, set)
+    const c = designFromDonors(pcs[k], { margin: margins[k], insertionAxis: ax.axis, params: { occlusalClearanceMm: clearance } }, set, BRIDGE_DONOR_OPTS)
     if (!c) throw new Error(`#${a.fdi}: abutment design failed`)
     return { fdi: a.fdi, result: c.result, donor: c.donor }
   })
@@ -328,7 +331,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
       const usual = hs[Math.floor(hs.length / 2)]
       const delta = usual - topOverMargin(ab.result, margins[ai].points)
       if (Math.abs(delta) < 0.3) continue
-      const c = designFromDonors(pcs[ai], { margin: margins[ai], insertionAxis: ax.axis, params: { occlusalClearanceMm: clearance, heightOffsetMm: delta } }, set)
+      const c = designFromDonors(pcs[ai], { margin: margins[ai], insertionAxis: ax.axis, params: { occlusalClearanceMm: clearance, heightOffsetMm: delta } }, set, BRIDGE_DONOR_OPTS)
       if (!c) continue
       const redone = { fdi: ab.fdi, result: c.result, donor: c.donor }
       abutments[ai] = redone

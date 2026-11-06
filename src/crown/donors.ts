@@ -104,13 +104,15 @@ export interface DonorChoice {
   donor: string
   reshapingMm: number
   tried: number
+  /** When the design is an average of the best few: their donor ids, the chosen one first. */
+  blend?: string[]
 }
 
 /**
  * Designs from each donor (on one fixed margin) and keeps the least-reshaped
  * design that passes every check, or the least-reshaped overall.
  */
-export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: DonorSet, opts: { maxDonors?: number; exclude?: string } = {}): DonorChoice | null {
+export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: DonorSet, opts: { maxDonors?: number; exclude?: string; blend?: number } = {}): DonorChoice | null {
   const all = set.donors.filter((d) => d.id !== opts.exclude)
   // Same position in the arch first: a class spans teeth of different form
   // (lower first molars have five cusps, second molars four).
@@ -180,9 +182,14 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
   }
   let best: Cand | null = null
   for (const c of cands) if (!best || (c.passes && !best.passes) || (c.passes === best.passes && c.score < best.score)) best = c
-  // Experiment (DONOR_BLEND=k): average the k best passing designs, all on one
-  // margin and bite, then rebuild and re-check the blended surface.
-  const blendK = Number((globalThis as any).process?.env?.DONOR_BLEND ?? 0)
+  // Blend: average the 3 best passing designs, all on one margin and bite, then
+  // rebuild and re-check the blended surface (kept only if nothing fails).
+  // Leave-one-out mean deviation, auto / on the technician's margin (mm):
+  // lower molars 0.164/0.168 → 0.160/0.162 (4 designs: 0.159/0.163), upper
+  // molars 0.207/0.208 → 0.197/0.203, lower premolars 0.156/0.165 →
+  // 0.147/0.154, upper premolars 0.149/0.175 → 0.147/0.165; no new fails;
+  // cusp relief within 0.21 mm of the technicians' (lower molars 1.59 vs 1.78).
+  const blendK = opts.blend ?? Number((globalThis as any).process?.env?.DONOR_BLEND ?? 3)
   if (best && best.passes && blendK > 1 && best.result.rebuild) {
     const top = pool.slice().sort((a, b) => a.score - b.score).slice(0, blendK)
     if (top.length > 1 && top.every((c) => c.final.pts.length === best!.final.pts.length)) {
@@ -193,7 +200,7 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
         for (let a = 0; a < 3; a++) pole[a] += c.final.pole[a] / top.length
       }
       const r = best.result.rebuild({ pts, pole }, { keepMinThickness: true })
-      if (!r.report.results.some((x) => x.verdict === 'fail')) best = { ...best, result: r, donor: top.map((c) => c.donor).join('+') }
+      if (!r.report.results.some((x) => x.verdict === 'fail')) best = { ...best, result: r, blend: [best.donor, ...top.map((c) => c.donor).filter((id) => id !== best!.donor)] }
     }
   }
   // The caller's stage hook sees the chosen design only.
