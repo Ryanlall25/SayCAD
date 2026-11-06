@@ -116,7 +116,7 @@ export function designFromDonors(pc: PreparedCase, req: DesignRequest, set: Dono
   // (lower first molars have five cusps, second molars four).
   const pos = toothSide(pc.toothNumber).pos
   const same = all.filter((d) => d.tooth !== undefined && toothSide(d.tooth).pos === pos)
-  const donors = (same.length >= 3 ? same : all).slice(0, opts.maxDonors ?? 24)
+  const donors = (same.length >= 3 ? same : all).slice(0, opts.maxDonors ?? Number((globalThis as any).process?.env?.DONOR_MAX ?? 24))
   // The set's usual cusp relief: least reshaping alone favoured flat donors
   // (tall cusps need carving to the bite), and the chosen upper molars came
   // out 20 % flatter than the technicians' (1.27 vs 1.58 mm); with each
