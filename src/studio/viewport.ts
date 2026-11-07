@@ -60,6 +60,9 @@ function thicknessColor(t: number, min: number, out: THREE.Color): THREE.Color {
   return out.setHex(0x3f7fbf)
 }
 
+/** solid: opaque; ghost: see-through; hidden: not drawn. */
+export type ScanLook = 'solid' | 'ghost' | 'hidden'
+
 export class StudioViewport {
   readonly renderer: THREE.WebGLRenderer
   readonly camera: THREE.PerspectiveCamera
@@ -73,8 +76,11 @@ export class StudioViewport {
     margin: new THREE.Group(),
     frame: new THREE.Group(),
     marker: new THREE.Group(),
-    bridge: new THREE.Group()
+    bridge: new THREE.Group(),
+    orient: new THREE.Group()
   }
+  /** How the prep jaw (with the neighbours) and the opposing jaw are drawn. */
+  private looks: Record<'scan' | 'antagonist', ScanLook> = { scan: 'solid', antagonist: 'ghost' }
   private crownMesh: THREE.Mesh | null = null
   private scanMesh: THREE.Mesh | null = null
   private antMesh: THREE.Mesh | null = null
@@ -493,6 +499,36 @@ export class StudioViewport {
     const coloured = !!g.getAttribute('color')
     this.scanMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: coloured ? 0xffffff : NEUTRAL_COLOR, vertexColors: coloured, roughness: coloured ? 0.55 : 0.68, metalness: 0.04, side: THREE.DoubleSide }))
     this.groups.scan.add(this.scanMesh)
+    this.applyLook('scan')
+  }
+
+  /**
+   * Draw a jaw solid, see-through (the crown's contacts and margin stay
+   * visible through the neighbours) or not at all. See-through stays
+   * pickable, so taps on the prep still work.
+   */
+  setLook(layer: 'scan' | 'antagonist', look: ScanLook): void {
+    this.looks[layer] = look
+    this.applyLook(layer)
+  }
+
+  look(layer: 'scan' | 'antagonist'): ScanLook {
+    return this.looks[layer]
+  }
+
+  private applyLook(layer: 'scan' | 'antagonist'): void {
+    const look = this.looks[layer]
+    this.groups[layer].visible = look !== 'hidden'
+    const mesh = layer === 'scan' ? this.scanMesh : this.antMesh
+    const mat = mesh?.material as THREE.MeshStandardMaterial | undefined
+    if (!mat) return
+    const ghost = look === 'ghost'
+    mat.transparent = ghost
+    mat.opacity = ghost ? (layer === 'scan' ? 0.38 : 0.45) : 1
+    mat.depthWrite = !ghost
+    mat.needsUpdate = true
+    // Drawn after the crown, so the crown shows through it.
+    mesh!.renderOrder = ghost ? 2 : 0
   }
 
   setAntagonist(g: THREE.BufferGeometry | null): void {
@@ -507,6 +543,7 @@ export class StudioViewport {
         : new THREE.MeshStandardMaterial({ color: 0xc8c8c8, metalness: 0.45, roughness: 0.35, side: THREE.DoubleSide, transparent: true, opacity: 0.45, depthWrite: false })
     )
     this.groups.antagonist.add(this.antMesh)
+    this.applyLook('antagonist')
   }
 
   setCrown(d: DesignData | null, minAxial = 0.5, minOcclusal = 0.7): void {
@@ -615,6 +652,43 @@ export class StudioViewport {
     }
     arrow(f.buccal, 0xe8b13a, 'B')
     arrow(f.mesial, 0x6cc3a5, 'M')
+    this.placeOrientLabels()
+  }
+
+  /**
+   * Buccal / lingual / mesial / distal labels around the tooth at its
+   * height of contour, so the sides read at any angle (exocad shows only
+   * buccal and lingual).
+   */
+  private placeOrientLabels(): void {
+    StudioViewport.clear(this.groups.orient)
+    const f = this.frame
+    if (!f) return
+    const o = new THREE.Vector3(...f.origin).addScaledVector(new THREE.Vector3(...f.occlusal), 3)
+    const r = 8
+    const neg = (v: Vec3): Vec3 => [-v[0], -v[1], -v[2]]
+    for (const [dir, text, color] of [[f.buccal, 'Buccal', 0xe8b13a], [neg(f.buccal), 'Lingual', 0x7fb2e5], [f.mesial, 'Mesial', 0x6cc3a5], [neg(f.mesial), 'Distal', 0xc39be0]] as Array<[Vec3, string, number]>) {
+      const sprite = makeTag(text, color)
+      sprite.position.copy(o).addScaledVector(new THREE.Vector3(...dir), r)
+      sprite.name = text
+      this.groups.orient.add(sprite)
+    }
+  }
+
+  /** Side labels on or off. */
+  setOrientLabels(on: boolean): void {
+    this.groups.orient.visible = on
+  }
+
+  get orientLabelsOn(): boolean {
+    return this.groups.orient.visible
+  }
+
+  /** Where each side label is drawn, in client pixels (browser tests). */
+  orientLabelScreen(): Record<string, { x: number; y: number }> {
+    const out: Record<string, { x: number; y: number }> = {}
+    for (const c of this.groups.orient.children) out[c.name] = this.worldToScreen([c.position.x, c.position.y, c.position.z])
+    return out
   }
 
   /** Orientation arrows (B/M) — useful while checking margin and axis only. */
@@ -640,7 +714,14 @@ export class StudioViewport {
       return on
     }
     const g = this.groups[layer === 'scan' ? 'scan' : layer]
-    g.visible = visible === 'toggle' ? !g.visible : visible
+    const on = visible === 'toggle' ? !g.visible : visible
+    if (layer === 'scan' || layer === 'antagonist') {
+      // Showing again restores the see-through/solid look it had.
+      if (!on) this.setLook(layer, 'hidden')
+      else if (this.looks[layer] === 'hidden') this.setLook(layer, layer === 'antagonist' ? 'ghost' : 'solid')
+      return this.groups[layer].visible
+    }
+    g.visible = on
     if (layer === 'margin') this.groups.frame.visible = g.visible
     return g.visible
   }
@@ -810,6 +891,27 @@ export class StudioViewport {
     this.renderer.dispose()
     this.mount.removeChild(this.renderer.domElement)
   }
+}
+
+/** A rounded word tag (side labels): readable at any zoom, drawn over the scans. */
+function makeTag(text: string, color: number): THREE.Sprite {
+  const c = document.createElement('canvas')
+  c.width = 192
+  c.height = 64
+  const ctx = c.getContext('2d')!
+  ctx.fillStyle = 'rgba(13, 31, 27, 0.72)'
+  ctx.beginPath()
+  ctx.roundRect(4, 8, 184, 48, 24)
+  ctx.fill()
+  ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`
+  ctx.font = '600 30px system-ui, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, 96, 33)
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }))
+  s.scale.set(4.2, 1.4, 1)
+  s.renderOrder = 20
+  return s
 }
 
 function makeLabel(text: string, color: number): THREE.Sprite {

@@ -454,3 +454,7 @@
 .st-conn-gum { stroke: #d8708a; stroke-width: 2; }
 .st-conn-bite { stroke: var(--label-2); stroke-width: 2; stroke-dasharray: 5 3; }
 .st-conn-t { font-size: 10px; fill: var(--label-2); }
+/* jaw looks (solid / see-through / hidden) on the view bar */
+.st-viewbar .st-look { position: relative; }
+.st-viewbar .st-look-ghost { opacity: 0.75; text-decoration: none; outline: 1.5px dashed currentColor; outline-offset: -6px; }
+.st-viewbar .st-look-hidden { opacity: 0.4; text-decoration: line-through; }

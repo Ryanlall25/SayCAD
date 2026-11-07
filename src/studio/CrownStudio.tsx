@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type Anthropic from '@anthropic-ai/sdk'
-import { CONTACT_BANDS, OCCLUSION_BANDS, StudioViewport, type BrushSettings, type CrownMap, type Pick } from './viewport'
+import { CONTACT_BANDS, OCCLUSION_BANDS, StudioViewport, type BrushSettings, type CrownMap, type Pick, type ScanLook } from './viewport'
 import type { BrushMode } from '../crown/brush'
 import { applyOffsets, editOffsets, maxOffset } from '../crown/manualEdits'
 import { CrownEngine } from '../crown/engineClient'
@@ -54,6 +54,8 @@ import { embedHost, toHost } from '../module/embed'
 import { fdiToUniversal, universalToFdi } from '../crown/library'
 import type { BridgeData } from '../crown/protocol'
 import { ConnectorSectionView } from './ConnectorSection'
+
+const LOOK_WORD: Record<ScanLook, string> = { solid: 'solid', ghost: 'see-through', hidden: 'hidden' }
 import './studio.css'
 
 /**
@@ -203,6 +205,8 @@ export default function CrownStudio(): React.JSX.Element {
   const [abutment2, setAbutment2] = useState<MarginResult | null>(null)
   const [connectorMm2, setConnectorMm2] = useState(12)
   const [bridge, setBridge] = useState<BridgeData | null>(null)
+  const [looks, setLooks] = useState<Record<'scan' | 'antagonist', ScanLook>>({ scan: 'solid', antagonist: 'ghost' })
+  const [sides, setSides] = useState(true)
   const [bridgeNote, setBridgeNote] = useState('')
   /** Outer surfaces before each stroke (undo), starting from the design as it was when brushing began. */
   const strokes = useRef<Array<{ outer: Float32Array; pole: [number, number, number] }>>([])
@@ -1594,7 +1598,12 @@ export default function CrownStudio(): React.JSX.Element {
               </button>
             ))}
             <span className="st-viewbar-sep" />
-            <button onClick={() => setLayerState('antagonist')} title="Show or hide the opposing jaw" aria-label="Opposing jaw">◐</button>
+            {(['scan', 'antagonist'] as const).map((layer) => (
+              <button key={layer} className={`st-look st-look-${looks[layer]}`} onClick={() => cycleLook(layer)} title={`${layer === 'scan' ? 'Prep jaw and neighbours' : 'Opposing jaw'}: ${LOOK_WORD[looks[layer]]} — tap to change`} aria-label={`${layer === 'scan' ? 'Prep jaw' : 'Opposing jaw'}: ${LOOK_WORD[looks[layer]]}`}>
+                {layer === 'scan' ? 'J' : 'O'}
+              </button>
+            ))}
+            <button className={sides ? 'on' : ''} onClick={() => { const on = !sides; setSides(on); viewRef.current?.setOrientLabels(on); haptic() }} title="Buccal / lingual / mesial / distal labels" aria-label={`Side labels ${sides ? 'on' : 'off'}`} aria-pressed={sides}>⊕</button>
             <button onClick={() => setLayerState('heatmap')} title="Thickness map" aria-label="Thickness map">▤</button>
           </div>
         )}
@@ -2099,6 +2108,15 @@ export default function CrownStudio(): React.JSX.Element {
       <input ref={rxRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void onRxPhoto(e.target.files?.[0]); e.target.value = '' }} />
     </div>
   )
+
+  function cycleLook(layer: 'scan' | 'antagonist'): void {
+    const next: Record<ScanLook, ScanLook> = { solid: 'ghost', ghost: 'hidden', hidden: 'solid' }
+    const look = next[looks[layer]]
+    viewRef.current?.setLook(layer, look)
+    setLooks((l) => ({ ...l, [layer]: look }))
+    setStatus(`${layer === 'scan' ? 'Prep jaw' : 'Opposing jaw'}: ${LOOK_WORD[look]}.`)
+    haptic()
+  }
 
   function setLayerState(layer: 'antagonist' | 'heatmap'): void {
     viewRef.current?.setLayer(layer, 'toggle')
