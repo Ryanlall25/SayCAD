@@ -458,3 +458,21 @@
 .st-viewbar .st-look { position: relative; }
 .st-viewbar .st-look-ghost { opacity: 0.75; text-decoration: none; outline: 1.5px dashed currentColor; outline-offset: -6px; }
 .st-viewbar .st-look-hidden { opacity: 0.4; text-decoration: line-through; }
+/* sectional view */
+.st-section-fig { margin: 8px 0 2px; background: var(--fill); border-radius: 12px; padding: 6px; }
+.st-section-fig svg { display: block; max-width: 340px; margin: 0 auto; }
+.st-section-fig figcaption { display: flex; flex-direction: column; gap: 3px; font-size: 12px; margin-top: 4px; }
+.st-section-fig figcaption .bad { color: var(--red); font-weight: 600; }
+.st-sec-outer { stroke: #d8344a; stroke-width: 2; fill: none; }
+.st-sec-intaglio { stroke: #e8b13a; stroke-width: 1.5; fill: none; stroke-dasharray: 4 2; }
+.st-sec-prep { stroke: #3fb59b; stroke-width: 1.5; fill: none; }
+.st-sec-ant { stroke: #8fa3b8; stroke-width: 1.5; fill: none; }
+.st-sec-mark { fill: none; stroke: var(--label); stroke-width: 2; }
+.st-sec-mark.bad { stroke: var(--red); }
+.st-sec-mark.bite { stroke: #3f7fbf; stroke-dasharray: 2 2; }
+.st-sec-scale { stroke: var(--label-2); stroke-width: 2; }
+.st-sec-t { font-size: 10px; fill: var(--label-2); }
+.st-sec-key { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin: 0 4px 0 2px; border-radius: 2px; }
+.st-sec-key.outer { background: #d8344a; } .st-sec-key.bite { background: #3f7fbf; } .st-sec-key.prep { background: #3fb59b; }
+.st-sec-key.intaglio { background: #e8b13a; } .st-sec-key.ant { background: #8fa3b8; }
+.st-sec-legend { color: var(--label-2); }

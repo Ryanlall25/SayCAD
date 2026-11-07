@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type Anthropic from '@anthropic-ai/sdk'
-import { CONTACT_BANDS, OCCLUSION_BANDS, StudioViewport, type BrushSettings, type CrownMap, type Pick, type ScanLook } from './viewport'
+import { CONTACT_BANDS, OCCLUSION_BANDS, StudioViewport, type BrushSettings, type CrownMap, type Pick, type ScanLook, type SectionSpec, type SectionView } from './viewport'
 import type { BrushMode } from '../crown/brush'
 import { applyOffsets, editOffsets, maxOffset } from '../crown/manualEdits'
 import { CrownEngine } from '../crown/engineClient'
@@ -54,6 +54,7 @@ import { embedHost, toHost } from '../module/embed'
 import { fdiToUniversal, universalToFdi } from '../crown/library'
 import type { BridgeData } from '../crown/protocol'
 import { ConnectorSectionView } from './ConnectorSection'
+import { SectionPanel } from './SectionPanel'
 
 const LOOK_WORD: Record<ScanLook, string> = { solid: 'solid', ghost: 'see-through', hidden: 'hidden' }
 import './studio.css'
@@ -207,6 +208,8 @@ export default function CrownStudio(): React.JSX.Element {
   const [bridge, setBridge] = useState<BridgeData | null>(null)
   const [looks, setLooks] = useState<Record<'scan' | 'antagonist', ScanLook>>({ scan: 'solid', antagonist: 'ghost' })
   const [sides, setSides] = useState(true)
+  const [sectionSpec, setSectionSpec] = useState<SectionSpec | null>(null)
+  const [sectionView, setSectionView] = useState<SectionView | null>(null)
   const [bridgeNote, setBridgeNote] = useState('')
   /** Outer surfaces before each stroke (undo), starting from the design as it was when brushing began. */
   const strokes = useRef<Array<{ outer: Float32Array; pole: [number, number, number] }>>([])
@@ -1107,6 +1110,17 @@ export default function CrownStudio(): React.JSX.Element {
       setBusy(null)
     }
   }
+
+  // The sectional view follows the design (a redesign or edit re-cuts it), and
+  // the cut is lifted when leaving the Check step.
+  useEffect(() => {
+    if (step !== 'check' && sectionSpec) {
+      viewRef.current?.setSection(null)
+      setSectionSpec(null)
+      setSectionView(null)
+    } else setSectionView(viewRef.current?.section ?? null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [design, step])
 
   // Margin edit mode: drag the line itself (taps still work too).
   useEffect(() => {
@@ -2037,6 +2051,7 @@ export default function CrownStudio(): React.JSX.Element {
                         </div>
                       ))}
                     </div>
+                    <SectionPanel spec={sectionSpec} view={sectionView} minWallMm={MATERIALS[params.material]?.minAxialMm ?? 0.5} onChange={(sp) => { setSectionSpec(sp); setSectionView(viewRef.current?.setSection(sp) ?? null) }} />
                     <div className="st-legend" aria-label="Thickness colors">
                       <span><i className="c-red" /> below minimum</span>
                       <span><i className="c-amber" /> near minimum</span>
