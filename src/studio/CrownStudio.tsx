@@ -53,6 +53,7 @@ import { assembleOutcome } from '../module/designCase'
 import { embedHost, toHost } from '../module/embed'
 import { fdiToUniversal, universalToFdi } from '../crown/library'
 import type { BridgeData } from '../crown/protocol'
+import { ConnectorSectionView } from './ConnectorSection'
 import './studio.css'
 
 /**
@@ -1871,11 +1872,11 @@ export default function CrownStudio(): React.JSX.Element {
                           {bridgeNote && <p className="st-brush-note st-bridge-note" role="status">{bridgeNote}</p>}
                           {bridge && (
                             <div className="st-bridge-report">
-                              {bridge.connectors.map((k) => (
-                                <p key={k.between.join('-')}>
-                                  <b>Connector {k.between.join('–')}</b>: {((Math.PI / 4) * k.widthMm * k.heightMm).toFixed(1)} mm² ({k.widthMm.toFixed(1)} × {k.heightMm.toFixed(1)} mm) · gum {k.gumClearanceMm === null ? '—' : `${k.gumClearanceMm.toFixed(2)} mm`} · bite {k.biteClearanceMm === null ? '—' : `${k.biteClearanceMm.toFixed(2)} mm`}
-                                </p>
-                              ))}
+                              <div className="st-conn-row">
+                                {bridge.connectors.map((k) => (
+                                  <ConnectorSectionView key={k.between.join('-')} k={k} label={`#${k.between[0]}–#${k.between[1]}`} occlusalClearanceMm={params.occlusalClearanceMm} />
+                                ))}
+                              </div>
                               <p className="st-foot">{bridge.manifoldOk ? 'One closed solid' : 'NOT a closed solid'} · {bridge.volumeMm3.toFixed(0)} mm³ · {bridge.donors.join(', ')}</p>
                             </div>
                           )}
