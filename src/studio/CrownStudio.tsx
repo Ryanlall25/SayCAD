@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type Anthropic from '@anthropic-ai/sdk'
-import { CONTACT_BANDS, OCCLUSION_BANDS, StudioViewport, type BrushSettings, type CrownMap, type Pick } from './viewport'
+import { CONTACT_BANDS, OCCLUSION_BANDS, StudioViewport, type BrushSettings, type CrownMap, type Pick, type ScanLook, type SectionSpec, type SectionView } from './viewport'
 import type { BrushMode } from '../crown/brush'
 import { applyOffsets, editOffsets, maxOffset } from '../crown/manualEdits'
 import { CrownEngine } from '../crown/engineClient'
@@ -53,6 +53,10 @@ import { assembleOutcome } from '../module/designCase'
 import { embedHost, toHost } from '../module/embed'
 import { fdiToUniversal, universalToFdi } from '../crown/library'
 import type { BridgeData } from '../crown/protocol'
+import { ConnectorSectionView } from './ConnectorSection'
+import { SectionPanel } from './SectionPanel'
+
+const LOOK_WORD: Record<ScanLook, string> = { solid: 'solid', ghost: 'see-through', hidden: 'hidden' }
 import './studio.css'
 
 /**
@@ -202,6 +206,10 @@ export default function CrownStudio(): React.JSX.Element {
   const [abutment2, setAbutment2] = useState<MarginResult | null>(null)
   const [connectorMm2, setConnectorMm2] = useState(12)
   const [bridge, setBridge] = useState<BridgeData | null>(null)
+  const [looks, setLooks] = useState<Record<'scan' | 'antagonist', ScanLook>>({ scan: 'solid', antagonist: 'ghost' })
+  const [sides, setSides] = useState(true)
+  const [sectionSpec, setSectionSpec] = useState<SectionSpec | null>(null)
+  const [sectionView, setSectionView] = useState<SectionView | null>(null)
   const [bridgeNote, setBridgeNote] = useState('')
   /** Outer surfaces before each stroke (undo), starting from the design as it was when brushing began. */
   const strokes = useRef<Array<{ outer: Float32Array; pole: [number, number, number] }>>([])
@@ -1103,6 +1111,17 @@ export default function CrownStudio(): React.JSX.Element {
     }
   }
 
+  // The sectional view follows the design (a redesign or edit re-cuts it), and
+  // the cut is lifted when leaving the Check step.
+  useEffect(() => {
+    if (step !== 'check' && sectionSpec) {
+      viewRef.current?.setSection(null)
+      setSectionSpec(null)
+      setSectionView(null)
+    } else setSectionView(viewRef.current?.section ?? null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [design, step])
+
   // Margin edit mode: drag the line itself (taps still work too).
   useEffect(() => {
     const v = viewRef.current
@@ -1593,7 +1612,12 @@ export default function CrownStudio(): React.JSX.Element {
               </button>
             ))}
             <span className="st-viewbar-sep" />
-            <button onClick={() => setLayerState('antagonist')} title="Show or hide the opposing jaw" aria-label="Opposing jaw">◐</button>
+            {(['scan', 'antagonist'] as const).map((layer) => (
+              <button key={layer} className={`st-look st-look-${looks[layer]}`} onClick={() => cycleLook(layer)} title={`${layer === 'scan' ? 'Prep jaw and neighbours' : 'Opposing jaw'}: ${LOOK_WORD[looks[layer]]} — tap to change`} aria-label={`${layer === 'scan' ? 'Prep jaw' : 'Opposing jaw'}: ${LOOK_WORD[looks[layer]]}`}>
+                {layer === 'scan' ? 'J' : 'O'}
+              </button>
+            ))}
+            <button className={sides ? 'on' : ''} onClick={() => { const on = !sides; setSides(on); viewRef.current?.setOrientLabels(on); haptic() }} title="Buccal / lingual / mesial / distal labels" aria-label={`Side labels ${sides ? 'on' : 'off'}`} aria-pressed={sides}>⊕</button>
             <button onClick={() => setLayerState('heatmap')} title="Thickness map" aria-label="Thickness map">▤</button>
           </div>
         )}
@@ -1871,11 +1895,11 @@ export default function CrownStudio(): React.JSX.Element {
                           {bridgeNote && <p className="st-brush-note st-bridge-note" role="status">{bridgeNote}</p>}
                           {bridge && (
                             <div className="st-bridge-report">
-                              {bridge.connectors.map((k) => (
-                                <p key={k.between.join('-')}>
-                                  <b>Connector {k.between.join('–')}</b>: {((Math.PI / 4) * k.widthMm * k.heightMm).toFixed(1)} mm² ({k.widthMm.toFixed(1)} × {k.heightMm.toFixed(1)} mm) · gum {k.gumClearanceMm === null ? '—' : `${k.gumClearanceMm.toFixed(2)} mm`} · bite {k.biteClearanceMm === null ? '—' : `${k.biteClearanceMm.toFixed(2)} mm`}
-                                </p>
-                              ))}
+                              <div className="st-conn-row">
+                                {bridge.connectors.map((k) => (
+                                  <ConnectorSectionView key={k.between.join('-')} k={k} label={`#${k.between[0]}–#${k.between[1]}`} occlusalClearanceMm={params.occlusalClearanceMm} />
+                                ))}
+                              </div>
                               <p className="st-foot">{bridge.manifoldOk ? 'One closed solid' : 'NOT a closed solid'} · {bridge.volumeMm3.toFixed(0)} mm³ · {bridge.donors.join(', ')}</p>
                             </div>
                           )}
@@ -2027,6 +2051,7 @@ export default function CrownStudio(): React.JSX.Element {
                         </div>
                       ))}
                     </div>
+                    <SectionPanel spec={sectionSpec} view={sectionView} minWallMm={MATERIALS[params.material]?.minAxialMm ?? 0.5} onChange={(sp) => { setSectionSpec(sp); setSectionView(viewRef.current?.setSection(sp) ?? null) }} />
                     <div className="st-legend" aria-label="Thickness colors">
                       <span><i className="c-red" /> below minimum</span>
                       <span><i className="c-amber" /> near minimum</span>
@@ -2098,6 +2123,15 @@ export default function CrownStudio(): React.JSX.Element {
       <input ref={rxRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { void onRxPhoto(e.target.files?.[0]); e.target.value = '' }} />
     </div>
   )
+
+  function cycleLook(layer: 'scan' | 'antagonist'): void {
+    const next: Record<ScanLook, ScanLook> = { solid: 'ghost', ghost: 'hidden', hidden: 'solid' }
+    const look = next[looks[layer]]
+    viewRef.current?.setLook(layer, look)
+    setLooks((l) => ({ ...l, [layer]: look }))
+    setStatus(`${layer === 'scan' ? 'Prep jaw' : 'Opposing jaw'}: ${LOOK_WORD[look]}.`)
+    haptic()
+  }
 
   function setLayerState(layer: 'antagonist' | 'heatmap'): void {
     viewRef.current?.setLayer(layer, 'toggle')

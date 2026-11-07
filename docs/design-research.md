@@ -41,11 +41,19 @@ work in the subsequent steps." (cMnmZAFzotQ)
 - The line sits **on the boundary** of the finish line. It does not need to cover the edge. (Aidite crown)
 - It must be smooth with no sharp corners; correct it with control points or a circular brush
   cursor. (Aidite checklist; GwczPul5-yY; 7FY9)
-- The crown edge must meet the prep edge with no ledge. Aidite calls this adjusting the "step". (Aidite crown)
+- The crown edge must meet the prep edge with no ledge. Aidite calls this adjusting the "step";
+  on implant crowns "the edge [is set] to 0 to ensure there is no step". (Aidite crown; 3i-fTWEgUWw)
+- Detection proposes the line automatically; a second candidate line is sometimes offered beside
+  it. Edits pull a section of the line with a disc brush, zoomed in. (llFYzaHlNNk; Hw9HBLC3fB4; eLSPz_Cc_Ms)
+- **If the margin line crosses an undercut, 3Shape turns it red to warn you.** (llFYzaHlNNk)
+- Before the margin, scan noise at the finish line is cleaned and the margin "opened": gum
+  trimmed back from the shoulder, the digital version of ditching a die. (FAmFFyoBXt0)
 
 ### Insertion path
 - **No undercut, or only a small one**. The tooth should be evenly wrapped. (Aidite crown & bridge)
 - A bridge has one common path for all abutments, set to "the best direction". (Aidite bridge checklist)
+- 3Shape can take the current view as the path: rotate the scan to look down the intended axis,
+  then press Set. The same panel shows how tall the restoration will be. (llFYzaHlNNk)
 
 ### Library choice and placement
 - Choose the library tooth **similar to the adjacent teeth**. The units should **arrange smoothly**
@@ -54,6 +62,10 @@ work in the subsequent steps." (cMnmZAFzotQ)
   corridor). (rebel3d)
 - On bridges, keep the **buccal ridges as consistent as possible** across units, and line up the
   buccal/lingual margins and the central sulcus. (Aidite bridge)
+- While a tooth is being placed, the neighbours are tinted by their distance to it, so the
+  contacts are judged during placement, not only after. (_cYGR2I6onM)
+- 3Shape's library picker is a grid of tooth thumbnails; picking one swaps the proposal in place.
+  (ki9vSi18I5w; 3p10NSwMR00)
 
 ### Contacts
 - Read contacts on the colour map (green patch). Check from below too: "flip the model upside
@@ -61,6 +73,8 @@ work in the subsequent steps." (cMnmZAFzotQ)
 - Molar contacts should be **broad**. To see and build one face-on, hide the neighbour, add
   material there, then confirm from occlusal with the neighbour semi-transparent. (N0YAjqyJARI)
 - Re-check contacts after every later step, because thickness and occlusion fixes move them. (Aidite crown)
+- The contact can be removed while sculpting; the contact step adds it back ("will be
+  automatically compensated after contact adjustment"). (3i-fTWEgUWw)
 
 ### Occlusion
 - Remove occlusal high points. This is repeated after each change. (Aidite crown & bridge)
@@ -84,9 +98,14 @@ work in the subsequent steps." (cMnmZAFzotQ)
 1. Line angles first, with a pen over a **large range**.
 2. Incisal ridge with a **small strength**, the same way on the laterals.
 3. Developmental (labial lobe) grooves with a small strength.
-4. Finally smooth the marginal ridges on both sides.
-- A **copy/mirror** tool can mirror the contralateral natural tooth as a reference shape.
-  (H5o-8dknqbk) On SayCAD's lab cases the technicians' crowns did **not** follow the contralateral
+4. Finally smooth the marginal ridges on both sides; afterwards the line angles may be deepened again.
+- Strengths are given as fractions: deepen the lingual marginal ridge "with 1/5 strength and a
+  pen", "then smooth with 1/2 strength", "draw the axial marginal ridge with 1/2 strength".
+  Check the anatomy from three sides (labial, incisal, proximal), and the incisal edge must not
+  be too thick. (ClGeLbVqO8A; 6QEb4M4Bh-4)
+- A **copy/mirror** tool can mirror the contralateral natural tooth as a reference shape. Aidite
+  makes it the standard start for a single anterior: "select copy, select mirroring according to
+  the jaw plane… then adapt". (H5o-8dknqbk; ClGeLbVqO8A) On SayCAD's lab cases the technicians' crowns did **not** follow the contralateral
   tooth (0.5–0.6 mm off when measured), so this belongs as a manual option, not the automatic default.
 
 ### Design for the mill
@@ -138,10 +157,27 @@ embrasure closed reasonably · no obvious occlusal cavity.
 | **Minimal-thickness shell** drawn inside a translucent crown | exocad | Thickness readable without a separate step |
 | **2D diagrams** beside parameters | exocad model creation | A picture per setting, not just a number |
 | **Material preview** (tooth colour instead of yellow) | exocad | Final look before export |
+| **Margin turns red over an undercut** | 3Shape | Warns while the line is placed |
+| **Set axis from the current view** | 3Shape | Look down the path, press Set |
+| **Library thumbnail grid** | 3Shape | Swap the proposal's tooth shape in place |
+| **Pre-op / wax-up overlay** | exocad | The situation or wax-up scan overlaid (cyan) to compare or copy shapes |
+| **Neighbours tinted by distance during placement** | exocad | Contacts judged while moving the tooth |
+| **Connector edited in a 2D pane** between the two units' profiles | 3Shape | Section shaped directly in 2D |
 
 ## 4. SayCAD Crown Studio today vs these tools
 
-Crown Studio already has:
+Built since this research (November 2026):
+- **connector cross-sections**: each connector drawn to scale, with the gum and bite at their
+  measured distances, the minimum area dashed inside, and a green / amber / red verdict with
+  reasons (3Shape shows only the section);
+- **see-through jaws**: prep jaw and opposing jaw each solid, see-through or hidden, still tappable
+  when see-through; Buccal / Lingual / Mesial / Distal labels around the tooth (exocad labels
+  only buccal and lingual);
+- **sectional view**: the 3D view clipped buccolingually or mesiodistally at any position, plus a
+  to-scale 2D section of crown, intaglio, prep and opposing tooth, with the thinnest wall and the
+  closest bite point marked and measured (3Shape draws the outline only).
+
+Crown Studio already had:
 - the wizard rail (Scans → Margin → Axis → Anatomy → Adapt → Check → Export), each stage done
   automatically on the first pass;
 - the margin: drag and tap, plus auto-detect;
@@ -155,26 +191,24 @@ Crown Studio already has:
   gum and bite clearance;
 - measurements pinned to the model, chat and voice commands, and an AI review.
 
-Missing, in suggested order (biggest value for the effort first):
+Still missing, in suggested order (biggest value for the effort first):
 
-1. **Connector cross-section display** (green/orange/red per connector). The data is already in the
-   bridge report; this is a visual.
-2. **Semi-transparent neighbours and antagonist** instead of only show/hide, plus floating
-   Buccal/Lingual labels.
-3. **Cross-section clip view**: a draggable plane through crown and die, with the cut outline coloured by thickness.
-4. **Landmark handles** on cusp tips, fossae and marginal ridges. The engine already knows the cusp
+1. **Margin warnings**: colour the margin red where it crosses an undercut along the chosen path.
+2. **Set the insertion path from the current view.**
+3. **Landmark handles** on cusp tips, fossae and marginal ridges. The engine already knows the cusp
    tips (`cuspTips`); dragging one would run the existing grab edit.
-5. **Transform gizmo** for the whole crown (move, rotate, scale) in place of the rotation and shift sliders.
-6. **Occlusal contact spots view**: show contacts as discrete spots with a count, flagging large patches.
-7. **Bur-size check**: flag grooves narrower than the chosen mill bur, or smooth them away (0.3 mm default).
-8. **Copy/mirror tool** for front teeth, offered as a manual option.
-9. **Virtual articulator / dynamic occlusion**: the largest item, a jaw-motion model with
+4. **Transform gizmo** for the whole crown (move, rotate, scale) in place of the rotation and shift sliders.
+5. **Occlusal contact spots view**: show contacts as discrete spots with a count, flagging large patches.
+6. **Bur-size check**: flag grooves narrower than the chosen mill bur, or smooth them away (0.3 mm default).
+7. **Copy/mirror tool** for front teeth, offered as a manual option.
+8. **Pre-op / wax-up overlay**: load the situation or wax-up scan and show it over the design.
+9. **Margin cleaning**: trim scan noise and gum back from the shoulder before detection.
+10. **Virtual articulator / dynamic occlusion**: the largest item, a jaw-motion model with
    protrusion and laterotrusion sweeps.
 
 ## 5. Videos watched
 
-Frames were viewed for these 24 videos; long ones were sampled. Another 19 crown, bridge and margin
-tutorials were found and downloaded but not yet reviewed.
+Frames were viewed for all 43 videos; long ones were sampled.
 
 | Video | Channel | Length |
 |---|---|---|
@@ -202,3 +236,22 @@ tutorials were found and downloaded but not yet reviewed.
 | [Exocad Crown design: Tooth 36](https://www.youtube.com/watch?v=DbDnT2kwCT0) | DT. Ray K | 6 min |
 | [3Shape Tutorial: Full Contour Bridge](https://www.youtube.com/watch?v=QVgr-5Og9G0) | WIXUR Dental Academy | 23 min |
 | [How to Make ANTERIOR Bridge look NATURAL](https://www.youtube.com/watch?v=AimPc1x3cHs) | Dental Class | 12 min |
+| [Aidite Exocad design guide: Anterior teeth design](https://www.youtube.com/watch?v=ClGeLbVqO8A) | Aidite | 9 min |
+| [Aidite Exocad design guide: Implant crown design](https://www.youtube.com/watch?v=3i-fTWEgUWw) | Aidite | 6 min |
+| [Aidite Exocad design guide: Veneer design](https://www.youtube.com/watch?v=6QEb4M4Bh-4) | Aidite | 30 min (sampled) |
+| [Performing a full anatomical crown design](https://www.youtube.com/watch?v=llFYzaHlNNk) | 3Shape Training Videos | 6 min |
+| [Split Bridges Design](https://www.youtube.com/watch?v=LMbnfgGvxqo) | 3Shape Training Videos | 6 min |
+| [Dental Lab Life: Designing a Crown in 3Shape](https://www.youtube.com/watch?v=ki9vSi18I5w) | Zahn Dental | 11 min (sampled) |
+| [Crown Design Tips with 3Shape](https://www.youtube.com/watch?v=nO8LpNBq7Z8) | Dr. Agatha Bis Dentistry | 16 min (sampled) |
+| [exocad Video Tutorial: Basic Features / Anatomic Coping with Cutback](https://www.youtube.com/watch?v=uGJD2RC4mJg) | exocad GmbH | 24 min (sampled) |
+| [Bridge EXOCAD. 2024 Tutorial](https://www.youtube.com/watch?v=KRQ4hNbs08M) | Dental Class | 15 min (sampled) |
+| [EXOCAD: Bridge Tutorial 2025](https://www.youtube.com/watch?v=ypYQtU8te28) | Dental Class | 17 min (sampled) |
+| [CROWN Design EXOCAD. 2024 Tutorial](https://www.youtube.com/watch?v=_cYGR2I6onM) | Dental Class | 6 min |
+| [Big ANTERIOR Case Tutorial EXOCAD 2025](https://www.youtube.com/watch?v=lG3NGKLQmvk) | Dental Class | 20 min (sampled) |
+| [How to design a Bridge with ExoCad](https://www.youtube.com/watch?v=QczF9f6A3t8) | Z Digital Dentistry | 15 min (sampled) |
+| [Exocad Digital Impression Preparation – Margin Opening & Cleaning](https://www.youtube.com/watch?v=FAmFFyoBXt0) | CaesarDentalArt | 13 min (sampled) |
+| [Margin line Detection](https://www.youtube.com/watch?v=Hw9HBLC3fB4) | Khánh Dental Lab | 10 min (sampled) |
+| [Detect / edit margins Exocad](https://www.youtube.com/watch?v=eLSPz_Cc_Ms) | GeorgeCampus | 11 min (sampled) |
+| [Exocad Crown design: Tooth 25](https://www.youtube.com/watch?v=d8B9IYsh68g) | DT. Ray K | 3 min |
+| [Exocad: Design perfect crown in 5 minutes](https://www.youtube.com/watch?v=SzXbCkBniJk) | Digiart Design Services | 5 min |
+| [Anatomic Crown Design Exocad workflow](https://www.youtube.com/watch?v=rkhWp_C3Jz0) | MediMatch Dental Lab | 3 min |

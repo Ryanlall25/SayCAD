@@ -5,6 +5,7 @@ import type { ToothFrame, Vec3 } from '../crown/geom'
 import type { DesignData } from '../crown/protocol'
 import { applyDab, applyGrab, type BrushMode } from '../crown/brush'
 import type { CrownLayer, CrownView } from '../speak/crownParser'
+import { readSection, sliceMesh, type SectionPlane, type SectionReading, type Segments2D } from '../crown/section'
 
 /**
  * The Crown Studio 3D view: scans, crown, margin line, orientation arrows
@@ -60,6 +61,25 @@ function thicknessColor(t: number, min: number, out: THREE.Color): THREE.Color {
   return out.setHex(0x3f7fbf)
 }
 
+/** A cut through the tooth: bl = buccolingual (seen from mesial), md = mesiodistal (seen from buccal). */
+export interface SectionSpec {
+  axis: 'bl' | 'md'
+  /** Along the plane's normal from the tooth's centre (mm). */
+  offsetMm: number
+}
+
+/** The cut as 2D outlines (plane coordinates, mm; y up) and what it reads. */
+export interface SectionView extends SectionSpec {
+  outer: Segments2D
+  intaglio: Segments2D
+  prep: Segments2D
+  antagonist: Segments2D
+  reading: SectionReading
+}
+
+/** solid: opaque; ghost: see-through; hidden: not drawn. */
+export type ScanLook = 'solid' | 'ghost' | 'hidden'
+
 export class StudioViewport {
   readonly renderer: THREE.WebGLRenderer
   readonly camera: THREE.PerspectiveCamera
@@ -73,8 +93,14 @@ export class StudioViewport {
     margin: new THREE.Group(),
     frame: new THREE.Group(),
     marker: new THREE.Group(),
-    bridge: new THREE.Group()
+    bridge: new THREE.Group(),
+    orient: new THREE.Group(),
+    section: new THREE.Group()
   }
+  private sectionSpec: SectionSpec | null = null
+  private sectionOut: SectionView | null = null
+  /** How the prep jaw (with the neighbours) and the opposing jaw are drawn. */
+  private looks: Record<'scan' | 'antagonist', ScanLook> = { scan: 'solid', antagonist: 'ghost' }
   private crownMesh: THREE.Mesh | null = null
   private scanMesh: THREE.Mesh | null = null
   private antMesh: THREE.Mesh | null = null
@@ -107,6 +133,7 @@ export class StudioViewport {
     this.camera = new THREE.PerspectiveCamera(35, 1, 0.1, 2000)
     this.camera.position.set(0, 60, 90)
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
+    this.renderer.localClippingEnabled = true
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     mount.appendChild(this.renderer.domElement)
     addHeadlightRig(this.scene, this.camera)
@@ -493,6 +520,37 @@ export class StudioViewport {
     const coloured = !!g.getAttribute('color')
     this.scanMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: coloured ? 0xffffff : NEUTRAL_COLOR, vertexColors: coloured, roughness: coloured ? 0.55 : 0.68, metalness: 0.04, side: THREE.DoubleSide }))
     this.groups.scan.add(this.scanMesh)
+    this.applyLook('scan')
+    this.refreshSection()
+  }
+
+  /**
+   * Draw a jaw solid, see-through (the crown's contacts and margin stay
+   * visible through the neighbours) or not at all. See-through stays
+   * pickable, so taps on the prep still work.
+   */
+  setLook(layer: 'scan' | 'antagonist', look: ScanLook): void {
+    this.looks[layer] = look
+    this.applyLook(layer)
+  }
+
+  look(layer: 'scan' | 'antagonist'): ScanLook {
+    return this.looks[layer]
+  }
+
+  private applyLook(layer: 'scan' | 'antagonist'): void {
+    const look = this.looks[layer]
+    this.groups[layer].visible = look !== 'hidden'
+    const mesh = layer === 'scan' ? this.scanMesh : this.antMesh
+    const mat = mesh?.material as THREE.MeshStandardMaterial | undefined
+    if (!mat) return
+    const ghost = look === 'ghost'
+    mat.transparent = ghost
+    mat.opacity = ghost ? (layer === 'scan' ? 0.38 : 0.45) : 1
+    mat.depthWrite = !ghost
+    mat.needsUpdate = true
+    // Drawn after the crown, so the crown shows through it.
+    mesh!.renderOrder = ghost ? 2 : 0
   }
 
   setAntagonist(g: THREE.BufferGeometry | null): void {
@@ -507,6 +565,8 @@ export class StudioViewport {
         : new THREE.MeshStandardMaterial({ color: 0xc8c8c8, metalness: 0.45, roughness: 0.35, side: THREE.DoubleSide, transparent: true, opacity: 0.45, depthWrite: false })
     )
     this.groups.antagonist.add(this.antMesh)
+    this.applyLook('antagonist')
+    this.refreshSection()
   }
 
   setCrown(d: DesignData | null, minAxial = 0.5, minOcclusal = 0.7): void {
@@ -524,6 +584,7 @@ export class StudioViewport {
     this.crownMesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.42, metalness: 0.02 }))
     this.groups.crown.add(this.crownMesh)
     this.paintCrown()
+    this.refreshSection()
   }
 
   private paintCrown(): void {
@@ -555,6 +616,94 @@ export class StudioViewport {
     if (mesh.indices) g.setIndex(new THREE.BufferAttribute(mesh.indices, 1))
     g.computeVertexNormals()
     this.groups.bridge.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: CROWN_COLOR, roughness: 0.42, metalness: 0.02 })))
+    this.refreshSection()
+  }
+
+  /**
+   * Cut the view with a plane through the tooth — buccolingual (seen from
+   * mesial) or mesiodistal (seen from buccal), offset along its normal — and
+   * draw where it cuts the crown, the prep and the opposing jaw. The 2D
+   * outlines and readings are in `section` for the panel's sectional view.
+   */
+  setSection(spec: SectionSpec | null): SectionView | null {
+    const turned = (spec?.axis ?? null) !== (this.sectionSpec?.axis ?? null)
+    this.sectionSpec = spec
+    this.refreshSection()
+    if (spec && turned && this.frame) this.view(spec.axis === 'bl' ? 'mesial' : 'buccal')
+    return this.sectionOut
+  }
+
+  get section(): SectionView | null {
+    return this.sectionOut
+  }
+
+  private sectionPlane(spec: SectionSpec): SectionPlane | null {
+    const f = this.frame
+    if (!f) return null
+    // bl: the plane holds the buccal and occlusal axes (normal mesial); md: mesial and occlusal (normal buccal).
+    const normal = spec.axis === 'bl' ? f.mesial : f.buccal
+    const xAxis = spec.axis === 'bl' ? f.buccal : ([-f.mesial[0], -f.mesial[1], -f.mesial[2]] as Vec3)
+    const o = f.origin
+    return { point: [o[0] + normal[0] * spec.offsetMm, o[1] + normal[1] * spec.offsetMm, o[2] + normal[2] * spec.offsetMm], normal, xAxis, yAxis: f.occlusal }
+  }
+
+  private refreshSection(): void {
+    StudioViewport.clear(this.groups.section)
+    this.sectionOut = null
+    const plane = this.sectionSpec ? this.sectionPlane(this.sectionSpec) : null
+    // Clip away the half toward the viewer (the +normal side).
+    const clip = plane ? [new THREE.Plane(new THREE.Vector3(...plane.normal).negate(), plane.normal[0] * plane.point[0] + plane.normal[1] * plane.point[1] + plane.normal[2] * plane.point[2])] : []
+    for (const g of [this.groups.crown, this.groups.scan, this.groups.antagonist, this.groups.bridge]) {
+      g.traverse((o) => {
+        const m = (o as THREE.Mesh).material as THREE.Material | undefined
+        if (m && !Array.isArray(m)) {
+          m.clippingPlanes = clip
+          m.clipShadows = true
+          m.side = THREE.DoubleSide
+          m.needsUpdate = true
+        }
+      })
+    }
+    if (!plane) return
+    const cut = (mesh: THREE.Mesh | null, select?: (a: number, b: number, c: number) => boolean): Segments2D => {
+      if (!mesh) return new Float64Array()
+      const g = mesh.geometry
+      const pos = g.getAttribute('position').array as ArrayLike<number>
+      const idx = g.index ? (g.index.array as ArrayLike<number>) : null
+      if (!select || !idx) return sliceMesh(pos, idx, plane)
+      const keep: number[] = []
+      for (let t = 0; t < idx.length; t += 3) if (select(idx[t], idx[t + 1], idx[t + 2])) keep.push(idx[t], idx[t + 1], idx[t + 2])
+      return sliceMesh(pos, keep, plane)
+    }
+    const nOuter = this.design ? this.design.nu * this.design.nv + 1 : 0
+    const bridge = this.groups.bridge.children[0] as THREE.Mesh | undefined
+    const crownMesh = this.groups.crown.visible ? this.crownMesh : bridge ?? null
+    const single = crownMesh === this.crownMesh && nOuter > 0
+    const outer = cut(crownMesh, single ? (a, b, c) => Math.max(a, b, c) < nOuter : undefined)
+    const intaglio = single ? cut(crownMesh, (a, b, c) => Math.max(a, b, c) >= nOuter) : new Float64Array()
+    const prep = cut(this.scanMesh)
+    const antagonist = cut(this.antMesh)
+    const reading = readSection(outer, intaglio, antagonist.length ? antagonist : null)
+    this.sectionOut = { axis: this.sectionSpec!.axis, offsetMm: this.sectionSpec!.offsetMm, outer, intaglio, prep, antagonist, reading }
+    // The cut outlines in 3D, nudged toward the viewer so they sit on the cut face.
+    const lift = new THREE.Vector3(...plane.normal).multiplyScalar(-0.02)
+    const to3 = (segs: Segments2D): Float32Array => {
+      const out = new Float32Array((segs.length / 2) * 3)
+      for (let k = 0, j = 0; k < segs.length; k += 2, j += 3) {
+        out[j] = plane.point[0] + segs[k] * plane.xAxis[0] + segs[k + 1] * plane.yAxis[0] + lift.x
+        out[j + 1] = plane.point[1] + segs[k] * plane.xAxis[1] + segs[k + 1] * plane.yAxis[1] + lift.y
+        out[j + 2] = plane.point[2] + segs[k] * plane.xAxis[2] + segs[k + 1] * plane.yAxis[2] + lift.z
+      }
+      return out
+    }
+    for (const [segs, color] of [[outer, 0xd8344a], [intaglio, 0xe8b13a], [prep, 0x3fb59b], [antagonist, 0x8fa3b8]] as Array<[Segments2D, number]>) {
+      if (!segs.length) continue
+      const g = new THREE.BufferGeometry()
+      g.setAttribute('position', new THREE.BufferAttribute(to3(segs), 3))
+      const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, depthTest: false }))
+      lines.renderOrder = 15
+      this.groups.section.add(lines)
+    }
   }
 
   /** Colour the crown by a distance map (or plain). */
@@ -615,6 +764,44 @@ export class StudioViewport {
     }
     arrow(f.buccal, 0xe8b13a, 'B')
     arrow(f.mesial, 0x6cc3a5, 'M')
+    this.placeOrientLabels()
+    this.refreshSection()
+  }
+
+  /**
+   * Buccal / lingual / mesial / distal labels around the tooth at its
+   * height of contour, so the sides read at any angle (exocad shows only
+   * buccal and lingual).
+   */
+  private placeOrientLabels(): void {
+    StudioViewport.clear(this.groups.orient)
+    const f = this.frame
+    if (!f) return
+    const o = new THREE.Vector3(...f.origin).addScaledVector(new THREE.Vector3(...f.occlusal), 3)
+    const r = 8
+    const neg = (v: Vec3): Vec3 => [-v[0], -v[1], -v[2]]
+    for (const [dir, text, color] of [[f.buccal, 'Buccal', 0xe8b13a], [neg(f.buccal), 'Lingual', 0x7fb2e5], [f.mesial, 'Mesial', 0x6cc3a5], [neg(f.mesial), 'Distal', 0xc39be0]] as Array<[Vec3, string, number]>) {
+      const sprite = makeTag(text, color)
+      sprite.position.copy(o).addScaledVector(new THREE.Vector3(...dir), r)
+      sprite.name = text
+      this.groups.orient.add(sprite)
+    }
+  }
+
+  /** Side labels on or off. */
+  setOrientLabels(on: boolean): void {
+    this.groups.orient.visible = on
+  }
+
+  get orientLabelsOn(): boolean {
+    return this.groups.orient.visible
+  }
+
+  /** Where each side label is drawn, in client pixels (browser tests). */
+  orientLabelScreen(): Record<string, { x: number; y: number }> {
+    const out: Record<string, { x: number; y: number }> = {}
+    for (const c of this.groups.orient.children) out[c.name] = this.worldToScreen([c.position.x, c.position.y, c.position.z])
+    return out
   }
 
   /** Orientation arrows (B/M) — useful while checking margin and axis only. */
@@ -640,7 +827,14 @@ export class StudioViewport {
       return on
     }
     const g = this.groups[layer === 'scan' ? 'scan' : layer]
-    g.visible = visible === 'toggle' ? !g.visible : visible
+    const on = visible === 'toggle' ? !g.visible : visible
+    if (layer === 'scan' || layer === 'antagonist') {
+      // Showing again restores the see-through/solid look it had.
+      if (!on) this.setLook(layer, 'hidden')
+      else if (this.looks[layer] === 'hidden') this.setLook(layer, layer === 'antagonist' ? 'ghost' : 'solid')
+      return this.groups[layer].visible
+    }
+    g.visible = on
     if (layer === 'margin') this.groups.frame.visible = g.visible
     return g.visible
   }
@@ -810,6 +1004,27 @@ export class StudioViewport {
     this.renderer.dispose()
     this.mount.removeChild(this.renderer.domElement)
   }
+}
+
+/** A rounded word tag (side labels): readable at any zoom, drawn over the scans. */
+function makeTag(text: string, color: number): THREE.Sprite {
+  const c = document.createElement('canvas')
+  c.width = 192
+  c.height = 64
+  const ctx = c.getContext('2d')!
+  ctx.fillStyle = 'rgba(13, 31, 27, 0.72)'
+  ctx.beginPath()
+  ctx.roundRect(4, 8, 184, 48, 24)
+  ctx.fill()
+  ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`
+  ctx.font = '600 30px system-ui, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, 96, 33)
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }))
+  s.scale.set(4.2, 1.4, 1)
+  s.renderOrder = 20
+  return s
 }
 
 function makeLabel(text: string, color: number): THREE.Sprite {

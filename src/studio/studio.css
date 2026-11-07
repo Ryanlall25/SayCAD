@@ -439,3 +439,40 @@
 .st-legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 .st-legend-unit { opacity: 0.6; }
 .st-bridge-report p { margin: 6px 2px; font-size: 13px; line-height: 1.35; }
+/* bridge connector cross-sections */
+.st-conn-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0 4px; }
+.st-conn { margin: 0; flex: 1 1 132px; min-width: 132px; background: var(--fill); border-radius: 10px; padding: 6px 6px 8px; }
+.st-conn svg { display: block; margin: 0 auto; }
+.st-conn figcaption { font-size: 12px; line-height: 1.35; margin-top: 2px; }
+.st-conn-word { font-weight: 600; }
+.st-conn-ok .st-conn-word { color: var(--green); }
+.st-conn-borderline .st-conn-word { color: var(--amber); }
+.st-conn-fail .st-conn-word { color: var(--red); }
+.st-conn-dims { color: var(--label-2); }
+.st-conn-why { display: block; color: var(--label-2); }
+.st-conn-min { fill: none; stroke: var(--label); stroke-opacity: 0.7; stroke-dasharray: 3 2; stroke-width: 1; }
+.st-conn-gum { stroke: #d8708a; stroke-width: 2; }
+.st-conn-bite { stroke: var(--label-2); stroke-width: 2; stroke-dasharray: 5 3; }
+.st-conn-t { font-size: 10px; fill: var(--label-2); }
+/* jaw looks (solid / see-through / hidden) on the view bar */
+.st-viewbar .st-look { position: relative; }
+.st-viewbar .st-look-ghost { opacity: 0.75; text-decoration: none; outline: 1.5px dashed currentColor; outline-offset: -6px; }
+.st-viewbar .st-look-hidden { opacity: 0.4; text-decoration: line-through; }
+/* sectional view */
+.st-section-fig { margin: 8px 0 2px; background: var(--fill); border-radius: 12px; padding: 6px; }
+.st-section-fig svg { display: block; max-width: 340px; margin: 0 auto; }
+.st-section-fig figcaption { display: flex; flex-direction: column; gap: 3px; font-size: 12px; margin-top: 4px; }
+.st-section-fig figcaption .bad { color: var(--red); font-weight: 600; }
+.st-sec-outer { stroke: #d8344a; stroke-width: 2; fill: none; }
+.st-sec-intaglio { stroke: #e8b13a; stroke-width: 1.5; fill: none; stroke-dasharray: 4 2; }
+.st-sec-prep { stroke: #3fb59b; stroke-width: 1.5; fill: none; }
+.st-sec-ant { stroke: #8fa3b8; stroke-width: 1.5; fill: none; }
+.st-sec-mark { fill: none; stroke: var(--label); stroke-width: 2; }
+.st-sec-mark.bad { stroke: var(--red); }
+.st-sec-mark.bite { stroke: #3f7fbf; stroke-dasharray: 2 2; }
+.st-sec-scale { stroke: var(--label-2); stroke-width: 2; }
+.st-sec-t { font-size: 10px; fill: var(--label-2); }
+.st-sec-key { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin: 0 4px 0 2px; border-radius: 2px; }
+.st-sec-key.outer { background: #d8344a; } .st-sec-key.bite { background: #3f7fbf; } .st-sec-key.prep { background: #3fb59b; }
+.st-sec-key.intaglio { background: #e8b13a; } .st-sec-key.ant { background: #8fa3b8; }
+.st-sec-legend { color: var(--label-2); }

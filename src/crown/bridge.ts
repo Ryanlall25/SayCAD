@@ -6,6 +6,7 @@ import { bestMargin, findPrep, findPrepDeep, marginScoreOf, scorePreps, toothSid
 import { SurfaceIndex, add, cross, dot, normalize, scale, sub, toLocal, toWorld, type ToothFrame, type Vec3 } from './geom'
 import type { CrownGrid } from './grid'
 import { commonAxis } from './insertion'
+import { CONNECTOR_MIN_MM2, CONNECTOR_OVERSIZE, connectorAreaMm2 } from './connector'
 import { fdiToUniversal } from './library'
 import { marginFromTaps, type MarginResult } from './margin'
 import { prepareCase, type DesignResult } from './pipeline'
@@ -128,8 +129,6 @@ function ringsToMesh(bottom: Vec3, rings: Vec3[][], top: Vec3): { positions: num
 
 const CAVITY_GROW_MM = 0.015
 const smoothstep = (a: number, b: number, x: number): number => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t) }
-const CONNECTOR_OVERSIZE = 1.06
-const CONNECTOR_MIN_MM2 = 6
 // As for single crowns (choosePrep): the pair's span is a further check.
 const AUTO_ABUTMENT_SCORE = 0.45
 const AUTO_MAX_MISSING = 0.25
@@ -714,7 +713,7 @@ export async function designBridge(req: BridgeRequest): Promise<BridgeResult> {
   if (solid.genus() !== 0) blockers.push(`the solid has ${solid.genus() > 0 ? `${solid.genus()} tunnel(s)` : 'separate pieces'} through it`)
   if (looseMm3 > 0.5) blockers.push(`part of the bridge came apart (${looseMm3.toFixed(1)} mm³) — a unit is not joined`)
   for (const k of connectors) {
-    const area = (Math.PI / 4) * k.widthMm * k.heightMm / CONNECTOR_OVERSIZE
+    const area = connectorAreaMm2(k)
     if (area < CONNECTOR_MIN_MM2 - 0.05) blockers.push(`connector #${k.between[0]}–#${k.between[1]} only ${area.toFixed(1)} mm²`)
     if (k.biteClearanceMm !== null && k.biteClearanceMm < clearance - 0.05) blockers.push(`connector #${k.between[0]}–#${k.between[1]} ${(clearance - k.biteClearanceMm).toFixed(2)} mm into the bite`)
     if (k.gumClearanceMm !== null && k.gumClearanceMm < 0) blockers.push(`connector #${k.between[0]}–#${k.between[1]} ${(-k.gumClearanceMm).toFixed(1)} mm into the gum`)
